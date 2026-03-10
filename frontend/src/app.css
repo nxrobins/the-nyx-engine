@@ -1,0 +1,435 @@
+@import url("https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400;1,600&display=swap");
+@import "tailwindcss";
+
+/* ── Nyx Engine v2.0 — Sumi-e Aesthetic ─────────────────────── */
+
+:root {
+	/* Palette */
+	--nyx-void: #0a0a0a;
+	--nyx-surface: #111111;
+	--nyx-border: #1a1a1a;
+	--nyx-text: #f5f5f5;
+	--nyx-text-dim: #737373;
+	--nyx-oracle-gold: #b8860b;
+	--nyx-kintsugi: rgba(184, 134, 11, 0.8);
+	--nyx-hypnos: #6366f1;
+	--nyx-nemesis: #dc2626;
+	--nyx-eris: #9333ea;
+
+	/* Typography */
+	--font-prose: "EB Garamond", Georgia, serif;
+	--font-ui: "Inter", system-ui, sans-serif;
+	--font-mono: "JetBrains Mono", "Fira Code", monospace;
+}
+
+/* ── Base ─────────────────────────────────────────────────────── */
+
+html, body {
+	margin: 0;
+	padding: 0;
+	height: 100%;
+	overflow: hidden;
+	background-color: var(--nyx-void);
+	color: var(--nyx-text);
+	font-family: var(--font-ui);
+}
+
+/* ── Center-Only Grid ─────────────────────────────────────────── */
+
+.game-grid {
+	display: grid;
+	grid-template-columns: 1fr;
+	height: 100vh;
+	overflow: hidden;
+}
+
+/* ── Side Pane Overlays ──────────────────────────────────────── */
+
+.pane-overlay {
+	position: fixed;
+	top: 0;
+	bottom: 0;
+	width: 300px;
+	z-index: 50;
+	background: var(--nyx-void);
+	transition: transform 300ms ease;
+	overflow-y: auto;
+}
+
+.pane-overlay-left {
+	left: 0;
+	border-right: 1px solid var(--nyx-border);
+	transform: translateX(-100%);
+}
+
+.pane-overlay-left.open {
+	transform: translateX(0);
+}
+
+.pane-overlay-right {
+	right: 0;
+	border-left: 1px solid var(--nyx-border);
+	transform: translateX(100%);
+}
+
+.pane-overlay-right.open {
+	transform: translateX(0);
+}
+
+/* ── Edge Triggers ───────────────────────────────────────────── */
+
+.pane-edge {
+	position: fixed;
+	top: 0;
+	bottom: 0;
+	width: 24px;
+	z-index: 50;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+}
+
+.pane-edge-left { left: 0; }
+.pane-edge-right { right: 0; }
+
+.edge-glyph {
+	opacity: 0;
+	color: var(--nyx-text-dim);
+	font-size: 0.75rem;
+	transition: opacity 200ms;
+}
+
+.pane-edge:hover .edge-glyph {
+	opacity: 0.4;
+}
+
+/* ── Dismiss Overlay ─────────────────────────────────────────── */
+
+.pane-dismiss {
+	position: fixed;
+	inset: 0;
+	z-index: 45;
+	background: rgba(0, 0, 0, 0.5);
+}
+
+/* ── Thread Anchor (Vertical Centering) ──────────────────────── */
+
+.thread-anchor-wrapper {
+	min-height: 100%;
+	display: flex;
+	flex-direction: column;
+}
+
+.thread-anchor-spacer {
+	flex: 1;
+}
+
+/* ── Prose Typography ─────────────────────────────────────────── */
+
+.prose-nyx {
+	font-family: var(--font-prose);
+	font-size: 1.125rem;
+	line-height: 1.85;
+	letter-spacing: 0.01em;
+	color: var(--nyx-text);
+}
+
+.prose-nyx strong {
+	font-weight: 600;
+}
+
+.prose-nyx em {
+	font-style: italic;
+	color: #d4d4d4;
+}
+
+.prose-nyx p {
+	margin: 0 0 0.75em 0;
+}
+
+.prose-nyx p:last-child {
+	margin-bottom: 0;
+}
+
+hr.nyx-divider {
+	border: none;
+	border-top: 1px solid var(--nyx-border);
+	opacity: 0.3;
+	margin: 1.5em 0;
+}
+
+/* ── Hypnos Pulse ─────────────────────────────────────────────── */
+
+.hypnos-text {
+	color: #a5b4fc;
+	opacity: 0.85;
+	font-family: var(--font-prose);
+	font-style: italic;
+	text-align: center;
+	animation: hypnos-breathe 3s ease-in-out infinite,
+	           hypnos-shimmer 6s ease-in-out infinite;
+}
+
+@keyframes hypnos-breathe {
+	0%, 100% { opacity: 0.6; }
+	50% { opacity: 0.95; }
+}
+
+@keyframes hypnos-shimmer {
+	0%, 100% {
+		text-shadow: 0 0 8px rgba(165, 180, 252, 0.15);
+	}
+	50% {
+		text-shadow: 0 0 16px rgba(165, 180, 252, 0.35),
+		             0 0 32px rgba(165, 180, 252, 0.1);
+	}
+}
+
+/* ── Jo-ha-kyū Transition (Hypnos → Clotho) ──────────────────── */
+
+.hypnos-exit {
+	animation: johakyuOut 300ms ease-in forwards;
+}
+
+.clotho-enter {
+	animation: johakyuIn 800ms ease-out forwards;
+}
+
+@keyframes johakyuOut {
+	from { opacity: 0.7; transform: translateY(0); }
+	to { opacity: 0; transform: translateY(-4px); }
+}
+
+@keyframes johakyuIn {
+	from { opacity: 0; transform: translateY(6px); }
+	to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Kintsugi (Broken Oath Glow) ──────────────────────────────── */
+
+.kintsugi {
+	filter: drop-shadow(0 0 4px var(--nyx-kintsugi));
+	color: var(--nyx-oracle-gold);
+}
+
+.kintsugi-line {
+	text-decoration: line-through;
+	text-decoration-color: var(--nyx-oracle-gold);
+}
+
+/* ── Oracle Prophecy Pulse ────────────────────────────────────── */
+
+.prophecy-pulse {
+	animation: prophecyGlow 4s ease-in-out infinite;
+}
+
+@keyframes prophecyGlow {
+	0%, 100% { opacity: 0.6; text-shadow: none; }
+	50% { opacity: 1; text-shadow: 0 0 12px rgba(184, 134, 11, 0.3); }
+}
+
+.prophecy-update {
+	animation: prophecyFlash 1.2s ease-out;
+}
+
+@keyframes prophecyFlash {
+	0% { opacity: 0; transform: scale(1.02); text-shadow: 0 0 20px rgba(184, 134, 11, 0.6); }
+	30% { opacity: 1; text-shadow: 0 0 15px rgba(184, 134, 11, 0.4); }
+	100% { opacity: 1; transform: scale(1); text-shadow: none; }
+}
+
+/* ── Milestone Flash ──────────────────────────────────────────── */
+
+.milestone-flash {
+	animation: milestoneFlare 2s ease-out;
+}
+
+@keyframes milestoneFlare {
+	0% { background: rgba(184, 134, 11, 0.15); }
+	100% { background: transparent; }
+}
+
+/* ── BFL Background Image ─────────────────────────────────────── */
+
+.bfl-background {
+	position: absolute;
+	inset: 0;
+	background-size: cover;
+	background-position: center;
+	mix-blend-mode: screen;
+	opacity: 0;
+	mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+	-webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+	transition: opacity 2s ease-in;
+	pointer-events: none;
+	z-index: 0;
+}
+
+.bfl-background.visible {
+	opacity: 0.25;
+}
+
+/* ── Scrollbar Styling ────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+	width: 4px;
+}
+
+::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+	background: #333;
+	border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background: #555;
+}
+
+/* ── Init Screen ──────────────────────────────────────────────── */
+
+.init-screen {
+	position: fixed;
+	inset: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	background: var(--nyx-void);
+	z-index: 100;
+}
+
+.init-fade-out {
+	animation: initDismiss 1s ease-in forwards;
+}
+
+@keyframes initDismiss {
+	to { opacity: 0; pointer-events: none; }
+}
+
+/* ── Utility ──────────────────────────────────────────────────── */
+
+.fade-in {
+	animation: fadeIn 0.6s ease-in;
+}
+
+@keyframes fadeIn {
+	from { opacity: 0; }
+	to { opacity: 1; }
+}
+
+.text-oracle-gold {
+	color: var(--nyx-oracle-gold);
+}
+
+/* ── Epoch Choice Buttons ────────────────────────────────────── */
+
+.nyx-choice-btn {
+	@apply px-4 py-2 text-neutral-400 transition-all duration-300
+	       border-b border-transparent
+	       hover:text-neutral-100 hover:border-neutral-500;
+	font-family: var(--font-prose);
+	cursor: pointer;
+	background: none;
+}
+
+/* Phase 1 — dreamlike, half-formed */
+.nyx-choice-btn.phase-1 {
+	opacity: 0.7;
+	filter: blur(0.5px);
+}
+.nyx-choice-btn.phase-1:hover {
+	opacity: 1;
+	filter: blur(0px);
+}
+
+/* Phase 2 — emerging clarity, monospace */
+.nyx-choice-btn.phase-2 {
+	font-family: var(--font-mono);
+	letter-spacing: 0.05em;
+}
+
+/* Phase 3 — sharp and terse, italic serif */
+.nyx-choice-btn.phase-3 {
+	font-family: var(--font-prose);
+	font-style: italic;
+	font-size: 1.1rem;
+}
+
+/* ── Title Screen ────────────────────────────────────── */
+
+.title-screen {
+	position: fixed; inset: 0;
+	display: flex; flex-direction: column;
+	align-items: center; justify-content: center;
+	background: var(--nyx-void);
+	z-index: 100; cursor: pointer; overflow: hidden;
+}
+
+.ash-particle {
+	position: absolute; width: 2px; height: 2px;
+	background: var(--nyx-text-dim); border-radius: 50%;
+	opacity: 0;
+	animation: ash-rise var(--duration, 15s) var(--delay, 0s) infinite ease-in-out;
+}
+
+@keyframes ash-rise {
+	0%   { opacity: 0; transform: translateY(100vh) translateX(0); }
+	20%  { opacity: 0.4; }
+	80%  { opacity: 0.3; }
+	100% { opacity: 0; transform: translateY(-10vh) translateX(var(--drift, 20px)); }
+}
+
+.golden-thread {
+	position: absolute; top: 0; bottom: 0; left: 50%; width: 1px;
+	background: var(--nyx-oracle-gold); opacity: 0.3;
+	animation: thread-pulse 4s ease-in-out infinite;
+	filter: drop-shadow(0 0 4px rgba(184, 134, 11, 0.3));
+}
+
+@keyframes thread-pulse {
+	0%, 100% { opacity: 0.2; filter: drop-shadow(0 0 2px rgba(184, 134, 11, 0.2)); }
+	50%      { opacity: 0.5; filter: drop-shadow(0 0 8px rgba(184, 134, 11, 0.5)); }
+}
+
+.loom-title {
+	font-family: var(--font-prose); font-weight: 600;
+	color: var(--nyx-text); text-transform: uppercase;
+	animation: loom-contract 6s ease-out forwards;
+}
+
+@keyframes loom-contract {
+	from { letter-spacing: 1.5em; opacity: 0; }
+	to   { letter-spacing: 0.5em; opacity: 1; }
+}
+
+.past-thread-line {
+	position: absolute; top: 0; bottom: 0; width: 1px;
+	background: var(--nyx-text-dim); opacity: 0.08;
+	transition: opacity 300ms ease; cursor: pointer;
+}
+.past-thread-line:hover { opacity: 0.25; }
+
+/* ── Incarnation ─────────────────────────────────────── */
+
+.incarnation-screen {
+	position: fixed; inset: 0;
+	display: flex; flex-direction: column;
+	align-items: center; justify-content: center;
+	background: var(--nyx-void); z-index: 100;
+}
+
+.incarnation-fade-out {
+	animation: incarnationDismiss 2s ease-in forwards;
+}
+
+@keyframes incarnationDismiss {
+	to { opacity: 0; pointer-events: none; }
+}
+
+.step-enter {
+	animation: johakyuIn 800ms ease-out forwards;
+}
