@@ -23,7 +23,7 @@ v4.0 additions (The Supremum Patch):
 - Soul Mirror: style directives injected based on dominant vector ≥ 7.0
 
 v3.0 additions:
-- Epoch State Machine (_compute_epoch) controls UI mode + Clotho paragraph count
+- Director System (_get_turn_metadata) controls age, beat, UI mode per turn
 - PostgreSQL persistence (optional) for players, threads, turns
 - Death hook: awaited epitaph generation + DB persist
 """
@@ -70,25 +70,60 @@ logger = logging.getLogger("nyx.kernel")
 
 
 # ---------------------------------------------------------------------------
-# Epoch State Machine
+# Epoch State Machine + Director Metadata (Sprint 8)
 # ---------------------------------------------------------------------------
 
-def _compute_epoch(turn_count: int) -> tuple[int, str]:
-    """Epoch state machine. Returns (phase, ui_mode).
+# Age map: deterministic age per turn (childhood = turns 1-9)
+_AGE_MAP: dict[int, int] = {
+    1: 3, 2: 4, 3: 5,      # Epoch 1: toddler → early child
+    4: 7, 5: 8, 6: 10,     # Epoch 2: school age
+    7: 12, 8: 14, 9: 17,   # Epoch 3: adolescence
+}
 
-    Phase 1 (turns 1-3):  5-6 paragraphs, 3 choices,   buttons
-    Phase 2 (turns 4-6):  4-5 paragraphs, 4-5 choices,  buttons
-    Phase 3 (turns 7-9):  2-3 paragraphs, 5-6 choices,  buttons
-    Phase 4 (turns 10+):  1 paragraph,    0 choices,     open
+# Authored beat directives — one per turn, keyed by turn number.
+# Each entry is (beat_position, directive) with epoch-specific narrative guidance.
+_TURN_BEATS: dict[int, tuple[str, str]] = {
+    # Epoch 1: Early Childhood (ages 3-5) — The world is the home
+    1: ("SETUP",        "First conscious memory. Establish parents, home, social class. The world IS the home — nothing exists beyond it."),
+    2: ("COMPLICATION", "The boundary of the home is tested. First encounter with something outside the family unit. Reference the home established in the previous scene."),
+    3: ("RESOLUTION",   "A choice that echoes. The child acts on instinct and something irreversible happens within the small world. Show consequences of both previous beats."),
+    # Epoch 2: Middle Childhood (ages 7-10) — The wider world
+    4: ("SETUP",        "Enters a wider world. New hierarchies, new rules — school, market, temple, or wherever children gather. The home recedes."),
+    5: ("COMPLICATION", "First betrayal or first loyalty tested. A peer, a promise, a secret. Reference the new world established in the previous scene."),
+    6: ("RESOLUTION",   "A public act. The child's reputation begins — others witness and judge. Show consequences of both previous beats."),
+    # Epoch 3: Adolescence (ages 12-17) — The body is a stranger
+    7: ("SETUP",        "The body is a stranger. New desires, new shame. The world seen through different eyes for the first time."),
+    8: ("COMPLICATION", "Authority challenged. A rule broken, a truth demanded. The adolescent refuses the world as given. Reference the previous scene directly."),
+    9: ("RESOLUTION",   "The threshold. One foot in childhood, one in the adult world. A decision that closes a door forever. Show consequences of both previous beats."),
+}
+
+
+def _get_turn_metadata(turn_count: int) -> tuple[int, int, str, str, str]:
+    """Return (phase, age, ui_mode, beat_position, vignette_directive).
+
+    Epochs 1-3 (turns 1-9): 3 turns each, buttons, deterministic age, authored beats.
+    Epoch 4 (turns 10+): open mode, age increments from 18, no beat structure.
     """
     if turn_count <= 3:
-        return 1, "buttons"
+        phase = 1
     elif turn_count <= 6:
-        return 2, "buttons"
+        phase = 2
     elif turn_count <= 9:
-        return 3, "buttons"
+        phase = 3
     else:
-        return 4, "open"
+        phase = 4
+
+    age = _AGE_MAP.get(turn_count, 18 + (turn_count - 10))
+
+    if turn_count <= 9 and turn_count in _TURN_BEATS:
+        ui_mode = "buttons"
+        beat_position, directive = _TURN_BEATS[turn_count]
+    else:
+        ui_mode = "open"
+        beat_position = "OPEN"
+        directive = ""
+
+    return phase, age, ui_mode, beat_position, directive
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +212,13 @@ def _build_stratified_context(state: ThreadState) -> str:
         if mirror:
             sections.append(f"═══ THE SOUL MIRROR ═══\n{mirror}")
 
+    # ── DREAM BLEED: Hypnos residue (ephemeral, consumed once) ────
+    if state.current_dream:
+        sections.append(
+            "═══ THE DREAM (Hypnos residue — reference abstractly, do not retell) ═══\n"
+            f"{state.current_dream}"
+        )
+
     if not sections:
         return ""
 
@@ -231,6 +273,10 @@ class TurnContext:
     eris_desc: str
     terminal: bool = False
     death_reason: str = ""
+    # Sprint 8: Director metadata
+    player_age: int = 3
+    beat_position: str = "SETUP"
+    vignette_directive: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -316,9 +362,11 @@ class NyxKernel:
         # Force Turn 1: Clotho generates the actual birth scene
         # -----------------------------------------------------------
         self.state.session.turn_count = 1
-        phase, ui_mode = _compute_epoch(1)
+        phase, age, ui_mode, beat_position, _directive = _get_turn_metadata(1)
         self.state.session.epoch_phase = phase
         self.state.session.ui_mode = ui_mode
+        self.state.session.player_age = age
+        self.state.session.beat_position = beat_position
 
         # Tag state so Clotho (mock or real) knows this is a birth scene
         self.state.last_outcome = "birth"
@@ -384,11 +432,13 @@ class NyxKernel:
         turn = self.state.session.turn_count
         logger.info(f"Turn {turn}: '{action}'")
 
-        # Epoch state machine
-        phase, ui_mode = _compute_epoch(turn)
+        # Epoch state machine → Director metadata (Sprint 8)
+        phase, age, ui_mode, beat_position, vignette_directive = _get_turn_metadata(turn)
         self.state.session.epoch_phase = phase
         self.state.session.ui_mode = ui_mode
-        logger.info(f"Epoch: phase={phase}, ui_mode={ui_mode}")
+        self.state.session.player_age = age
+        self.state.session.beat_position = beat_position
+        logger.info(f"Epoch: phase={phase}, age={age}, beat={beat_position}")
 
         # Store last action for reference
         self.state.last_action = action
@@ -415,6 +465,9 @@ class NyxKernel:
                 stratified_context="",
                 nemesis_desc="",
                 eris_desc="",
+                player_age=age,
+                beat_position=beat_position,
+                vignette_directive=vignette_directive,
             )
 
         # Step 2: Apply vector deltas from Lachesis
@@ -536,6 +589,9 @@ class NyxKernel:
             eris_desc=outcome.eris_description,
             terminal=terminal,
             death_reason=death_reason,
+            player_age=age,
+            beat_position=beat_position,
+            vignette_directive=vignette_directive,
         )
 
     # ------------------------------------------------------------------
@@ -629,6 +685,10 @@ class NyxKernel:
 
         # Commit state
         self.state = outcome.state
+
+        # Clear consumed dream (it was already fed to Clotho via stratified context)
+        self.state.current_dream = ""
+
         logger.info(
             f"Turn {ctx.turn} complete. "
             f"Vectors: {SoulVectorEngine.vector_summary(self.state.soul_ledger.vectors)}, "
@@ -723,11 +783,20 @@ class NyxKernel:
             eris_desc=ctx.eris_desc,
             epoch_phase=ctx.phase,
             stratified_context=ctx.stratified_context,
+            vignette_directive=ctx.vignette_directive,
         )
         prose, choices = _parse_clotho_output(clotho_result.prose, ctx.phase)
         prose = self._append_interventions(prose, ctx)
 
-        return await self._finalize_turn(ctx, prose, choices)
+        result = await self._finalize_turn(ctx, prose, choices)
+
+        # Dream trigger: fire on Resolution beats (turns 3, 6, 9)
+        if ctx.beat_position == "RESOLUTION" and ctx.phase <= 3:
+            dream = await self.hypnos.weave_dream(self.state)
+            self.state.current_dream = dream
+            logger.info(f"Hypnos dream woven at turn {ctx.turn}")
+
+        return result
 
     # ------------------------------------------------------------------
     # Turn 1+: Streaming pipeline (thin orchestration shell)
@@ -806,6 +875,7 @@ class NyxKernel:
                 eris_desc=ctx.eris_desc,
                 epoch_phase=ctx.phase,
                 stratified_context=ctx.stratified_context,
+                vignette_directive=ctx.vignette_directive,
             ):
                 full_prose_buffer += token
 
@@ -850,6 +920,16 @@ class NyxKernel:
                 "eris_struck": result.eris_struck,
                 "turn_number": result.turn_number,
             }) + "\n\n"
+
+            # ── PHASE 4: DREAM (epoch boundary only) ──────────────
+            if ctx.beat_position == "RESOLUTION" and ctx.phase <= 3:
+                dream = await self.hypnos.weave_dream(self.state)
+                self.state.current_dream = dream
+                yield "data: " + json.dumps({
+                    "type": "dream",
+                    "text": dream,
+                }) + "\n\n"
+                logger.info(f"Hypnos dream streamed at turn {ctx.turn}")
 
         except asyncio.CancelledError:
             logger.warning(f"[stream] Turn cancelled by client disconnect.")
@@ -909,15 +989,6 @@ class NyxKernel:
 
         logger.info(f"Epitaph: {epitaph}")
         await update_thread_death(self._thread_id, epitaph, turn)
-
-    # ------------------------------------------------------------------
-    # Hypnos Stream
-    # ------------------------------------------------------------------
-
-    async def get_hypnos_stream(self, action: str):
-        """Yield Hypnos filler fragments for SSE streaming."""
-        async for fragment in self.hypnos.stream_fragments(self.state, action):
-            yield fragment
 
     def reset(self) -> None:
         """Destroy session and reset state."""

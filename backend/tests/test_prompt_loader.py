@@ -115,9 +115,9 @@ class TestContentSpotChecks:
         prompt = load_prompt("eris")
         assert "CHAOS INCARNATE" in prompt
 
-    def test_hypnos_has_ellipsis_rule(self):
+    def test_hypnos_has_dream_weaver_identity(self):
         prompt = load_prompt("hypnos")
-        assert "ellipsis" in prompt
+        assert "dream" in prompt.lower()
 
     def test_chronicler_has_compression_rule(self):
         prompt = load_prompt("chronicler")

@@ -122,22 +122,29 @@ def _mock_prose(state: ThreadState) -> str:
 # Epoch Directives & Fallback Choices
 # ---------------------------------------------------------------------------
 
-EPOCH_DIRECTIVES = {
+_VOICE_DIRECTIVES: dict[int, str] = {
     1: (
-        "EPOCH PHASE 1 (Age 3-6): Write 5 to 6 paragraphs of childlike wonder. "
-        "Simple language, sensory details. After your prose, output exactly 3 choices."
+        "VOICE REGISTER — EARLY CHILDHOOD: "
+        "Simple, sensory, immediate. Short sentences. The world is enormous and new. "
+        "Colours are brighter, sounds are louder, adults are giants. "
+        "Write 5-6 paragraphs. After your prose, output exactly 3 choices."
     ),
     2: (
-        "EPOCH PHASE 2 (Age 7-11): Write 4 to 5 paragraphs. Growing vocabulary, "
-        "testing boundaries. After your prose, output 4 to 5 choices."
+        "VOICE REGISTER — MIDDLE CHILDHOOD: "
+        "Growing vocabulary, testing rules, first lies, first loyalties. "
+        "Sentences can compound. The child notices injustice but can't name it. "
+        "Write 4-5 paragraphs. After your prose, output 4-5 choices."
     ),
     3: (
-        "EPOCH PHASE 3 (Age 12-16): Write 2 to 3 paragraphs. Terse, intense. "
-        "After your prose, output 5 to 6 morally ambiguous choices."
+        "VOICE REGISTER — ADOLESCENCE: "
+        "Terse, intense, self-conscious. The body is a stranger. "
+        "Bravado masks terror. First real moral choices. "
+        "Write 2-3 paragraphs. After your prose, output 5-6 morally ambiguous choices."
     ),
     4: (
-        "EPOCH PHASE 4 (Age 18+): Write exactly 1 dense paragraph. "
-        "No choices — the player types freely. Do NOT output any choices section."
+        "VOICE REGISTER — ADULTHOOD: "
+        "Dense, allusive, weight of history. The past is always present. "
+        "Write exactly 1 dense paragraph. No choices — the player types freely."
     ),
 }
 
@@ -189,6 +196,7 @@ def _build_payload(
     nemesis_desc: str = "",
     eris_desc: str = "",
     epoch_phase: int = 1,
+    vignette_directive: str = "",
 ) -> str:
     """Build the structured JSON payload for Clotho's user message."""
     vectors = state.soul_ledger.vectors
@@ -235,6 +243,8 @@ def _build_payload(
         "turn_number": state.session.turn_count,
         "player_name": state.session.player_name,
         "player_gender": state.session.player_gender,
+        "player_age": state.session.player_age,
+        "beat_position": state.session.beat_position,
     }
 
     msg = "WEAVE THE FOLLOWING STATE INTO REALITY:\n\n" + json.dumps(payload, indent=2)
@@ -248,9 +258,17 @@ def _build_payload(
             f"Use appropriate pronouns. Weave the name sparingly."
         )
 
-    # Append epoch directive
-    directive = EPOCH_DIRECTIVES.get(epoch_phase, EPOCH_DIRECTIVES[4])
-    msg += f"\n\n--- EPOCH INSTRUCTIONS ---\n{directive}"
+    # Voice register + age pinning (Sprint 8: The Director)
+    voice = _VOICE_DIRECTIVES.get(epoch_phase, _VOICE_DIRECTIVES[4])
+    msg += f"\n\n--- VOICE & AGE ---\n{voice}"
+    msg += (
+        f"\nThe player is EXACTLY {state.session.player_age} years old. "
+        "Pin all sensory details, vocabulary, and world-knowledge to this age. Do NOT drift."
+    )
+
+    # Beat / vignette directive (epochs 1-3)
+    if vignette_directive:
+        msg += f"\n\n--- SCENE BEAT ({state.session.beat_position}) ---\n{vignette_directive}"
 
     # Append choice format instructions (Phase 1-3 only)
     if epoch_phase < 4:
@@ -278,6 +296,7 @@ class Clotho(AgentBase):
         eris_desc: str = "",
         epoch_phase: int = 1,
         stratified_context: str = "",
+        vignette_directive: str = "",
     ) -> ClothoResponse:
         """Generate literary prose from resolved state.
 
@@ -306,7 +325,8 @@ class Clotho(AgentBase):
             system = stratified_context + "\n\n" + CLOTHO_SYSTEM_PROMPT
 
         user_message = _build_payload(
-            state, action, nemesis_desc, eris_desc, epoch_phase=epoch_phase,
+            state, action, nemesis_desc, eris_desc,
+            epoch_phase=epoch_phase, vignette_directive=vignette_directive,
         )
         logger.info(f"Clotho calling {model} (epoch {epoch_phase}, context={len(stratified_context)} chars)")
 
@@ -340,6 +360,7 @@ class Clotho(AgentBase):
         eris_desc: str = "",
         epoch_phase: int = 1,
         stratified_context: str = "",
+        vignette_directive: str = "",
     ) -> AsyncGenerator[str, None]:
         """Stream prose tokens for the SSE pipeline.
 
@@ -377,7 +398,8 @@ class Clotho(AgentBase):
             system = stratified_context + "\n\n" + CLOTHO_SYSTEM_PROMPT
 
         user_message = _build_payload(
-            state, action, nemesis_desc, eris_desc, epoch_phase=epoch_phase,
+            state, action, nemesis_desc, eris_desc,
+            epoch_phase=epoch_phase, vignette_directive=vignette_directive,
         )
         logger.info(f"Clotho streaming {model} (epoch {epoch_phase})")
 

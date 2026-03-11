@@ -30,12 +30,15 @@ export interface SessionData {
 	player_id: string;
 	player_name: string;
 	player_gender: string;
+	hamartia: string;
 	first_memory: string;
 	turn_count: number;
 	run_number: number;
 	current_environment: string;
 	epoch_phase: number;   // 1-4
 	ui_mode: string;       // "buttons" | "open"
+	player_age: number;    // deterministic age per turn
+	beat_position: string; // SETUP | COMPLICATION | RESOLUTION | OPEN
 }
 
 export interface ThreadState {
@@ -45,6 +48,7 @@ export interface ThreadState {
 	rag_context: string[];
 	last_action: string;
 	last_outcome: string;
+	current_dream: string; // Hypnos dream text (consumed by next Clotho call)
 }
 
 export interface TurnResult {

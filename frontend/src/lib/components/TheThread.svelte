@@ -8,7 +8,6 @@
 	import { fade } from 'svelte/transition';
 	import {
 		proseHistory,
-		hypnosStream,
 		streamingProse,
 		backgroundImage,
 		isProcessing,
@@ -16,6 +15,8 @@
 		uiChoices,
 		gameState,
 		submitAction,
+		activeDream,
+		dismissDream,
 	} from '$lib/stores/engine';
 	import { renderProse } from '$lib/utils/markdown';
 	import Console from './Console.svelte';
@@ -64,7 +65,7 @@
 			<div class="thread-anchor-spacer"></div>
 
 			<!-- Welcome state (before any prose or streaming) -->
-			{#if $proseHistory.length === 0 && !$hypnosStream}
+			{#if $proseHistory.length === 0}
 				<div class="flex items-center justify-center">
 					<p
 						class="text-center italic"
@@ -76,7 +77,7 @@
 			{/if}
 
 			<!-- Diegetic loading state (processing, before any streaming arrives) -->
-			{#if $isProcessing && !$hypnosStream && !$streamingProse}
+			{#if $isProcessing && !$streamingProse}
 				<div class="flex flex-col items-center justify-center fade-in">
 					<div class="weaving-thread"></div>
 					<p class="weaving-text">The Fates are weaving...</p>
@@ -90,15 +91,8 @@
 				</div>
 			{/if}
 
-			<!-- Hypnos filler stream (legacy fallback) -->
-			{#if $hypnosStream}
-				<div class="hypnos-text prose-nyx mb-6 max-w-2xl mx-auto">
-					{@html renderProse($hypnosStream)}
-				</div>
-			{/if}
-
 			<!-- Paginated paragraph display (after prose arrives) -->
-			{#if paragraphs.length > 0 && !$hypnosStream && !$isProcessing}
+			{#if paragraphs.length > 0 && !$isProcessing}
 				{#key visibleIndex}
 					<div
 						class="prose-nyx mb-6 max-w-2xl mx-auto"
@@ -115,7 +109,7 @@
 				{#if $isTerminal}
 					<!-- Terminal state always shows, bypasses pagination -->
 					<Console />
-				{:else if paragraphs.length > 0 && visibleIndex < paragraphs.length - 1 && !$hypnosStream && !$isProcessing}
+				{:else if paragraphs.length > 0 && visibleIndex < paragraphs.length - 1 && !$isProcessing}
 					<!-- More paragraphs to read — show advance button -->
 					<button
 						onclick={advanceText}
@@ -131,7 +125,11 @@
 							{#each $uiChoices as choice}
 								<button
 									class="nyx-choice-btn phase-{$gameState.session.epoch_phase}"
-									onclick={() => submitAction(choice)}
+									onclick={() => {
+										submitAction(choice).catch((err) => {
+											console.error('[nyx] Choice action failed:', err);
+										});
+									}}
 								>
 									{choice}
 								</button>
@@ -150,4 +148,25 @@
 			<div class="thread-anchor-spacer"></div>
 		</div>
 	</div>
+
+	<!-- Dream Overlay (Hypnos epoch-boundary interlude) -->
+	{#if $activeDream}
+		<div
+			class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+			transition:fade={{ duration: 800 }}
+		>
+			<div class="max-w-lg px-8 text-center">
+				<p class="hypnos-text text-lg leading-relaxed mb-8">
+					{$activeDream}
+				</p>
+				<button
+					onclick={dismissDream}
+					class="text-[var(--nyx-text-dim)] hover:text-[var(--nyx-text)] transition-colors"
+					style="font-family: var(--font-prose); font-size: 0.875rem; letter-spacing: 0.1em;"
+				>
+					[ Awaken ]
+				</button>
+			</div>
+		</div>
+	{/if}
 </main>

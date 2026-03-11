@@ -20,7 +20,6 @@ import uuid
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from sse_starlette.sse import EventSourceResponse
 
 from app.core.config import settings
 from app.core.kernel import NyxKernel
@@ -123,8 +122,8 @@ async def init_session(req: InitRequest) -> TurnResult:
         gender=req.gender,
         first_memory=req.first_memory,
     )
-    result.session_id = sid
-    return result
+    # model_copy ensures session_id is in model_fields_set for serialization
+    return result.model_copy(update={"session_id": sid})
 
 
 # ------------------------------------------------------------------
@@ -137,8 +136,7 @@ async def submit_action(action: PlayerAction) -> TurnResult:
     agents resolve. Use /turn for the streaming experience."""
     kernel = _require_session(action.session_id)
     result = await kernel.process_turn(action.action)
-    result.session_id = action.session_id
-    return result
+    return result.model_copy(update={"session_id": action.session_id})
 
 
 # ------------------------------------------------------------------
@@ -195,75 +193,6 @@ async def stream_turn_post(action: PlayerAction, request: Request):
             "X-Accel-Buffering": "no",
         },
     )
-
-
-# ------------------------------------------------------------------
-# GET /stream — SSE with Hypnos mask + BFL heartbeat (legacy)
-# ------------------------------------------------------------------
-
-@router.get("/stream")
-async def stream_turn(action: str, session_id: str, request: Request):
-    """SSE endpoint implementing the Hypnos Mask protocol (legacy).
-
-    Requires session_id as a query param.
-    """
-    kernel = _require_session(session_id)
-
-    async def event_generator():
-        # Launch the heavy backend processing
-        turn_task = asyncio.create_task(kernel.process_turn(action))
-
-        # Stream Hypnos filler while we wait
-        async for fragment in kernel.get_hypnos_stream(action):
-            if await request.is_disconnected():
-                turn_task.cancel()
-                return
-            yield {
-                "event": "hypnos",
-                "data": json.dumps({"text": fragment}),
-            }
-
-        # Wait for the real result
-        result = await turn_task
-
-        # Send the final prose (overwrites Hypnos on frontend)
-        yield {
-            "event": "result",
-            "data": result.model_dump_json(),
-        }
-
-        # BFL Image: If milestone triggered, hold SSE open with heartbeats
-        if (
-            result.state.the_loom.milestone_reached
-            and result.state.the_loom.image_prompt_trigger
-            and settings.bfl_api_key
-        ):
-            bfl_task = asyncio.create_task(
-                generate_image(
-                    prompt=result.state.the_loom.image_prompt_trigger,
-                    api_key=settings.bfl_api_key,
-                )
-            )
-            while not bfl_task.done():
-                if await request.is_disconnected():
-                    bfl_task.cancel()
-                    return
-                yield {"event": "heartbeat", "data": ""}
-                await asyncio.sleep(1)
-
-            try:
-                image_url = bfl_task.result()
-                if image_url:
-                    yield {
-                        "event": "image",
-                        "data": json.dumps({"url": image_url}),
-                    }
-            except Exception as e:
-                logger.warning(f"BFL image generation failed: {e}")
-
-        yield {"event": "done", "data": ""}
-
-    return EventSourceResponse(event_generator())
 
 
 # ------------------------------------------------------------------

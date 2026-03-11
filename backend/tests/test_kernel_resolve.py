@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.core.kernel import NyxKernel, TurnContext, _compute_epoch
+from app.core.kernel import NyxKernel, TurnContext, _get_turn_metadata
 
 
 @pytest.fixture
@@ -180,13 +180,13 @@ class TestResolveEpochMachine:
 
     @pytest.mark.asyncio
     async def test_phase_4_open_mode(self):
-        phase, ui_mode = _compute_epoch(10)
+        phase, _age, ui_mode, beat, _dir = _get_turn_metadata(10)
         assert phase == 4
         assert ui_mode == "open"
 
     @pytest.mark.asyncio
     async def test_phase_3_turns_7_to_9(self):
-        phase, ui_mode = _compute_epoch(7)
+        phase, _age, ui_mode, beat, _dir = _get_turn_metadata(7)
         assert phase == 3
         assert ui_mode == "buttons"
 

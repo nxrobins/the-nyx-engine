@@ -60,6 +60,8 @@ class SessionData(BaseModel):
     current_environment: str = "A shadowed threshold between worlds."
     epoch_phase: int = 1        # 1-4, computed from turn_count
     ui_mode: str = "buttons"    # "buttons" | "open"
+    player_age: int = 3         # deterministic age per turn
+    beat_position: str = "SETUP"  # SETUP | COMPLICATION | RESOLUTION | OPEN
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +76,7 @@ class ThreadState(BaseModel):
     rag_context: list[str] = Field(default_factory=list)  # fallback context
     last_action: str = ""
     last_outcome: str = ""
+    current_dream: str = ""    # Hypnos dream text (consumed by next Clotho call)
     # Chronicler: rolling prose buffer + dual-track compressed chronicle
     prose_history: list[str] = Field(default_factory=list)       # last N raw prose turns
     chronicle: list[str] = Field(default_factory=list)           # mythic sentence per 5-turn window

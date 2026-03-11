@@ -33,9 +33,6 @@ export const gameState = writable<ThreadState | null>(null);
 /** Prose history — array of turn prose strings */
 export const proseHistory = writable<string[]>([]);
 
-/** Current Hypnos filler stream (legacy, kept for backward compat) */
-export const hypnosStream = writable<string>('');
-
 /** Streaming prose — accumulates tokens during Clotho typewriter phase */
 export const streamingProse = writable<string>('');
 
@@ -59,6 +56,14 @@ export const isInitialized = writable<boolean>(false);
 
 /** Epoch choice buttons (empty in Phase 4 / open mode) */
 export const uiChoices = writable<string[]>([]);
+
+/** Dream interlude text from Hypnos (displayed as full-screen overlay) */
+export const activeDream = writable<string>('');
+
+/** Dismiss the dream overlay — called by [ Awaken ] button */
+export function dismissDream(): void {
+	activeDream.set('');
+}
 
 // ── Turn 0: Initialize Session ──────────────────────────────────
 
@@ -94,6 +99,9 @@ export async function initGame(params: {
 	const result: TurnResult = await res.json();
 
 	_sessionId = result.session_id;
+	if (!_sessionId) {
+		console.error('[nyx] CRITICAL: No session_id in /init response!', Object.keys(result));
+	}
 	gameState.set(result.state);
 	proseHistory.set([result.prose]);
 	uiChoices.set(result.ui_choices || []);
@@ -116,10 +124,10 @@ export async function initGame(params: {
  */
 export async function submitAction(action: string): Promise<void> {
 	isProcessing.set(true);
-	hypnosStream.set('');
 	streamingProse.set('');
 	mechanicToast.set(null);
 	uiChoices.set([]);
+	activeDream.set('');
 
 	const response = await fetch('/api/turn', {
 		method: 'POST',
@@ -158,8 +166,8 @@ export async function submitAction(action: string): Promise<void> {
 						if (data.type === 'prose') {
 							fullProse += data.text;
 						}
-					} catch {
-						// Malformed JSON — skip this chunk
+					} catch (e) {
+						console.error('[nyx] SSE parse error:', e, 'chunk:', chunk.slice(0, 200));
 					}
 				}
 			}
@@ -173,12 +181,27 @@ export async function submitAction(action: string): Promise<void> {
 				if (data.type === 'prose') {
 					fullProse += data.text;
 				}
-			} catch {
-				// Ignore trailing malformed data
+			} catch (e) {
+				console.error('[nyx] SSE flush parse error:', e, 'buffer:', buffer.slice(0, 200));
 			}
 		}
 	} finally {
 		reader.releaseLock();
+
+		// Safety net: if the 'state' event was dropped, commit any orphaned
+		// streaming prose so paragraphs don't repeat from the previous turn.
+		let orphanedProse = '';
+		streamingProse.update((current) => {
+			orphanedProse = current;
+			return '';
+		});
+		if (orphanedProse) {
+			console.warn('[nyx] State event missed — committing orphaned streaming prose');
+			proseHistory.update((h) => [...h, orphanedProse]);
+		}
+
+		// Ensure processing flag is always cleared so UI is never stuck
+		isProcessing.set(false);
 	}
 }
 
@@ -239,10 +262,28 @@ function handleStreamEvent(data: Record<string, unknown>): void {
 			break;
 		}
 
-		case 'done':
-			// Stream fully complete — ensure processing is cleared
+		case 'dream': {
+			const dreamText = data.text as string;
+			if (dreamText) {
+				activeDream.set(dreamText);
+			}
+			break;
+		}
+
+		case 'done': {
+			// Stream fully complete — commit any orphaned prose before clearing
+			let doneProse = '';
+			streamingProse.update((current) => {
+				doneProse = current;
+				return '';
+			});
+			if (doneProse) {
+				console.warn('[nyx] Done event fired with uncommitted prose — state event was dropped');
+				proseHistory.update((h) => [...h, doneProse]);
+			}
 			isProcessing.set(false);
 			break;
+		}
 	}
 }
 
@@ -260,7 +301,6 @@ export async function resetGame(): Promise<void> {
 	_sessionId = '';
 	gameState.set(null);
 	proseHistory.set([]);
-	hypnosStream.set('');
 	streamingProse.set('');
 	mechanicToast.set(null);
 	backgroundImage.set('');
@@ -268,6 +308,7 @@ export async function resetGame(): Promise<void> {
 	isTerminal.set(false);
 	deathReason.set('');
 	uiChoices.set([]);
+	activeDream.set('');
 	isInitialized.set(false);
 	vestibuleState.set('title');
 }
