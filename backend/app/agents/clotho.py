@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import random
+from typing import AsyncGenerator
 
 from app.agents.base import AgentBase
 from app.core.config import settings
@@ -64,6 +65,18 @@ The setting is a pre-technological mythic fable. There is NO modern
 technology. If the player suggests anachronisms, seamlessly translate
 them into mythic equivalents ("a phone" → "a glass mirror of whispers").
 Never break the world.
+
+LAW V — THE ANCHOR (PLOT & IDENTITY)
+Ambience is useless without context. You MUST clearly establish the
+reality of the player's world. Who is raising them? What is their
+social standing? What is the immediate, tangible situation occurring
+right now? Every scene must answer: WHERE am I, WHO is with me,
+and WHAT is happening? Atmosphere without grounding is fog.
+
+LAW VI — ECONOMY OF BREATH
+Do not exhaust the player. For standard turns, output a maximum of
+2 to 3 concise paragraphs. Only expand to longer descriptions during
+major life events or Epoch transitions. Dense prose beats long prose.
 
 ═══════════════════════════════════════════
 YOUR FUNCTION
@@ -390,3 +403,70 @@ class Clotho(AgentBase):
                 scene_tags=[state.last_outcome or "neutral"],
                 ui_choices=choices,
             )
+
+    async def astream(
+        self, state: ThreadState, action: str,
+        nemesis_desc: str = "",
+        eris_desc: str = "",
+        epoch_phase: int = 1,
+        stratified_context: str = "",
+    ) -> AsyncGenerator[str, None]:
+        """Stream prose tokens for the SSE pipeline.
+
+        Mock mode: chunks mock prose into 3-word groups with delays.
+        Real LLM mode: delegates to llm.stream() for token-by-token output.
+
+        IMPORTANT: This yields raw tokens including the ---CHOICES--- section.
+        The kernel's stream handler is responsible for buffering and splitting
+        the choices separator from the prose tokens.
+        """
+        model = settings.clotho_model
+
+        # --- Mock mode: simulate token streaming ---
+        if model == "mock":
+            await asyncio.sleep(0.3)
+            prose = _mock_prose(state)
+            # Append mock choices separator for phases 1-3
+            choices = _FALLBACK_CHOICES.get(epoch_phase, [])
+            if epoch_phase < 4 and choices:
+                prose += "\n\n---CHOICES---\n" + json.dumps(choices)
+
+            words = prose.split(" ")
+            for i in range(0, len(words), 3):
+                chunk = " ".join(words[i:i + 3])
+                # Add leading space except for the first chunk
+                if i > 0:
+                    chunk = " " + chunk
+                yield chunk
+                await asyncio.sleep(random.uniform(0.04, 0.08))
+            return
+
+        # --- Real LLM mode: stream via LiteLLM ---
+        system = CLOTHO_SYSTEM_PROMPT
+        if stratified_context:
+            system = stratified_context + "\n\n" + CLOTHO_SYSTEM_PROMPT
+
+        user_message = _build_payload(
+            state, action, nemesis_desc, eris_desc, epoch_phase=epoch_phase,
+        )
+        logger.info(f"Clotho streaming {model} (epoch {epoch_phase})")
+
+        try:
+            async for token in llm.stream(
+                model=model,
+                system_prompt=system,
+                user_message=user_message,
+                temperature=0.85,
+                max_tokens=1200,
+            ):
+                yield token
+        except Exception as e:
+            logger.error(f"Clotho stream failed: {e}. Falling back to mock chunks.")
+            prose = _mock_prose(state)
+            words = prose.split(" ")
+            for i in range(0, len(words), 3):
+                chunk = " ".join(words[i:i + 3])
+                if i > 0:
+                    chunk = " " + chunk
+                yield chunk
+                await asyncio.sleep(random.uniform(0.04, 0.08))

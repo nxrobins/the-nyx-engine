@@ -9,6 +9,7 @@
 	import {
 		proseHistory,
 		hypnosStream,
+		streamingProse,
 		backgroundImage,
 		isProcessing,
 		isTerminal,
@@ -74,7 +75,22 @@
 				</div>
 			{/if}
 
-			<!-- Hypnos filler stream (during processing) -->
+			<!-- Diegetic loading state (processing, before any streaming arrives) -->
+			{#if $isProcessing && !$hypnosStream && !$streamingProse}
+				<div class="flex flex-col items-center justify-center fade-in">
+					<div class="weaving-thread"></div>
+					<p class="weaving-text">The Fates are weaving...</p>
+				</div>
+			{/if}
+
+			<!-- Streaming prose (typewriter effect during Clotho Phase 2) -->
+			{#if $isProcessing && $streamingProse}
+				<div class="prose-nyx mb-6 max-w-2xl mx-auto clotho-enter">
+					{@html renderProse($streamingProse)}
+				</div>
+			{/if}
+
+			<!-- Hypnos filler stream (legacy fallback) -->
 			{#if $hypnosStream}
 				<div class="hypnos-text prose-nyx mb-6 max-w-2xl mx-auto">
 					{@html renderProse($hypnosStream)}
@@ -82,7 +98,7 @@
 			{/if}
 
 			<!-- Paginated paragraph display (after prose arrives) -->
-			{#if paragraphs.length > 0 && !$hypnosStream}
+			{#if paragraphs.length > 0 && !$hypnosStream && !$isProcessing}
 				{#key visibleIndex}
 					<div
 						class="prose-nyx mb-6 max-w-2xl mx-auto"
@@ -99,7 +115,7 @@
 				{#if $isTerminal}
 					<!-- Terminal state always shows, bypasses pagination -->
 					<Console />
-				{:else if paragraphs.length > 0 && visibleIndex < paragraphs.length - 1 && !$hypnosStream}
+				{:else if paragraphs.length > 0 && visibleIndex < paragraphs.length - 1 && !$hypnosStream && !$isProcessing}
 					<!-- More paragraphs to read — show advance button -->
 					<button
 						onclick={advanceText}

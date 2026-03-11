@@ -270,6 +270,41 @@ hr.nyx-divider {
 	opacity: 0.25;
 }
 
+/* ── Thread-Line HUD ─────────────────────────────────────────── */
+
+.thread-hud {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	z-index: 40;
+	display: flex;
+	justify-content: center;
+	padding: 0.6rem 1rem;
+	pointer-events: none;
+}
+
+.thread-hud-text {
+	font-family: var(--font-prose);
+	font-size: 0.8rem;
+	letter-spacing: 0.15em;
+	text-transform: uppercase;
+	color: var(--nyx-text-dim);
+	opacity: 0.5;
+	transition: opacity 300ms ease;
+}
+
+.thread-hud:hover .thread-hud-text {
+	opacity: 0.85;
+	pointer-events: auto;
+}
+
+.thread-hud-separator {
+	color: var(--nyx-oracle-gold);
+	opacity: 0.4;
+	margin: 0 0.5em;
+}
+
 /* ── Scrollbar Styling ────────────────────────────────────────── */
 
 ::-webkit-scrollbar {
@@ -432,4 +467,79 @@ hr.nyx-divider {
 
 .step-enter {
 	animation: johakyuIn 800ms ease-out forwards;
+}
+
+/* ── Mechanic Toast (Phase 1 Feedback) ──────────────── */
+
+.mechanic-toast {
+	position: fixed;
+	bottom: 2rem;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 60;
+	display: flex;
+	align-items: center;
+	gap: 0.5em;
+	padding: 0.5rem 1.2rem;
+	font-family: var(--font-mono);
+	font-size: 0.75rem;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	color: var(--nyx-text-dim);
+	border: 1px solid var(--nyx-border);
+	background: rgba(10, 10, 10, 0.9);
+	animation: mechanic-flash 2.5s ease-out forwards;
+	pointer-events: none;
+}
+
+.mechanic-toast.nemesis {
+	color: var(--nyx-nemesis);
+	border-color: var(--nyx-nemesis);
+	text-shadow: 0 0 8px rgba(220, 38, 38, 0.4);
+}
+
+.mechanic-toast.eris {
+	color: var(--nyx-eris);
+	border-color: var(--nyx-eris);
+	text-shadow: 0 0 8px rgba(147, 51, 234, 0.4);
+}
+
+.toast-icon {
+	font-size: 0.9rem;
+	opacity: 0.7;
+}
+
+.toast-delta {
+	font-size: 0.65rem;
+	opacity: 0.6;
+}
+
+.toast-delta.positive { color: var(--nyx-oracle-gold); }
+.toast-delta.negative { color: var(--nyx-nemesis); }
+
+@keyframes mechanic-flash {
+	0%   { opacity: 0; transform: translateX(-50%) translateY(8px); }
+	10%  { opacity: 0.9; transform: translateX(-50%) translateY(0); }
+	70%  { opacity: 0.9; }
+	100% { opacity: 0; transform: translateX(-50%) translateY(-4px); }
+}
+
+/* ── Weaving State (Init Loading) ────────────────────── */
+
+.weaving-thread {
+	width: 1px;
+	height: 120px;
+	background: var(--nyx-oracle-gold);
+	animation: thread-pulse 4s ease-in-out infinite;
+	filter: drop-shadow(0 0 4px rgba(184, 134, 11, 0.3));
+	margin-bottom: 2rem;
+}
+
+.weaving-text {
+	font-family: var(--font-prose);
+	font-style: italic;
+	font-size: 1.125rem;
+	color: var(--nyx-text-dim);
+	text-align: center;
+	animation: hypnos-breathe 3s ease-in-out infinite;
 }

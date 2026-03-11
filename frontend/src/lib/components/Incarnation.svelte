@@ -72,78 +72,92 @@
 	}
 </script>
 
-<div class="incarnation-screen" class:incarnation-fade-out={fading}>
-	{#if step === 0}
-		<!-- Step 0: Name -->
-		<div class="step-enter">
-			<p class="incarnation-prose">
-				A thread stirs in the void. Before the Fates can weave,<br />
-				they must know the shape of the soul.
-			</p>
-			<p class="incarnation-prompt">What name does this soul carry?</p>
-			<input
-				class="incarnation-input"
-				type="text"
-				placeholder="Speak your name..."
-				bind:value={playerName}
-				onkeydown={handleNameSubmit}
-				maxlength={30}
-				autofocus
-			/>
-			{#if error}
-				<p class="incarnation-error step-enter">{error}</p>
-			{/if}
-		</div>
-	{:else if step === 1}
-		<!-- Step 1: Gender -->
-		<div class="step-enter">
-			<p class="incarnation-prose">
-				The thread takes form. <em>{playerName}</em>...<br />
-				the Fates taste the syllables.
-			</p>
-			<p class="incarnation-prompt">What shape does this soul wear?</p>
-			<div class="gender-buttons fade-in">
-				<button
-					class="nyx-choice-btn phase-3"
-					onclick={() => selectGender('boy')}
-				>
-					A Boy
-				</button>
-				<button
-					class="nyx-choice-btn phase-3"
-					onclick={() => selectGender('girl')}
-				>
-					A Girl
-				</button>
+{#if loading}
+	<!-- Weaving state: atmospheric hold while the Loom initializes -->
+	<div class="incarnation-screen fade-in">
+		<div class="weaving-thread"></div>
+		<p class="weaving-text">The Fates are weaving...</p>
+	</div>
+{:else}
+	<div class="incarnation-screen" class:incarnation-fade-out={fading}>
+		{#if step === 0}
+			<!-- Step 0: Name -->
+			<div class="step-enter">
+				<p class="incarnation-prose">
+					A thread stirs in the void. Before the Fates can weave,<br />
+					they must know the shape of the soul.
+				</p>
+				<p class="incarnation-prompt">What name does this soul carry?</p>
+				<input
+					class="incarnation-input"
+					type="text"
+					placeholder="Speak your name..."
+					bind:value={playerName}
+					onkeydown={handleNameSubmit}
+					maxlength={30}
+					autofocus
+				/>
+				{#if error}
+					<p class="incarnation-error step-enter">{error}</p>
+				{/if}
 			</div>
-			{#if error}
-				<p class="incarnation-error step-enter">{error}</p>
-			{/if}
-		</div>
-	{:else}
-		<!-- Step 2: First Memory -->
-		<div class="step-enter">
-			<p class="incarnation-prose">
-				The thread is woven. But where does it fall?
-			</p>
-			<p class="incarnation-prompt">What is your earliest memory?</p>
-			<div class="memory-buttons fade-in">
-				{#each MEMORIES as memory}
+		{:else if step === 1}
+			<!-- Step 1: Gender -->
+			<div class="step-enter">
+				<p class="incarnation-prose">
+					The thread takes form. <em>{playerName}</em>...<br />
+					the Fates taste the syllables.
+				</p>
+				<p class="incarnation-prompt">What shape does this soul wear?</p>
+				<div class="gender-buttons fade-in">
 					<button
 						class="nyx-choice-btn phase-3"
-						onclick={() => selectMemory(memory)}
-						disabled={loading}
+						onclick={() => selectGender('boy')}
 					>
-						{memory}
+						A Boy
 					</button>
-				{/each}
+					<button
+						class="nyx-choice-btn phase-3"
+						onclick={() => selectGender('girl')}
+					>
+						A Girl
+					</button>
+				</div>
+				{#if error}
+					<p class="incarnation-error step-enter">{error}</p>
+				{/if}
 			</div>
-			{#if error}
-				<p class="incarnation-error step-enter">{error}</p>
-			{/if}
-		</div>
-	{/if}
-</div>
+		{:else}
+			<!-- Step 2: World Prologue + First Memory -->
+			<div class="step-enter">
+				<p class="incarnation-prose">
+					The thread is woven. But where does it fall?
+				</p>
+				<p class="incarnation-prose" style="max-width: 520px; font-size: 1.05rem; color: var(--nyx-text-dim); opacity: 0.75;">
+					This is the Age of Ash — a world of crumbled empires and
+					forgotten gods. Iron rusts in the rain. Villages cling to
+					hillsides like scars. The strong devour the weak,
+					and the Fates watch from their Loom, indifferent.
+				</p>
+				<p class="incarnation-prompt">What is your earliest memory?</p>
+				<div class="memory-buttons fade-in">
+					{#each MEMORIES as memory}
+						<button
+							class="nyx-choice-btn phase-3"
+							onclick={() => selectMemory(memory)}
+							disabled={fading}
+						>
+							{memory}
+						</button>
+					{/each}
+				</div>
+				{#if error}
+					<p class="incarnation-error step-enter">{error}</p>
+				{/if}
+			</div>
+		{/if}
+	</div>
+{/if}
 
 <style>
 	.incarnation-prose {

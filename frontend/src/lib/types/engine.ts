@@ -63,6 +63,16 @@ export interface HypnosEvent {
 	text: string;
 }
 
+/** Mechanic event from the streaming pipeline (Phase 1) */
+export interface MechanicEvent {
+	vector_deltas: Record<string, number>;
+	dominant: string;
+	outcome: string;
+	nemesis_struck: boolean;
+	eris_struck: boolean;
+	valid: boolean;
+}
+
 /** Hamartia options returned by GET /hamartia-options */
 export interface HamartiaOptions {
 	options: string[];

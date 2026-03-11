@@ -14,6 +14,7 @@ import json
 import logging
 
 from fastapi import APIRouter, Request
+from fastapi.responses import StreamingResponse
 from sse_starlette.sse import EventSourceResponse
 
 from app.core.config import settings
@@ -71,7 +72,63 @@ async def submit_action(action: PlayerAction) -> TurnResult:
 
 
 # ------------------------------------------------------------------
-# GET /stream — SSE with Hypnos mask + BFL heartbeat
+# POST /turn — Streaming SSE (Sprint 6: 3-Phase Pipeline)
+# ------------------------------------------------------------------
+
+@router.post("/turn")
+async def stream_turn_post(action: PlayerAction, request: Request):
+    """3-Phase streaming turn pipeline.
+
+    Phase 1: mechanic — Lachesis math + conflict resolution (immediate)
+    Phase 2: prose    — Clotho tokens streamed for typewriter effect
+    Phase 3: state    — Final state + choices + cleanup
+
+    BFL image generation runs post-stream if a milestone is triggered.
+    """
+    kernel = _get_kernel()
+
+    async def event_generator():
+        # Stream the 3-phase kernel pipeline
+        async for chunk in kernel.process_turn_stream(action.action):
+            if await request.is_disconnected():
+                logger.info("Client disconnected during stream")
+                return
+            yield chunk
+
+        # BFL image: fire after stream if milestone triggered
+        if (
+            kernel.state.the_loom.milestone_reached
+            and kernel.state.the_loom.image_prompt_trigger
+            and settings.bfl_api_key
+        ):
+            try:
+                image_url = await generate_image(
+                    prompt=kernel.state.the_loom.image_prompt_trigger,
+                    api_key=settings.bfl_api_key,
+                )
+                if image_url:
+                    yield "data: " + json.dumps({
+                        "type": "image",
+                        "url": image_url,
+                    }) + "\n\n"
+            except Exception as e:
+                logger.warning(f"BFL image generation failed: {e}")
+
+        yield "data: " + json.dumps({"type": "done"}) + "\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ------------------------------------------------------------------
+# GET /stream — SSE with Hypnos mask + BFL heartbeat (legacy)
 # ------------------------------------------------------------------
 
 @router.get("/stream")

@@ -10,6 +10,7 @@
 	import TheThread from '$lib/components/TheThread.svelte';
 	import TheOracle from '$lib/components/TheOracle.svelte';
 	import { vestibuleState } from '$lib/stores/vestibule';
+	import { gameState, mechanicToast } from '$lib/stores/engine';
 
 	let leftOpen = $state(false);
 	let rightOpen = $state(false);
@@ -17,6 +18,17 @@
 	function dismissPanes() {
 		leftOpen = false;
 		rightOpen = false;
+	}
+
+	/** Map epoch phase → diegetic age */
+	function calculateAge(phase: number): string {
+		switch (phase) {
+			case 1: return '3';
+			case 2: return '7';
+			case 3: return '13';
+			case 4: return '18';
+			default: return '?';
+		}
 	}
 </script>
 
@@ -26,6 +38,19 @@
 	<Incarnation />
 {:else}
 	<!-- Game UI (playing state) -->
+
+	<!-- Diegetic Thread-Line HUD -->
+	{#if $gameState}
+		<div class="thread-hud">
+			<span class="thread-hud-text">
+				{$gameState.session.player_name}
+				<span class="thread-hud-separator">✦</span>
+				AGE {calculateAge($gameState.session.epoch_phase)}
+				<span class="thread-hud-separator">✦</span>
+				{$gameState.session.hamartia}
+			</span>
+		</div>
+	{/if}
 
 	<!-- Edge triggers (always visible) -->
 	<div class="pane-edge pane-edge-left" onclick={() => leftOpen = true}>
@@ -52,4 +77,30 @@
 	<div class="game-grid fade-in">
 		<TheThread />
 	</div>
+
+	<!-- Mechanic Toast (Phase 1 feedback) -->
+	{#if $mechanicToast}
+		<div class="mechanic-toast" class:nemesis={$mechanicToast.nemesis_struck} class:eris={$mechanicToast.eris_struck}>
+			{#if $mechanicToast.nemesis_struck}
+				<span class="toast-icon">&#x2620;</span>
+				<span>NEMESIS STRIKES</span>
+			{:else if $mechanicToast.eris_struck}
+				<span class="toast-icon">&#x2604;</span>
+				<span>ERIS INTERVENES</span>
+			{:else if !$mechanicToast.valid}
+				<span class="toast-icon">&#x2717;</span>
+				<span>{$mechanicToast.dominant} CHECK FAILED</span>
+			{:else}
+				<span class="toast-icon">&#x2719;</span>
+				<span>{$mechanicToast.dominant}</span>
+				{#each Object.entries($mechanicToast.vector_deltas) as [vec, delta]}
+					{#if delta !== 0}
+						<span class="toast-delta" class:positive={delta > 0} class:negative={delta < 0}>
+							{delta > 0 ? '+' : ''}{delta} {vec}
+						</span>
+					{/if}
+				{/each}
+			{/if}
+		</div>
+	{/if}
 {/if}
