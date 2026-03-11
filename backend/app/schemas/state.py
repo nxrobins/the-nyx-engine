@@ -74,9 +74,10 @@ class ThreadState(BaseModel):
     rag_context: list[str] = Field(default_factory=list)  # fallback context
     last_action: str = ""
     last_outcome: str = ""
-    # Chronicler: rolling prose buffer + compressed chronicle
-    prose_history: list[str] = Field(default_factory=list)   # last N raw prose turns
-    chronicle: list[str] = Field(default_factory=list)       # mythic sentence per 5-turn window
+    # Chronicler: rolling prose buffer + dual-track compressed chronicle
+    prose_history: list[str] = Field(default_factory=list)       # last N raw prose turns
+    chronicle: list[str] = Field(default_factory=list)           # mythic sentence per 5-turn window
+    factual_chronicle: list[str] = Field(default_factory=list)   # factual state snapshots per window
 
 
 # ---------------------------------------------------------------------------
@@ -140,8 +141,13 @@ class MomusValidation(BaseModel):
 
 
 class ChroniclerResponse(BaseModel):
-    """Chronicler compresses N turns into one mythic sentence."""
+    """Chronicler compresses N turns into dual-track output.
+
+    chronicle_sentence — mythic track: poetic one-sentence compression of internal change.
+    factual_digest — factual track: deterministic state snapshot for consistency.
+    """
     chronicle_sentence: str = ""
+    factual_digest: str = ""
 
 
 class HypnosResponse(BaseModel):

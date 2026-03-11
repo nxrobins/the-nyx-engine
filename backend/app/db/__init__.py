@@ -80,7 +80,8 @@ CREATE TABLE IF NOT EXISTS threads (
     epitaph     TEXT,
     final_turn  INT,
     is_dead     BOOLEAN NOT NULL DEFAULT FALSE,
-    chronicle   JSONB NOT NULL DEFAULT '[]'::jsonb
+    chronicle           JSONB NOT NULL DEFAULT '[]'::jsonb,
+    factual_chronicle   JSONB NOT NULL DEFAULT '[]'::jsonb
 );
 
 CREATE TABLE IF NOT EXISTS turns (
@@ -206,6 +207,23 @@ async def append_chronicle(thread_id: Optional[int], sentence: str) -> None:
             logger.info(f"Chronicle appended to thread {thread_id}")
     except Exception as e:
         logger.error(f"append_chronicle failed: {e}")
+
+
+async def append_factual_chronicle(thread_id: Optional[int], digest: str) -> None:
+    """Append a factual digest to the thread's factual_chronicle array. No-op without DB."""
+    if not _pool or thread_id is None or not digest:
+        return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                """UPDATE threads
+                   SET factual_chronicle = factual_chronicle || $1::jsonb
+                   WHERE thread_id = $2""",
+                json.dumps([digest]), thread_id,
+            )
+            logger.info(f"Factual chronicle appended to thread {thread_id}")
+    except Exception as e:
+        logger.error(f"append_factual_chronicle failed: {e}")
 
 
 async def get_dead_threads(player_id: str) -> list[dict]:

@@ -50,7 +50,8 @@ from app.schemas.state import (
 )
 from app.db import (
     ensure_player, create_thread, update_thread_death,
-    create_turn, append_chronicle, get_last_ancestor,
+    create_turn, append_chronicle, append_factual_chronicle,
+    get_last_ancestor,
 )
 from app.services import llm
 from app.services.bfl import generate_image
@@ -119,22 +120,30 @@ def _build_stratified_context(state: ThreadState) -> str:
 
     Architecture (token-budget ~2,000 tokens total):
         TOP    — The Theology:  Literary Laws (already baked into CLOTHO_SYSTEM_PROMPT)
-        MID    — The Chronicle: Mythic history sentences (long-term memory)
+        MID    — The Chronicle: Mythic + Factual dual-track (long-term memory)
         ACTIVE — The Short-Term: Last 2 turns of raw prose (immediate continuity)
         BOTTOM — The Mirror:    Style directive from dominant soul vector
 
     Returns an assembled string that the kernel prepends to Clotho's system prompt.
     The Literary Laws live in CLOTHO_SYSTEM_PROMPT itself, so this function
-    builds only the dynamic layers: Chronicle + Short-Term + Mirror.
+    builds only the dynamic layers: Chronicle + Factual + Short-Term + Mirror.
     """
     sections: list[str] = []
 
-    # ── MID: The Chronicle (long-term compressed memory) ──────────
+    # ── MID: The Chronicle (long-term mythic memory) ──────────────
     if state.chronicle:
         chronicle_block = "\n".join(f"  • {s}" for s in state.chronicle)
         sections.append(
             "═══ THE CHRONICLE (mythic history of this soul) ═══\n"
             f"{chronicle_block}"
+        )
+
+    # ── MID-2: Factual Record (state consistency memory) ──────────
+    if state.factual_chronicle:
+        factual_block = "\n".join(f"  • {s}" for s in state.factual_chronicle)
+        sections.append(
+            "═══ FACTUAL RECORD (state consistency — do not contradict) ═══\n"
+            f"{factual_block}"
         )
 
     # ── ACTIVE: Last 2 turns of raw prose (short-term memory) ─────
@@ -565,10 +574,17 @@ class NyxKernel:
             chronicle_result = await self.chronicler.evaluate(
                 outcome.state, ctx.action, prose_window=window,
             )
+            # Mythic track
             if chronicle_result.chronicle_sentence:
                 outcome.state.chronicle.append(chronicle_result.chronicle_sentence)
                 await append_chronicle(self._thread_id, chronicle_result.chronicle_sentence)
                 logger.info(f"Chronicle [{len(outcome.state.chronicle)}]: {chronicle_result.chronicle_sentence}")
+
+            # Factual track
+            if chronicle_result.factual_digest:
+                outcome.state.factual_chronicle.append(chronicle_result.factual_digest)
+                await append_factual_chronicle(self._thread_id, chronicle_result.factual_digest)
+                logger.info(f"Factual [{len(outcome.state.factual_chronicle)}]: {chronicle_result.factual_digest}")
 
             # Flush the prose history buffer
             _retain = settings.chronicle_prose_retention
