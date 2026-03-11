@@ -1,23 +1,25 @@
-"""The Nyx Kernel - Asynchronous Orchestrator v4.0 (Supremum Patch).
+"""The Nyx Kernel - Asynchronous Orchestrator v5.0 (The Unbroken Thread).
 
 The central nervous system of the engine. Receives player input,
 dispatches to agents in parallel, resolves conflicts, and produces
 the final turn result.
 
+v5.0 — Kernel Decomposition (P0-003):
+  The 10-step pipeline is split into three reusable methods:
+    _resolve_turn()  — Steps 1-8: pure game math (Lachesis → resolver)
+    _finalize_turn()  — Step 10+: post-prose bookkeeping (Momus → DB)
+    _handle_death()   — Terminal path: epitaph + DB + death result
+  process_turn() and process_turn_stream() are thin orchestration shells.
+
 v4.0 additions (The Supremum Patch):
 - Chronicler agent: recursive memory compression every 5 turns
 - Stratified Context Builder: [Chronicle] + [Short-Term] + [Soul Mirror]
 - Soul Mirror: style directives injected based on dominant vector ≥ 7.0
-- prose_history + chronicle fields on ThreadState for rolling context
-- DB chronicle column (JSONB) on threads table
-- Clotho Literary Laws: Iceberg, Kinetic, Sense Supremacy, Ancient Guardrail
 
 v3.0 additions:
 - Epoch State Machine (_compute_epoch) controls UI mode + Clotho paragraph count
 - PostgreSQL persistence (optional) for players, threads, turns
 - Death hook: awaited epitaph generation + DB persist
-- Birth hook: Ancestral Echo from last dead thread
-- Choices pass-through from Clotho → TurnResult
 """
 
 from __future__ import annotations
@@ -27,24 +29,29 @@ import copy
 import json
 import logging
 import uuid
+from dataclasses import dataclass, field
 from typing import AsyncGenerator
 
 from app.agents.atropos import Atropos
 from app.agents.chronicler import Chronicler
-from app.agents.clotho import Clotho
+from app.agents.clotho import Clotho, _parse_clotho_output
 from app.agents.eris import Eris
 from app.agents.hypnos import Hypnos
 from app.agents.lachesis import Lachesis
 from app.agents.momus import Momus
 from app.agents.nemesis import Nemesis
 from app.core.config import settings
-from app.core.resolver import ConflictResolver
+from app.core.resolver import ConflictResolver, ResolvedOutcome
 from app.schemas.state import (
+    LachesisResponse,
     Oath,
     ThreadState,
     TurnResult,
 )
-from app.db import ensure_player, create_thread, update_thread_death, create_turn, append_chronicle, get_last_ancestor
+from app.db import (
+    ensure_player, create_thread, update_thread_death,
+    create_turn, append_chronicle, get_last_ancestor,
+)
 from app.services import llm
 from app.services.bfl import generate_image
 from app.services.rag import NyxRAGStore
@@ -184,8 +191,34 @@ def _dominant_vector_english(deltas: dict[str, float]) -> str:
     return _VECTOR_ENGLISH.get(dominant, dominant)
 
 
-# Chronicler constants loaded from settings (chronicle_interval, chronicle_prose_retention)
+# ---------------------------------------------------------------------------
+# TurnContext — the shared contract between _resolve_turn and the pipelines
+# ---------------------------------------------------------------------------
 
+@dataclass
+class TurnContext:
+    """Everything the pipeline needs after game-math resolution.
+
+    Created by ``_resolve_turn()`` and consumed by both ``process_turn()``
+    (sync Clotho) and ``process_turn_stream()`` (streaming Clotho).
+    """
+    turn: int
+    phase: int
+    ui_mode: str
+    action: str
+    outcome: ResolvedOutcome
+    working_state: ThreadState
+    lachesis_result: LachesisResponse
+    stratified_context: str
+    nemesis_desc: str
+    eris_desc: str
+    terminal: bool = False
+    death_reason: str = ""
+
+
+# ---------------------------------------------------------------------------
+# The Nyx Kernel
+# ---------------------------------------------------------------------------
 
 class NyxKernel:
     """The heart of the engine. Orchestrates all agents per turn."""
@@ -317,11 +350,19 @@ class NyxKernel:
         )
 
     # ------------------------------------------------------------------
-    # Turn 1+: Full pipeline
+    # Shared Pipeline: _resolve_turn (Steps 1-8)
     # ------------------------------------------------------------------
 
-    async def process_turn(self, action: str) -> TurnResult:
-        """Execute one full turn through the v3.0 engine pipeline."""
+    async def _resolve_turn(self, action: str) -> TurnContext:
+        """Steps 1-8: Pure game math. Shared by sync and streaming pipelines.
+
+        Lachesis → delta application → hamartia fork → oath processing →
+        parallel agent dispatch → conflict resolution → vector penalties →
+        prophecy update → terminal check.
+
+        Returns a TurnContext with everything Clotho needs, or a terminal
+        context if the player has died.
+        """
         self.state.session.turn_count += 1
         turn = self.state.session.turn_count
         logger.info(f"Turn {turn}: '{action}'")
@@ -335,26 +376,32 @@ class NyxKernel:
         # Store last action for reference
         self.state.last_action = action
 
-        # ----------------------------------------------------------
         # Step 1: Lachesis evaluates state + action validity
-        # ----------------------------------------------------------
         lachesis_result = await self.lachesis.evaluate(self.state, action)
 
         if not lachesis_result.valid_action:
             logger.info(f"Lachesis BLOCKED: {lachesis_result.reason}")
             self.state.session.turn_count -= 1  # Don't count invalid turns
-            return TurnResult(
-                prose=f"*{lachesis_result.reason}*\n\nThe world does not bend to impossible demands.",
-                state=self.state,
-                turn_number=turn,
+            # Return a "rejected" context — callers handle the rejection
+            return TurnContext(
+                turn=turn,
+                phase=phase,
+                ui_mode=ui_mode,
+                action=action,
+                outcome=ResolvedOutcome(
+                    state=self.state,
+                    action_valid=False,
+                    invalid_reason=lachesis_result.reason,
+                ),
+                working_state=self.state,
+                lachesis_result=lachesis_result,
+                stratified_context="",
+                nemesis_desc="",
+                eris_desc="",
             )
 
-        # Update working state from Lachesis
-        working_state = lachesis_result.updated_state or copy.deepcopy(self.state)
-
-        # ----------------------------------------------------------
         # Step 2: Apply vector deltas from Lachesis
-        # ----------------------------------------------------------
+        working_state = lachesis_result.updated_state or copy.deepcopy(self.state)
         if lachesis_result.vector_deltas:
             working_state.soul_ledger.vectors = SoulVectorEngine.apply_deltas(
                 working_state.soul_ledger.vectors,
@@ -362,29 +409,22 @@ class NyxKernel:
             )
             logger.info(f"Vectors after deltas: {SoulVectorEngine.vector_summary(working_state.soul_ledger.vectors)}")
 
-        # ----------------------------------------------------------
         # Step 2b: Hamartia fork (Turn 10 overwrite)
-        # ----------------------------------------------------------
         if lachesis_result.assigned_hamartia:
             working_state.soul_ledger.hamartia = lachesis_result.assigned_hamartia
             logger.info(f"HAMARTIA FORKED: 'Unformed' → '{lachesis_result.assigned_hamartia}'")
 
-        # ----------------------------------------------------------
         # Step 3: Process oaths (detect new, check violations)
-        # ----------------------------------------------------------
         oath_broken_id: str | None = None
 
-        # 3a: Oath violation detected by Lachesis
         if lachesis_result.oath_violation:
             oath_broken_id = lachesis_result.oath_violation
-            # Mark the oath as broken
             for oath in working_state.soul_ledger.active_oaths:
                 if oath.oath_id == oath_broken_id:
                     oath.broken = True
                     logger.info(f"Oath BROKEN: {oath.text}")
                     break
 
-        # 3b: New oath detected by Lachesis
         if lachesis_result.oath_detected:
             new_oath = Oath(
                 oath_id=f"oath_{uuid.uuid4().hex[:8]}",
@@ -394,13 +434,10 @@ class NyxKernel:
             working_state.soul_ledger.active_oaths.append(new_oath)
             logger.info(f"New oath sworn: '{new_oath.text}'")
 
-        # 3c: Update environment if Lachesis provided one
         if lachesis_result.environment_update:
             working_state.session.current_environment = lachesis_result.environment_update
 
-        # ----------------------------------------------------------
         # Step 4: Parallel agent evaluation
-        # ----------------------------------------------------------
         atropos_result, nemesis_result, eris_result = await asyncio.gather(
             self.atropos.evaluate(
                 working_state, action,
@@ -419,9 +456,7 @@ class NyxKernel:
             f"eris={eris_result.chaos_triggered}"
         )
 
-        # ----------------------------------------------------------
         # Step 5: Conflict Resolution
-        # ----------------------------------------------------------
         outcome = self.resolver.resolve(
             state=working_state,
             lachesis=lachesis_result,
@@ -430,9 +465,7 @@ class NyxKernel:
             eris=eris_result,
         )
 
-        # ----------------------------------------------------------
         # Step 6: Apply Eris vector_chaos if triggered
-        # ----------------------------------------------------------
         if outcome.eris_struck and outcome.vector_chaos:
             outcome.state.soul_ledger.vectors = SoulVectorEngine.apply_deltas(
                 outcome.state.soul_ledger.vectors,
@@ -440,9 +473,7 @@ class NyxKernel:
             )
             logger.info(f"Eris chaos applied: {outcome.vector_chaos}")
 
-        # ----------------------------------------------------------
         # Step 7: Apply Nemesis vector_penalty if triggered
-        # ----------------------------------------------------------
         if outcome.nemesis_struck and outcome.vector_penalty:
             outcome.state.soul_ledger.vectors = SoulVectorEngine.apply_deltas(
                 outcome.state.soul_ledger.vectors,
@@ -450,31 +481,11 @@ class NyxKernel:
             )
             logger.info(f"Nemesis penalty applied: {outcome.vector_penalty}")
 
-        # ----------------------------------------------------------
         # Step 8: Store prophecy if updated
-        # ----------------------------------------------------------
         if outcome.prophecy_updated:
             outcome.state.the_loom.current_prophecy = outcome.prophecy_updated
             logger.info(f"Prophecy updated: '{outcome.prophecy_updated}'")
 
-        # ----------------------------------------------------------
-        # Step 6b / 8b: Terminal state — skip prose, return death
-        # ----------------------------------------------------------
-        if outcome.terminal:
-            self.state = outcome.state
-            # Death hook: generate epitaph + persist (AWAITED, not fire-and-forget)
-            await self._generate_epitaph(outcome.state, turn)
-            return TurnResult(
-                prose=f"**THREAD SEVERED**\n\n{outcome.death_reason}",
-                state=outcome.state,
-                terminal=True,
-                death_reason=outcome.death_reason,
-                turn_number=turn,
-            )
-
-        # ----------------------------------------------------------
-        # Step 9: Clotho generates prose from resolved state
-        # ----------------------------------------------------------
         # Set last_outcome for Clotho's context
         if outcome.nemesis_struck:
             outcome.state.last_outcome = "nemesis"
@@ -484,30 +495,49 @@ class NyxKernel:
         # Build stratified context (Chronicle + Short-Term + Soul Mirror)
         stratified = _build_stratified_context(outcome.state)
 
-        clotho_result = await self.clotho.evaluate(
-            outcome.state, action,
+        # Terminal check
+        terminal = outcome.terminal
+        death_reason = outcome.death_reason if terminal else ""
+
+        return TurnContext(
+            turn=turn,
+            phase=phase,
+            ui_mode=ui_mode,
+            action=action,
+            outcome=outcome,
+            working_state=working_state,
+            lachesis_result=lachesis_result,
+            stratified_context=stratified,
             nemesis_desc=outcome.nemesis_description,
             eris_desc=outcome.eris_description,
-            epoch_phase=phase,
-            stratified_context=stratified,
+            terminal=terminal,
+            death_reason=death_reason,
         )
 
-        # Append Nemesis/Eris flavor to prose
-        prose = clotho_result.prose
-        if outcome.nemesis_struck and outcome.nemesis_description:
-            prose += f"\n\n---\n\n*{outcome.nemesis_description}*"
-        if outcome.eris_struck and outcome.eris_description:
-            prose += f"\n\n---\n\n*{outcome.eris_description}*"
+    # ------------------------------------------------------------------
+    # Shared Pipeline: _finalize_turn (Step 10+)
+    # ------------------------------------------------------------------
 
-        # ----------------------------------------------------------
-        # Step 10: Momus validates → commit → milestone check
-        # ----------------------------------------------------------
+    async def _finalize_turn(
+        self,
+        ctx: TurnContext,
+        prose: str,
+        choices: list[str],
+    ) -> TurnResult:
+        """Step 10+: Post-prose bookkeeping. Shared by sync and streaming.
+
+        Momus validation → milestone check → prose history append →
+        Chronicler compression → RAG indexing → state commit → DB persist.
+        """
+        outcome = ctx.outcome
+
+        # Momus validation
         validation = await self.momus.validate_prose(prose, outcome.state)
         if not validation.valid:
             logger.warning(f"Momus flagged: {validation.hallucinations}")
             prose = validation.corrected_prose or prose
 
-        # Check for milestone (any vector == 10)
+        # Milestone check (any vector == 10)
         is_milestone, milestone_vec = SoulVectorEngine.is_milestone(
             outcome.state.soul_ledger.vectors
         )
@@ -519,31 +549,26 @@ class NyxKernel:
                 f"Environment: {outcome.state.session.current_environment}"
             )
             logger.info(f"MILESTONE: {milestone_vec} reached 10!")
-            # BFL image generation is fire-and-forget; handled in SSE route
         else:
             outcome.state.the_loom.milestone_reached = False
             outcome.state.the_loom.image_prompt_trigger = ""
 
-        # ----------------------------------------------------------
-        # Step 10b: Track prose history + Chronicler compression
-        # ----------------------------------------------------------
+        # Prose history + Chronicler compression
         outcome.state.prose_history.append(prose)
 
-        # Chronicler fires every settings.chronicle_interval turns
-        if turn % settings.chronicle_interval == 0 and len(outcome.state.prose_history) >= settings.chronicle_interval:
+        if (ctx.turn % settings.chronicle_interval == 0
+                and len(outcome.state.prose_history) >= settings.chronicle_interval):
             window = outcome.state.prose_history[-settings.chronicle_interval:]
-            logger.info(f"Chronicler triggered at turn {turn} — compressing {len(window)} turns")
+            logger.info(f"Chronicler triggered at turn {ctx.turn} — compressing {len(window)} turns")
             chronicle_result = await self.chronicler.evaluate(
-                outcome.state, action, prose_window=window,
+                outcome.state, ctx.action, prose_window=window,
             )
             if chronicle_result.chronicle_sentence:
                 outcome.state.chronicle.append(chronicle_result.chronicle_sentence)
-                # Persist to DB
                 await append_chronicle(self._thread_id, chronicle_result.chronicle_sentence)
                 logger.info(f"Chronicle [{len(outcome.state.chronicle)}]: {chronicle_result.chronicle_sentence}")
 
-            # Flush the prose history buffer — the chronicle now carries the memory
-            # Keep only the last N turns for immediate continuity
+            # Flush the prose history buffer
             _retain = settings.chronicle_prose_retention
             outcome.state.prose_history = outcome.state.prose_history[-_retain:]
 
@@ -552,11 +577,11 @@ class NyxKernel:
         if len(outcome.state.prose_history) > _cap:
             outcome.state.prose_history = outcome.state.prose_history[-_cap:]
 
-        # Add turn to RAG store
+        # RAG indexing
         try:
             await self.rag.add_turn(
-                turn_number=turn,
-                action=action,
+                turn_number=ctx.turn,
+                action=ctx.action,
                 outcome=outcome.state.last_outcome or "neutral",
                 prose_summary=prose[:200],
                 environment=outcome.state.session.current_environment,
@@ -564,25 +589,24 @@ class NyxKernel:
         except Exception as e:
             logger.warning(f"RAG indexing failed: {e}")
 
-        # Update RAG context on state (last 5 semantic results)
         try:
-            outcome.state.rag_context = await self.rag.query(action, n_results=5)
+            outcome.state.rag_context = await self.rag.query(ctx.action, n_results=5)
         except Exception as e:
             logger.warning(f"RAG query failed: {e}")
 
         # Commit state
         self.state = outcome.state
         logger.info(
-            f"Turn {turn} complete. "
+            f"Turn {ctx.turn} complete. "
             f"Vectors: {SoulVectorEngine.vector_summary(self.state.soul_ledger.vectors)}, "
             f"Imbalance: {SoulVectorEngine.imbalance_score(self.state.soul_ledger.vectors):.1f}"
         )
 
-        # Persist turn to DB
+        # DB persist
         await create_turn(
             thread_id=self._thread_id,
-            turn_number=turn,
-            action=action,
+            turn_number=ctx.turn,
+            action=ctx.action,
             outcome=outcome.state.last_outcome or "neutral",
             prose_summary=prose[:200],
             soul_vectors=outcome.state.soul_ledger.vectors.model_dump(),
@@ -594,50 +618,110 @@ class NyxKernel:
             terminal=False,
             nemesis_struck=outcome.nemesis_struck,
             eris_struck=outcome.eris_struck,
-            turn_number=turn,
+            turn_number=ctx.turn,
             image_url=image_url,
-            ui_choices=clotho_result.ui_choices,
+            ui_choices=choices,
         )
 
     # ------------------------------------------------------------------
-    # Streaming Turn Pipeline (Sprint 6)
+    # Shared Pipeline: _handle_death (terminal path)
+    # ------------------------------------------------------------------
+
+    async def _handle_death(self, ctx: TurnContext) -> TurnResult:
+        """Terminal path: epitaph generation + DB persist + death result."""
+        self.state = ctx.outcome.state
+        await self._generate_epitaph(ctx.outcome.state, ctx.turn)
+
+        # DB persist
+        await create_turn(
+            thread_id=self._thread_id,
+            turn_number=ctx.turn,
+            action=ctx.action,
+            outcome="terminal",
+            prose_summary=ctx.death_reason[:200],
+            soul_vectors=ctx.outcome.state.soul_ledger.vectors.model_dump(),
+        )
+
+        return TurnResult(
+            prose=f"**THREAD SEVERED**\n\n{ctx.death_reason}",
+            state=ctx.outcome.state,
+            terminal=True,
+            death_reason=ctx.death_reason,
+            turn_number=ctx.turn,
+        )
+
+    # ------------------------------------------------------------------
+    # Shared: Intervention prose appending
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _append_interventions(prose: str, ctx: TurnContext) -> str:
+        """Append Nemesis/Eris flavor text to Clotho's prose."""
+        if ctx.outcome.nemesis_struck and ctx.nemesis_desc:
+            prose += f"\n\n---\n\n*{ctx.nemesis_desc}*"
+        if ctx.outcome.eris_struck and ctx.eris_desc:
+            prose += f"\n\n---\n\n*{ctx.eris_desc}*"
+        return prose
+
+    # ------------------------------------------------------------------
+    # Turn 1+: Sync pipeline (thin orchestration shell)
+    # ------------------------------------------------------------------
+
+    async def process_turn(self, action: str) -> TurnResult:
+        """Execute one full turn through the engine pipeline (sync Clotho)."""
+        ctx = await self._resolve_turn(action)
+
+        # Rejected by Lachesis
+        if not ctx.outcome.action_valid:
+            return TurnResult(
+                prose=f"*{ctx.outcome.invalid_reason}*\n\nThe world does not bend to impossible demands.",
+                state=self.state,
+                turn_number=ctx.turn,
+            )
+
+        # Death
+        if ctx.terminal:
+            return await self._handle_death(ctx)
+
+        # Clotho generates prose
+        clotho_result = await self.clotho.evaluate(
+            ctx.outcome.state, action,
+            nemesis_desc=ctx.nemesis_desc,
+            eris_desc=ctx.eris_desc,
+            epoch_phase=ctx.phase,
+            stratified_context=ctx.stratified_context,
+        )
+        prose, choices = _parse_clotho_output(clotho_result.prose, ctx.phase)
+        prose = self._append_interventions(prose, ctx)
+
+        return await self._finalize_turn(ctx, prose, choices)
+
+    # ------------------------------------------------------------------
+    # Turn 1+: Streaming pipeline (thin orchestration shell)
     # ------------------------------------------------------------------
 
     async def process_turn_stream(self, action: str) -> AsyncGenerator[str, None]:
         """Execute one turn as an SSE async generator.
 
-        Yields three phases as `data: {...}\n\n` lines:
+        Yields three phases as ``data: {...}\\n\\n`` lines:
           Phase 1 (mechanic) — Lachesis math + conflict resolution, immediate
           Phase 2 (prose)    — Clotho tokens, streamed for typewriter effect
           Phase 3 (state)    — Final state, choices, cleanup
 
         DB persistence is guaranteed in the finally block.
         """
-        self.state.session.turn_count += 1
-        turn = self.state.session.turn_count
-        logger.info(f"[stream] Turn {turn}: '{action}'")
-
-        # Epoch state machine
-        phase, ui_mode = _compute_epoch(turn)
-        self.state.session.epoch_phase = phase
-        self.state.session.ui_mode = ui_mode
-        self.state.last_action = action
-
         db_saved = False
         full_prose_buffer = ""
+        ctx: TurnContext | None = None
 
         try:
-            # ==============================================================
-            # PHASE 1: THE MATH (Lachesis + Conflict Resolution)
-            # ==============================================================
-            lachesis_result = await self.lachesis.evaluate(self.state, action)
+            ctx = await self._resolve_turn(action)
 
-            if not lachesis_result.valid_action:
-                logger.info(f"[stream] Lachesis BLOCKED: {lachesis_result.reason}")
-                self.state.session.turn_count -= 1
+            # Invalid action — emit rejection
+            if not ctx.outcome.action_valid:
                 yield "data: " + json.dumps({
                     "type": "prose",
-                    "text": f"*{lachesis_result.reason}*\nThe world does not bend to impossible demands.",
+                    "text": f"*{ctx.outcome.invalid_reason}*\nThe world does not bend to impossible demands.",
                 }) + "\n\n"
                 yield "data: " + json.dumps({
                     "type": "state",
@@ -648,288 +732,109 @@ class NyxKernel:
                 }) + "\n\n"
                 return
 
-            # Apply vector deltas from Lachesis
-            working_state = lachesis_result.updated_state or copy.deepcopy(self.state)
-            if lachesis_result.vector_deltas:
-                working_state.soul_ledger.vectors = SoulVectorEngine.apply_deltas(
-                    working_state.soul_ledger.vectors,
-                    lachesis_result.vector_deltas,
-                )
-
-            # Hamartia fork (Turn 10 overwrite)
-            if lachesis_result.assigned_hamartia:
-                working_state.soul_ledger.hamartia = lachesis_result.assigned_hamartia
-                logger.info(f"[stream] HAMARTIA FORKED: 'Unformed' → '{lachesis_result.assigned_hamartia}'")
-
-            # Process oaths
-            oath_broken_id: str | None = None
-            if lachesis_result.oath_violation:
-                oath_broken_id = lachesis_result.oath_violation
-                for oath in working_state.soul_ledger.active_oaths:
-                    if oath.oath_id == oath_broken_id:
-                        oath.broken = True
-                        break
-
-            if lachesis_result.oath_detected:
-                new_oath = Oath(
-                    oath_id=f"oath_{uuid.uuid4().hex[:8]}",
-                    text=lachesis_result.oath_detected,
-                    turn_sworn=turn,
-                )
-                working_state.soul_ledger.active_oaths.append(new_oath)
-
-            if lachesis_result.environment_update:
-                working_state.session.current_environment = lachesis_result.environment_update
-
-            # Parallel agent evaluation
-            atropos_result, nemesis_result, eris_result = await asyncio.gather(
-                self.atropos.evaluate(
-                    working_state, action,
-                    nemesis_lethal=(oath_broken_id is not None),
-                ),
-                self.nemesis.evaluate(
-                    working_state, action,
-                    oath_broken=oath_broken_id,
-                ),
-                self.eris.evaluate(working_state, action),
-            )
-
-            # Conflict resolution
-            outcome = self.resolver.resolve(
-                state=working_state,
-                lachesis=lachesis_result,
-                atropos=atropos_result,
-                nemesis=nemesis_result,
-                eris=eris_result,
-            )
-
-            # Apply vector chaos/penalty
-            if outcome.eris_struck and outcome.vector_chaos:
-                outcome.state.soul_ledger.vectors = SoulVectorEngine.apply_deltas(
-                    outcome.state.soul_ledger.vectors,
-                    outcome.vector_chaos,
-                )
-            if outcome.nemesis_struck and outcome.vector_penalty:
-                outcome.state.soul_ledger.vectors = SoulVectorEngine.apply_deltas(
-                    outcome.state.soul_ledger.vectors,
-                    outcome.vector_penalty,
-                )
-            if outcome.prophecy_updated:
-                outcome.state.the_loom.current_prophecy = outcome.prophecy_updated
-
             # Emit the mechanic event
-            mechanic_payload: dict = {
-                "vector_deltas": _english_deltas(lachesis_result.vector_deltas),
-                "dominant": _dominant_vector_english(lachesis_result.vector_deltas),
-                "outcome": outcome.state.last_outcome or "neutral",
-                "nemesis_struck": outcome.nemesis_struck,
-                "eris_struck": outcome.eris_struck,
-                "valid": True,
-            }
             yield "data: " + json.dumps({
                 "type": "mechanic",
-                "payload": mechanic_payload,
+                "payload": {
+                    "vector_deltas": _english_deltas(ctx.lachesis_result.vector_deltas),
+                    "dominant": _dominant_vector_english(ctx.lachesis_result.vector_deltas),
+                    "outcome": ctx.outcome.state.last_outcome or "neutral",
+                    "nemesis_struck": ctx.outcome.nemesis_struck,
+                    "eris_struck": ctx.outcome.eris_struck,
+                    "valid": True,
+                },
             }) + "\n\n"
 
-            # Terminal check — skip prose, emit death
-            if outcome.terminal:
-                self.state = outcome.state
-                await self._generate_epitaph(outcome.state, turn)
+            # Terminal — emit death
+            if ctx.terminal:
+                await self._handle_death(ctx)
                 yield "data: " + json.dumps({
                     "type": "prose",
-                    "text": f"**THREAD SEVERED**\n\n{outcome.death_reason}",
+                    "text": f"**THREAD SEVERED**\n\n{ctx.death_reason}",
                 }) + "\n\n"
                 yield "data: " + json.dumps({
                     "type": "state",
-                    "payload": outcome.state.model_dump(),
+                    "payload": ctx.outcome.state.model_dump(),
                     "ui_choices": [],
                     "terminal": True,
-                    "death_reason": outcome.death_reason,
+                    "death_reason": ctx.death_reason,
                 }) + "\n\n"
-                # DB persist
-                await create_turn(
-                    thread_id=self._thread_id,
-                    turn_number=turn,
-                    action=action,
-                    outcome="terminal",
-                    prose_summary=outcome.death_reason[:200],
-                    soul_vectors=outcome.state.soul_ledger.vectors.model_dump(),
-                )
-                db_saved = True
+                db_saved = True  # _handle_death persists to DB
                 return
 
-            # ==============================================================
-            # PHASE 2: THE PROSE (Clotho streaming)
-            # ==============================================================
-            if outcome.nemesis_struck:
-                outcome.state.last_outcome = "nemesis"
-            elif outcome.eris_struck:
-                outcome.state.last_outcome = "eris"
-
-            stratified = _build_stratified_context(outcome.state)
-
-            # Stream Clotho tokens — but buffer for ---CHOICES--- handling
+            # ── PHASE 2: THE PROSE (Clotho streaming) ────────────
             separator = "---CHOICES---"
             separator_buffer = ""
             separator_found = False
 
             async for token in self.clotho.astream(
-                outcome.state, action,
-                nemesis_desc=outcome.nemesis_description,
-                eris_desc=outcome.eris_description,
-                epoch_phase=phase,
-                stratified_context=stratified,
+                ctx.outcome.state, action,
+                nemesis_desc=ctx.nemesis_desc,
+                eris_desc=ctx.eris_desc,
+                epoch_phase=ctx.phase,
+                stratified_context=ctx.stratified_context,
             ):
                 full_prose_buffer += token
 
-                # Look-ahead buffer: hold back tokens near the separator
                 if not separator_found:
                     separator_buffer += token
 
-                    # Check if buffer contains the separator
                     if separator in separator_buffer:
                         separator_found = True
-                        # Emit everything before the separator
                         pre_sep = separator_buffer.split(separator, 1)[0]
                         if pre_sep:
                             yield "data: " + json.dumps({
-                                "type": "prose",
-                                "text": pre_sep,
+                                "type": "prose", "text": pre_sep,
                             }) + "\n\n"
-                        # Don't emit the separator or anything after it
                     elif len(separator_buffer) > len(separator) + 20:
-                        # Safe to flush: no separator possible in the flushed portion
                         safe = separator_buffer[:-(len(separator) + 10)]
                         separator_buffer = separator_buffer[-(len(separator) + 10):]
                         yield "data: " + json.dumps({
-                            "type": "prose",
-                            "text": safe,
+                            "type": "prose", "text": safe,
                         }) + "\n\n"
 
             # Flush remaining buffer if no separator was found
             if not separator_found and separator_buffer:
                 yield "data: " + json.dumps({
-                    "type": "prose",
-                    "text": separator_buffer,
+                    "type": "prose", "text": separator_buffer,
                 }) + "\n\n"
 
-            # Parse the full buffer for choices
-            from app.agents.clotho import _parse_clotho_output
-            prose, choices = _parse_clotho_output(full_prose_buffer, phase)
+            # Parse the full buffer for choices + interventions
+            prose, choices = _parse_clotho_output(full_prose_buffer, ctx.phase)
+            prose = self._append_interventions(prose, ctx)
 
-            # Append Nemesis/Eris flavor to prose
-            if outcome.nemesis_struck and outcome.nemesis_description:
-                prose += f"\n\n---\n\n*{outcome.nemesis_description}*"
-            if outcome.eris_struck and outcome.eris_description:
-                prose += f"\n\n---\n\n*{outcome.eris_description}*"
+            # ── PHASE 3: STATE RESOLUTION ────────────────────────
+            result = await self._finalize_turn(ctx, prose, choices)
+            db_saved = True
 
-            # ==============================================================
-            # PHASE 3: STATE RESOLUTION
-            # ==============================================================
-
-            # Momus validation
-            validation = await self.momus.validate_prose(prose, outcome.state)
-            if not validation.valid:
-                logger.warning(f"Momus flagged: {validation.hallucinations}")
-                prose = validation.corrected_prose or prose
-
-            # Milestone check
-            is_milestone, milestone_vec = SoulVectorEngine.is_milestone(
-                outcome.state.soul_ledger.vectors
-            )
-            if is_milestone:
-                outcome.state.the_loom.milestone_reached = True
-                outcome.state.the_loom.image_prompt_trigger = (
-                    f"A mortal's {milestone_vec} reaches its zenith. "
-                    f"Environment: {outcome.state.session.current_environment}"
-                )
-            else:
-                outcome.state.the_loom.milestone_reached = False
-                outcome.state.the_loom.image_prompt_trigger = ""
-
-            # Prose history + Chronicler
-            outcome.state.prose_history.append(prose)
-
-            if turn % settings.chronicle_interval == 0 and len(outcome.state.prose_history) >= settings.chronicle_interval:
-                window = outcome.state.prose_history[-settings.chronicle_interval:]
-                chronicle_result = await self.chronicler.evaluate(
-                    outcome.state, action, prose_window=window,
-                )
-                if chronicle_result.chronicle_sentence:
-                    outcome.state.chronicle.append(chronicle_result.chronicle_sentence)
-                    await append_chronicle(self._thread_id, chronicle_result.chronicle_sentence)
-                _retain = settings.chronicle_prose_retention
-                outcome.state.prose_history = outcome.state.prose_history[-_retain:]
-
-            _cap = settings.chronicle_interval + settings.chronicle_prose_retention
-            if len(outcome.state.prose_history) > _cap:
-                outcome.state.prose_history = outcome.state.prose_history[-_cap:]
-
-            # RAG indexing
-            try:
-                await self.rag.add_turn(
-                    turn_number=turn,
-                    action=action,
-                    outcome=outcome.state.last_outcome or "neutral",
-                    prose_summary=prose[:200],
-                    environment=outcome.state.session.current_environment,
-                )
-            except Exception as e:
-                logger.warning(f"RAG indexing failed: {e}")
-
-            try:
-                outcome.state.rag_context = await self.rag.query(action, n_results=5)
-            except Exception as e:
-                logger.warning(f"RAG query failed: {e}")
-
-            # Commit state
-            self.state = outcome.state
-
-            # Emit final state
             yield "data: " + json.dumps({
                 "type": "state",
-                "payload": outcome.state.model_dump(),
+                "payload": result.state.model_dump(),
                 "ui_choices": choices,
                 "terminal": False,
                 "death_reason": "",
-                "nemesis_struck": outcome.nemesis_struck,
-                "eris_struck": outcome.eris_struck,
-                "turn_number": turn,
+                "nemesis_struck": result.nemesis_struck,
+                "eris_struck": result.eris_struck,
+                "turn_number": result.turn_number,
             }) + "\n\n"
 
-            # DB persist
-            await create_turn(
-                thread_id=self._thread_id,
-                turn_number=turn,
-                action=action,
-                outcome=outcome.state.last_outcome or "neutral",
-                prose_summary=prose[:200],
-                soul_vectors=outcome.state.soul_ledger.vectors.model_dump(),
-            )
-            db_saved = True
-
-            logger.info(
-                f"[stream] Turn {turn} complete. "
-                f"Vectors: {SoulVectorEngine.vector_summary(self.state.soul_ledger.vectors)}"
-            )
-
         except asyncio.CancelledError:
-            logger.warning(f"[stream] Turn {turn} cancelled by client disconnect.")
+            logger.warning(f"[stream] Turn cancelled by client disconnect.")
             raise
 
         finally:
             # Guarantee DB persistence even on disconnect
-            if not db_saved and self._thread_id:
+            if not db_saved and self._thread_id and ctx is not None:
                 try:
                     await create_turn(
                         thread_id=self._thread_id,
-                        turn_number=turn,
+                        turn_number=ctx.turn,
                         action=action,
                         outcome=self.state.last_outcome or "partial",
                         prose_summary=full_prose_buffer[:200] if full_prose_buffer else "disconnected",
                         soul_vectors=self.state.soul_ledger.vectors.model_dump(),
                     )
-                    logger.info(f"[stream] Emergency DB persist for turn {turn}")
+                    logger.info(f"[stream] Emergency DB persist for turn {ctx.turn}")
                 except Exception as e:
                     logger.error(f"[stream] Emergency DB persist failed: {e}")
 
