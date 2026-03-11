@@ -20,16 +20,7 @@
 		rightOpen = false;
 	}
 
-	/** Map epoch phase → diegetic age */
-	function calculateAge(phase: number): string {
-		switch (phase) {
-			case 1: return '3';
-			case 2: return '7';
-			case 3: return '13';
-			case 4: return '18';
-			default: return '?';
-		}
-	}
+	/** Beat position indicator for dev overlay (optional future use) */
 </script>
 
 {#if $vestibuleState === 'title'}
@@ -45,7 +36,7 @@
 			<span class="thread-hud-text">
 				{$gameState.session.player_name}
 				<span class="thread-hud-separator">✦</span>
-				AGE {calculateAge($gameState.session.epoch_phase)}
+				AGE {$gameState.session.player_age}
 				<span class="thread-hud-separator">✦</span>
 				{$gameState.session.hamartia}
 			</span>
