@@ -48,6 +48,7 @@ export interface ThreadState {
 }
 
 export interface TurnResult {
+	session_id: string;
 	prose: string;
 	state: ThreadState;
 	terminal: boolean;

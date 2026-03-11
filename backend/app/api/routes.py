@@ -1,10 +1,13 @@
-"""API routes for the Nyx Engine v2.0.
+"""API routes for the Nyx Engine v3.0.
 
 POST /init    - Initialize session with hamartia choice (Turn 0)
 POST /action  - Submit a player action, get full turn result
-GET  /stream  - SSE stream: Hypnos filler + final Clotho prose + BFL image
+POST /turn    - SSE stream: 3-Phase pipeline (mechanic → prose → state)
+GET  /stream  - SSE with Hypnos mask + BFL heartbeat (legacy)
 GET  /state   - Current thread state (debug)
 POST /reset   - Reset the game session
+
+v3.0: Session isolation via SessionManager (keyed by UUID).
 """
 
 from __future__ import annotations
@@ -12,8 +15,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
+import uuid
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sse_starlette.sse import EventSourceResponse
 
@@ -27,12 +32,76 @@ logger = logging.getLogger("nyx.api")
 
 router = APIRouter()
 
-# In-memory kernel instance (future: session-based instances)
-_kernel = NyxKernel()
+
+# ---------------------------------------------------------------------------
+# Session Manager — isolates concurrent players
+# ---------------------------------------------------------------------------
+
+_SESSION_TTL = 3600  # 1 hour — evict idle sessions
 
 
-def _get_kernel() -> NyxKernel:
-    return _kernel
+class _SessionEntry:
+    __slots__ = ("kernel", "last_active")
+
+    def __init__(self, kernel: NyxKernel) -> None:
+        self.kernel = kernel
+        self.last_active = time.monotonic()
+
+    def touch(self) -> None:
+        self.last_active = time.monotonic()
+
+
+_sessions: dict[str, _SessionEntry] = {}
+
+
+def _get_or_create_session(session_id: str | None = None) -> tuple[str, NyxKernel]:
+    """Return (session_id, kernel). Creates a new session if id is missing/expired."""
+    _evict_stale()
+
+    if session_id and session_id in _sessions:
+        entry = _sessions[session_id]
+        entry.touch()
+        return session_id, entry.kernel
+
+    # New session
+    sid = uuid.uuid4().hex
+    entry = _SessionEntry(NyxKernel())
+    _sessions[sid] = entry
+    logger.info(f"Session created: {sid} (active={len(_sessions)})")
+    return sid, entry.kernel
+
+
+def _require_session(session_id: str) -> NyxKernel:
+    """Lookup an existing session or 404."""
+    _evict_stale()
+
+    entry = _sessions.get(session_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Session not found or expired.")
+    entry.touch()
+    return entry.kernel
+
+
+def _destroy_session(session_id: str) -> None:
+    """Destroy a session and free its kernel."""
+    entry = _sessions.pop(session_id, None)
+    if entry:
+        entry.kernel.reset()
+        logger.info(f"Session destroyed: {session_id} (remaining={len(_sessions)})")
+
+
+def _evict_stale() -> None:
+    """Remove sessions idle longer than _SESSION_TTL."""
+    now = time.monotonic()
+    stale = [sid for sid, e in _sessions.items() if now - e.last_active > _SESSION_TTL]
+    for sid in stale:
+        entry = _sessions.pop(sid, None)
+        if entry:
+            try:
+                entry.kernel.reset()
+            except Exception:
+                pass
+            logger.info(f"Session evicted (idle): {sid}")
 
 
 # ------------------------------------------------------------------
@@ -43,11 +112,10 @@ def _get_kernel() -> NyxKernel:
 async def init_session(req: InitRequest) -> TurnResult:
     """Initialize a new game session with a chosen hamartia.
 
-    Returns the Turn 0 result with the initial prophecy.
+    Always creates a fresh session. Returns the session_id
+    that the client must send back on every subsequent request.
     """
-    global _kernel
-    _kernel = NyxKernel()
-    kernel = _get_kernel()
+    sid, kernel = _get_or_create_session()
     result = await kernel.initialize(
         hamartia=req.hamartia,
         player_id=req.player_id,
@@ -55,6 +123,7 @@ async def init_session(req: InitRequest) -> TurnResult:
         gender=req.gender,
         first_memory=req.first_memory,
     )
+    result.session_id = sid
     return result
 
 
@@ -65,9 +134,10 @@ async def init_session(req: InitRequest) -> TurnResult:
 @router.post("/action", response_model=TurnResult)
 async def submit_action(action: PlayerAction) -> TurnResult:
     """Synchronous turn processing. Returns the full result after all
-    agents resolve. Use /stream for the Hypnos-masked experience."""
-    kernel = _get_kernel()
+    agents resolve. Use /turn for the streaming experience."""
+    kernel = _require_session(action.session_id)
     result = await kernel.process_turn(action.action)
+    result.session_id = action.session_id
     return result
 
 
@@ -85,7 +155,7 @@ async def stream_turn_post(action: PlayerAction, request: Request):
 
     BFL image generation runs post-stream if a milestone is triggered.
     """
-    kernel = _get_kernel()
+    kernel = _require_session(action.session_id)
 
     async def event_generator():
         # Stream the 3-phase kernel pipeline
@@ -132,18 +202,12 @@ async def stream_turn_post(action: PlayerAction, request: Request):
 # ------------------------------------------------------------------
 
 @router.get("/stream")
-async def stream_turn(action: str, request: Request):
-    """SSE endpoint implementing the Hypnos Mask protocol.
+async def stream_turn(action: str, session_id: str, request: Request):
+    """SSE endpoint implementing the Hypnos Mask protocol (legacy).
 
-    1. Immediately streams Hypnos filler fragments (type: 'hypnos')
-    2. Concurrently processes the real turn through the Kernel
-    3. Sends the final result (type: 'result') which overwrites the filler
-    4. If milestone triggered, holds connection open with heartbeats
-       while BFL generates the image
-    5. Sends 'image' event with URL when BFL completes
-    6. Sends 'done' event to signal completion
+    Requires session_id as a query param.
     """
-    kernel = _get_kernel()
+    kernel = _require_session(session_id)
 
     async def event_generator():
         # Launch the heavy backend processing
@@ -168,15 +232,7 @@ async def stream_turn(action: str, request: Request):
             "data": result.model_dump_json(),
         }
 
-        # ----------------------------------------------------------
-        # BFL Image: If milestone triggered, hold SSE open with
-        # heartbeat pings while we poll the image API.
-        #
-        # GOTCHA: The SSE generator closes when it stops yielding.
-        # Clotho finishes in ~3-4s, but BFL takes 5-8s. Without
-        # heartbeats, the connection severs before the image URL
-        # is ready.
-        # ----------------------------------------------------------
+        # BFL Image: If milestone triggered, hold SSE open with heartbeats
         if (
             result.state.the_loom.milestone_reached
             and result.state.the_loom.image_prompt_trigger
@@ -188,7 +244,6 @@ async def stream_turn(action: str, request: Request):
                     api_key=settings.bfl_api_key,
                 )
             )
-            # Send heartbeats while waiting for BFL
             while not bfl_task.done():
                 if await request.is_disconnected():
                     bfl_task.cancel()
@@ -216,9 +271,11 @@ async def stream_turn(action: str, request: Request):
 # ------------------------------------------------------------------
 
 @router.get("/state")
-async def get_state():
+async def get_state(session_id: str = ""):
     """Debug endpoint: current thread state."""
-    kernel = _get_kernel()
+    if not session_id:
+        return {"error": "session_id required"}
+    kernel = _require_session(session_id)
     return kernel.state.model_dump()
 
 
@@ -248,10 +305,9 @@ async def get_player_threads(player_id: str):
 # ------------------------------------------------------------------
 
 @router.post("/reset")
-async def reset_session():
-    """Reset the game to a fresh state. Destroys ChromaDB session."""
-    global _kernel
-    kernel = _get_kernel()
-    kernel.reset()
-    _kernel = NyxKernel()
+async def reset_session(action: PlayerAction | None = None):
+    """Reset the game to a fresh state. Destroys the session."""
+    session_id = action.session_id if action else ""
+    if session_id and session_id in _sessions:
+        _destroy_session(session_id)
     return {"status": "reset", "message": "A new thread begins."}

@@ -22,26 +22,16 @@ from app.agents.base import AgentBase
 from app.core.config import settings
 from app.schemas.state import HypnosResponse, ThreadState
 from app.services import llm
+from app.services.prompt_loader import load_prompt
 
 logger = logging.getLogger("nyx.hypnos")
 
 
 # ---------------------------------------------------------------------------
-# System Prompt — Ultra-minimal for speed
+# System Prompt (loaded from app/prompts/hypnos.yaml)
 # ---------------------------------------------------------------------------
 
-HYPNOS_SYSTEM_PROMPT = """You are Hypnos, the veil between thought and consequence.
-
-Generate EXACTLY 3 short atmospheric fragments (max 15 words each) separated by newlines.
-Each fragment must end with an ellipsis (...).
-
-RULES:
-- NEVER resolve the player's action. You don't know the outcome.
-- NEVER mention specific items, names, or game mechanics.
-- Each fragment is a standalone sensory impression: sounds, textures, feelings, dread.
-- Dark fantasy tone. Second person ("you feel", "your pulse").
-- All 3 fragments must be DIFFERENT in what they describe.
-- NO numbering, NO bullet points, NO labels. Just the 3 lines."""
+HYPNOS_SYSTEM_PROMPT = load_prompt("hypnos")
 
 
 # ---------------------------------------------------------------------------
@@ -134,7 +124,7 @@ class Hypnos(AgentBase):
 
         for fragment in fragments:
             yield fragment
-            await asyncio.sleep(0.6)  # Pacing between fragments
+            await asyncio.sleep(settings.hypnos_fragment_delay)
 
     async def _generate_fragments(
         self, state: ThreadState, action: str

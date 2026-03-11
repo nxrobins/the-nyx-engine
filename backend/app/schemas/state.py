@@ -93,6 +93,7 @@ class LachesisResponse(BaseModel):
     oath_detected: Optional[str] = None       # raw oath text if sworn
     oath_violation: Optional[str] = None      # oath_id if action violates
     environment_update: str = ""              # new environment description
+    assigned_hamartia: Optional[str] = None   # set at Turn 10 when "Unformed"
 
 
 class AtroposResponse(BaseModel):
@@ -150,6 +151,7 @@ class HypnosResponse(BaseModel):
 class PlayerAction(BaseModel):
     """Incoming player action."""
     action: str
+    session_id: str = ""     # required for session isolation
     player_id: str = "usr_001"
 
 
@@ -164,6 +166,7 @@ class InitRequest(BaseModel):
 
 class TurnResult(BaseModel):
     """Final output of a complete turn through the Nyx Kernel."""
+    session_id: str = ""     # returned on init, sent back on every turn
     prose: str
     state: ThreadState
     terminal: bool = False

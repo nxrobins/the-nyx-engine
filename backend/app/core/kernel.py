@@ -148,7 +148,7 @@ def _build_stratified_context(state: ThreadState) -> str:
     dominant_name, dominant_val = max(pairs, key=lambda x: x[1])
 
     # Only inject mirror if the dominant vector is pronounced enough
-    if dominant_val >= 7.0:
+    if dominant_val >= settings.soul_mirror_threshold:
         mirror = _SOUL_MIRROR.get(dominant_name, "")
         if mirror:
             sections.append(f"═══ THE SOUL MIRROR ═══\n{mirror}")
@@ -184,11 +184,7 @@ def _dominant_vector_english(deltas: dict[str, float]) -> str:
     return _VECTOR_ENGLISH.get(dominant, dominant)
 
 
-# ---------------------------------------------------------------------------
-# Chronicler Integration Constants
-# ---------------------------------------------------------------------------
-
-CHRONICLE_INTERVAL = 5  # compress every N turns
+# Chronicler constants loaded from settings (chronicle_interval, chronicle_prose_retention)
 
 
 class NyxKernel:
@@ -367,6 +363,13 @@ class NyxKernel:
             logger.info(f"Vectors after deltas: {SoulVectorEngine.vector_summary(working_state.soul_ledger.vectors)}")
 
         # ----------------------------------------------------------
+        # Step 2b: Hamartia fork (Turn 10 overwrite)
+        # ----------------------------------------------------------
+        if lachesis_result.assigned_hamartia:
+            working_state.soul_ledger.hamartia = lachesis_result.assigned_hamartia
+            logger.info(f"HAMARTIA FORKED: 'Unformed' → '{lachesis_result.assigned_hamartia}'")
+
+        # ----------------------------------------------------------
         # Step 3: Process oaths (detect new, check violations)
         # ----------------------------------------------------------
         oath_broken_id: str | None = None
@@ -526,9 +529,9 @@ class NyxKernel:
         # ----------------------------------------------------------
         outcome.state.prose_history.append(prose)
 
-        # Chronicler fires every CHRONICLE_INTERVAL turns
-        if turn % CHRONICLE_INTERVAL == 0 and len(outcome.state.prose_history) >= CHRONICLE_INTERVAL:
-            window = outcome.state.prose_history[-CHRONICLE_INTERVAL:]
+        # Chronicler fires every settings.chronicle_interval turns
+        if turn % settings.chronicle_interval == 0 and len(outcome.state.prose_history) >= settings.chronicle_interval:
+            window = outcome.state.prose_history[-settings.chronicle_interval:]
             logger.info(f"Chronicler triggered at turn {turn} — compressing {len(window)} turns")
             chronicle_result = await self.chronicler.evaluate(
                 outcome.state, action, prose_window=window,
@@ -540,12 +543,14 @@ class NyxKernel:
                 logger.info(f"Chronicle [{len(outcome.state.chronicle)}]: {chronicle_result.chronicle_sentence}")
 
             # Flush the prose history buffer — the chronicle now carries the memory
-            # Keep only the last 2 turns for immediate continuity
-            outcome.state.prose_history = outcome.state.prose_history[-2:]
+            # Keep only the last N turns for immediate continuity
+            _retain = settings.chronicle_prose_retention
+            outcome.state.prose_history = outcome.state.prose_history[-_retain:]
 
         # Cap prose_history to prevent unbounded growth between compressions
-        if len(outcome.state.prose_history) > CHRONICLE_INTERVAL + 2:
-            outcome.state.prose_history = outcome.state.prose_history[-(CHRONICLE_INTERVAL + 2):]
+        _cap = settings.chronicle_interval + settings.chronicle_prose_retention
+        if len(outcome.state.prose_history) > _cap:
+            outcome.state.prose_history = outcome.state.prose_history[-_cap:]
 
         # Add turn to RAG store
         try:
@@ -650,6 +655,11 @@ class NyxKernel:
                     working_state.soul_ledger.vectors,
                     lachesis_result.vector_deltas,
                 )
+
+            # Hamartia fork (Turn 10 overwrite)
+            if lachesis_result.assigned_hamartia:
+                working_state.soul_ledger.hamartia = lachesis_result.assigned_hamartia
+                logger.info(f"[stream] HAMARTIA FORKED: 'Unformed' → '{lachesis_result.assigned_hamartia}'")
 
             # Process oaths
             oath_broken_id: str | None = None
@@ -840,18 +850,20 @@ class NyxKernel:
             # Prose history + Chronicler
             outcome.state.prose_history.append(prose)
 
-            if turn % CHRONICLE_INTERVAL == 0 and len(outcome.state.prose_history) >= CHRONICLE_INTERVAL:
-                window = outcome.state.prose_history[-CHRONICLE_INTERVAL:]
+            if turn % settings.chronicle_interval == 0 and len(outcome.state.prose_history) >= settings.chronicle_interval:
+                window = outcome.state.prose_history[-settings.chronicle_interval:]
                 chronicle_result = await self.chronicler.evaluate(
                     outcome.state, action, prose_window=window,
                 )
                 if chronicle_result.chronicle_sentence:
                     outcome.state.chronicle.append(chronicle_result.chronicle_sentence)
                     await append_chronicle(self._thread_id, chronicle_result.chronicle_sentence)
-                outcome.state.prose_history = outcome.state.prose_history[-2:]
+                _retain = settings.chronicle_prose_retention
+                outcome.state.prose_history = outcome.state.prose_history[-_retain:]
 
-            if len(outcome.state.prose_history) > CHRONICLE_INTERVAL + 2:
-                outcome.state.prose_history = outcome.state.prose_history[-(CHRONICLE_INTERVAL + 2):]
+            _cap = settings.chronicle_interval + settings.chronicle_prose_retention
+            if len(outcome.state.prose_history) > _cap:
+                outcome.state.prose_history = outcome.state.prose_history[-_cap:]
 
             # RAG indexing
             try:

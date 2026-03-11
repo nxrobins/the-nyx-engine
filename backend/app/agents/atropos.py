@@ -24,20 +24,8 @@ from app.services.soul_math import SoulVectorEngine
 logger = logging.getLogger("nyx.atropos")
 
 
-# ---------------------------------------------------------------------------
-# Death keyword triggers
-# ---------------------------------------------------------------------------
-
-_DEATH_TRIGGERS = [
-    "surrender to death",
-    "embrace the void",
-    "drink the poison",
-    "jump off",
-    "end my thread",
-    "cut my own thread",
-    "give up completely",
-    "welcome oblivion",
-]
+# Death triggers loaded from settings (configurable via .env)
+# Fallback list is defined in config.py
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +70,7 @@ class Atropos(AgentBase):
 
         # --- Trigger 3: Self-destruction keywords ---
         action_lower = action.lower()
-        if any(trigger in action_lower for trigger in _DEATH_TRIGGERS):
+        if any(trigger in action_lower for trigger in settings.atropos_death_keywords):
             logger.info("Atropos: Thread severed — Self-destruction detected.")
             return AtroposResponse(
                 terminal_state=True,

@@ -18,11 +18,11 @@ import logging
 
 import httpx
 
+from app.core.config import settings
+
 logger = logging.getLogger("nyx.bfl")
 
 _BFL_BASE_URL = "https://api.bfl.ml/v1"
-_STYLE_PREFIX = "Monochrome sumi-e ink wash"
-_STYLE_SUFFIX = "black ink on aged parchment, no text, no UI elements"
 _POLL_INTERVAL = 1.0  # seconds
 _POLL_TIMEOUT = 30.0  # seconds
 
@@ -42,7 +42,7 @@ async def generate_image(
     Returns:
         Image URL string, or empty string on failure/timeout.
     """
-    styled_prompt = f"{_STYLE_PREFIX}, {prompt}, {_STYLE_SUFFIX}"
+    styled_prompt = f"{settings.bfl_style_prefix}, {prompt}, {settings.bfl_style_suffix}"
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         # Step 1: Submit generation request

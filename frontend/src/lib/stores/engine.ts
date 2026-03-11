@@ -15,6 +15,16 @@ import { writable } from 'svelte/store';
 import type { ThreadState, TurnResult, HamartiaOptions, MechanicEvent } from '$lib/types/engine';
 import { vestibuleState } from '$lib/stores/vestibule';
 
+// ── Session ID ──────────────────────────────────────────────────
+
+/** Session UUID returned by POST /init, sent on every subsequent request. */
+let _sessionId = '';
+
+/** Read-only accessor for components that need to display session info. */
+export function getSessionId(): string {
+	return _sessionId;
+}
+
 // ── Core State ──────────────────────────────────────────────────
 
 /** Current thread state (null before Turn 0 init) */
@@ -83,6 +93,7 @@ export async function initGame(params: {
 
 	const result: TurnResult = await res.json();
 
+	_sessionId = result.session_id;
 	gameState.set(result.state);
 	proseHistory.set([result.prose]);
 	uiChoices.set(result.ui_choices || []);
@@ -113,7 +124,7 @@ export async function submitAction(action: string): Promise<void> {
 	const response = await fetch('/api/turn', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ action }),
+		body: JSON.stringify({ action, session_id: _sessionId }),
 	});
 
 	if (!response.ok || !response.body) {
@@ -241,7 +252,12 @@ function handleStreamEvent(data: Record<string, unknown>): void {
  * Reset the game session. Returns to title screen.
  */
 export async function resetGame(): Promise<void> {
-	await fetch('/api/reset', { method: 'POST' });
+	await fetch('/api/reset', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ action: '', session_id: _sessionId }),
+	});
+	_sessionId = '';
 	gameState.set(null);
 	proseHistory.set([]);
 	hypnosStream.set('');

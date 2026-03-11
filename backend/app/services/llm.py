@@ -7,12 +7,14 @@ and error normalization.
 Model string format: "provider/model" e.g.:
   - "anthropic/claude-sonnet-4-20250514"
   - "openai/mercury-2"  (with custom api_base for Mercury)
+
+v2.1: Per-call credential injection replaces global env mutation.
+      Fixes P1-004 — Mercury credentials no longer clobber OPENAI_API_KEY.
 """
 
 from __future__ import annotations
 
 import logging
-import os
 from typing import AsyncGenerator
 
 import litellm
@@ -21,28 +23,34 @@ from app.core.config import settings
 
 logger = logging.getLogger("nyx.llm")
 
+# Suppress LiteLLM's verbose logging
+litellm.set_verbose = False
+
+
 # ---------------------------------------------------------------------------
-# LiteLLM environment configuration
-# Mercury (Inception Labs) uses OpenAI-compatible API at a custom base URL.
-# LiteLLM reads MERCURY_API_BASE from env to route "openai/mercury-2".
+# Credential resolver — per-call, no global env mutation
 # ---------------------------------------------------------------------------
 
-def _configure_litellm() -> None:
-    """Set up LiteLLM environment variables for provider routing."""
-    # Anthropic
-    if settings.anthropic_api_key:
-        os.environ["ANTHROPIC_API_KEY"] = settings.anthropic_api_key
+def _resolve_credentials(model: str) -> dict:
+    """Return provider-specific kwargs for a LiteLLM call.
 
-    # Mercury via OpenAI-compatible endpoint
-    if settings.mercury_api_key:
-        os.environ["OPENAI_API_KEY"] = settings.mercury_api_key
-        os.environ["OPENAI_API_BASE"] = settings.mercury_api_base
+    Instead of writing API keys into os.environ (which causes credential
+    collision between providers), we inject them per-call via kwargs.
+    """
+    kwargs: dict = {}
 
-    # Suppress LiteLLM's verbose logging
-    litellm.set_verbose = False
+    if model.startswith("anthropic/"):
+        if settings.anthropic_api_key:
+            kwargs["api_key"] = settings.anthropic_api_key
 
+    elif model.startswith("openai/"):
+        # Mercury routes through OpenAI-compatible endpoint
+        if settings.mercury_api_key:
+            kwargs["api_key"] = settings.mercury_api_key
+        if settings.mercury_api_base:
+            kwargs["api_base"] = settings.mercury_api_base
 
-_configure_litellm()
+    return kwargs
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +79,7 @@ async def generate(
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},
         ],
+        **_resolve_credentials(model),
     )
     if json_mode:
         kwargs["response_format"] = {"type": "json_object"}
@@ -99,6 +108,7 @@ async def stream(
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},
         ],
+        **_resolve_credentials(model),
     )
     async for chunk in response:
         delta = chunk.choices[0].delta.content

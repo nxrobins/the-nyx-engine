@@ -1,0 +1,16 @@
+[project]
+name = "nyx-engine"
+version = "0.1.0"
+description = "Multi-agent CYOA game engine — Children of Nyx"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+pythonpath = ["."]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
