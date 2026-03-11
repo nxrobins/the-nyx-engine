@@ -1,4 +1,4 @@
-"""Lachesis - The State Ledger & RAG Memory v2.0.
+"""Lachesis - The State Ledger & RAG Memory v2.1 (Responsibility Split).
 
 'You are Lachesis. You are the strict memory of the system. Ingest the
 player's action and compare it against their soul vectors, oaths, and
@@ -10,8 +10,11 @@ Classifies player actions into soul vector deltas:
   - Boasting/glory-seeking/public acts → kleos+
   - Stealth/restraint/humility → aidos+
 
-Also detects oath-swearing ("I swear", "I promise", "I vow") and checks
-for oath violations against active oaths.
+v2.1 — Oath detection and hamartia assignment extracted to standalone
+service modules (oath_engine, hamartia_engine). Lachesis focuses on
+LLM-dependent judgment: action validity, vector classification,
+environment tracking, and outcome classification. The kernel owns
+deterministic oath/hamartia logic directly.
 """
 
 from __future__ import annotations
@@ -39,58 +42,8 @@ LACHESIS_SYSTEM_PROMPT = load_prompt("lachesis")
 
 
 # ---------------------------------------------------------------------------
-# Oath Detection Patterns
-# ---------------------------------------------------------------------------
-
-_OATH_PATTERNS = [
-    re.compile(r"\bi swear\b", re.IGNORECASE),
-    re.compile(r"\bi promise\b", re.IGNORECASE),
-    re.compile(r"\bi vow\b", re.IGNORECASE),
-    re.compile(r"\bon my honor\b", re.IGNORECASE),
-    re.compile(r"\bon my blood\b", re.IGNORECASE),
-    re.compile(r"\bon my life\b", re.IGNORECASE),
-    re.compile(r"\bi pledge\b", re.IGNORECASE),
-    re.compile(r"\bmy oath\b", re.IGNORECASE),
-]
-
-
-def _detect_oath(action: str) -> str | None:
-    """Check if the player's action contains an oath."""
-    for pattern in _OATH_PATTERNS:
-        if pattern.search(action):
-            return action.strip()
-    return None
-
-
-# ---------------------------------------------------------------------------
 # Mock Logic (Phase 1 fallback)
 # ---------------------------------------------------------------------------
-
-_VECTOR_HAMARTIA_MAP: dict[str, str] = {
-    "metis": "Hubris",       # intellectual overconfidence
-    "bia": "Wrath",          # destructive rage
-    "kleos": "Vainglory",    # obsessive need for recognition
-    "aidos": "Cowardice",    # paralytic fear of action
-}
-
-
-def _determine_hamartia_from_vectors(state: ThreadState) -> str | None:
-    """Deterministic hamartia assignment based on dominant soul vector.
-
-    Called at Turn 10 (epoch_phase 4) when hamartia is still 'Unformed'.
-    Returns the assigned hamartia string, or None if conditions aren't met.
-    """
-    if state.soul_ledger.hamartia != "Unformed" or state.session.epoch_phase != 4:
-        return None
-
-    vectors = state.soul_ledger.vectors
-    pairs = [
-        ("metis", vectors.metis), ("bia", vectors.bia),
-        ("kleos", vectors.kleos), ("aidos", vectors.aidos),
-    ]
-    dominant_name, _ = max(pairs, key=lambda x: x[1])
-    return _VECTOR_HAMARTIA_MAP.get(dominant_name, "Aimlessness")
-
 
 def _mock_evaluate(state: ThreadState, action: str) -> LachesisResponse:
     """Keyword-based mock evaluation — deterministic fallback."""
@@ -108,11 +61,7 @@ def _mock_evaluate(state: ThreadState, action: str) -> LachesisResponse:
             updated_state=updated,
         )
 
-    # Check for oath
-    oath_text = _detect_oath(action)
-
-    # Classify action into vector deltas
-    result: LachesisResponse
+    # Classify action into vector deltas (oath/hamartia handled by kernel)
 
     # Combat / force → bia+
     if any(word in action_lower for word in ["attack", "fight", "strike", "stab", "smash"]):
@@ -120,65 +69,51 @@ def _mock_evaluate(state: ThreadState, action: str) -> LachesisResponse:
         updated.rag_context.append(
             f"Turn {updated.session.turn_count}: Player engaged in combat."
         )
-        result = LachesisResponse(
+        return LachesisResponse(
             valid_action=True,
             updated_state=updated,
             vector_deltas={"bia": 2.0, "aidos": -0.5},
-            oath_detected=oath_text,
             environment_update=updated.session.current_environment,
         )
 
     # Cunning / deception → metis+
-    elif any(word in action_lower for word in ["deceive", "trick", "persuade", "convince", "lie"]):
+    if any(word in action_lower for word in ["deceive", "trick", "persuade", "convince", "lie"]):
         updated.last_outcome = "cunning_success"
-        result = LachesisResponse(
+        return LachesisResponse(
             valid_action=True,
             updated_state=updated,
             vector_deltas={"metis": 2.0, "kleos": 0.5},
-            oath_detected=oath_text,
             environment_update=updated.session.current_environment,
         )
 
     # Glory / boasting → kleos+
-    elif any(word in action_lower for word in ["boast", "proclaim", "challenge", "declare"]):
+    if any(word in action_lower for word in ["boast", "proclaim", "challenge", "declare"]):
         updated.last_outcome = "glory_seized"
-        result = LachesisResponse(
+        return LachesisResponse(
             valid_action=True,
             updated_state=updated,
             vector_deltas={"kleos": 2.5, "aidos": -1.0},
-            oath_detected=oath_text,
             environment_update=updated.session.current_environment,
         )
 
     # Stealth / restraint → aidos+
-    elif any(word in action_lower for word in ["hide", "rest", "pray", "wait", "sneak", "observe"]):
+    if any(word in action_lower for word in ["hide", "rest", "pray", "wait", "sneak", "observe"]):
         updated.last_outcome = "shadow_move"
-        result = LachesisResponse(
+        return LachesisResponse(
             valid_action=True,
             updated_state=updated,
             vector_deltas={"aidos": 2.0, "bia": -0.5},
-            oath_detected=oath_text,
             environment_update=updated.session.current_environment,
         )
 
     # Default: neutral
-    else:
-        updated.last_outcome = "neutral"
-        result = LachesisResponse(
-            valid_action=True,
-            updated_state=updated,
-            vector_deltas={"metis": 0.5, "aidos": 0.5},
-            oath_detected=oath_text,
-            environment_update=updated.session.current_environment,
-        )
-
-    # Hamartia assignment: at Turn 10 (epoch_phase 4), overwrite "Unformed"
-    assigned = _determine_hamartia_from_vectors(state)
-    if assigned:
-        result.assigned_hamartia = assigned
-        logger.info(f"Lachesis (mock): Assigned hamartia '{assigned}' from dominant vector")
-
-    return result
+    updated.last_outcome = "neutral"
+    return LachesisResponse(
+        valid_action=True,
+        updated_state=updated,
+        vector_deltas={"metis": 0.5, "aidos": 0.5},
+        environment_update=updated.session.current_environment,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -208,22 +143,6 @@ def _build_payload(state: ThreadState, action: str) -> str:
     }
 
     msg = "JUDGE THE FOLLOWING ACTION:\n\n" + json.dumps(payload, indent=2)
-
-    # Hamartia overwrite directive: at Turn 10 (Epoch Phase 4), if hamartia
-    # is still "Unformed", Lachesis must evaluate childhood vectors and
-    # output a permanent hamartia string in her JSON response.
-    if (
-        state.soul_ledger.hamartia == "Unformed"
-        and state.session.epoch_phase == 4
-    ):
-        msg += (
-            "\n\n--- HAMARTIA ASSIGNMENT ---\n"
-            "The player's hamartia is currently 'Unformed'. Based on their childhood "
-            "soul vectors (metis/bia/kleos/aidos), you MUST now determine their permanent "
-            "tragic flaw. Add a field \"assigned_hamartia\" to your JSON response with a "
-            "short, evocative hamartia string (e.g., 'Hubris', 'Wrath', 'Vainglory', "
-            "'Cowardice'). This will be permanent."
-        )
 
     return msg
 
@@ -377,21 +296,14 @@ def _parse_response(raw: str, state: ThreadState, action: str) -> LachesisRespon
         logger.info("Lachesis: LLM omitted rag_summary, using fallback.")
     updated.rag_context.append(f"Turn {updated.session.turn_count}: {rag_summary}")
 
-    # Oath detection — LLM + regex fallback
+    # Oath detection — pass through from LLM (kernel handles deterministic fallback)
     oath_detected = data.get("oath_detected")
-    if not oath_detected:
-        oath_detected = _detect_oath(action)
 
-    # Oath violation
+    # Oath violation — pass through from LLM
     oath_violation = data.get("oath_violation")
 
-    # Hamartia assignment (Turn 10, only when "Unformed")
+    # Hamartia — pass through from LLM (kernel handles deterministic fallback)
     assigned_hamartia = data.get("assigned_hamartia")
-    # Deterministic fallback: if conditions require hamartia but LLM omitted it
-    if not assigned_hamartia:
-        assigned_hamartia = _determine_hamartia_from_vectors(state)
-        if assigned_hamartia:
-            logger.info(f"Lachesis: LLM omitted assigned_hamartia, using vector fallback: '{assigned_hamartia}'")
 
     return LachesisResponse(
         valid_action=True,

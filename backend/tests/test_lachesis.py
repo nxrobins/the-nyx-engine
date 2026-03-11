@@ -1,14 +1,15 @@
-"""Tests for Lachesis agent — JSON parsers, oath detection, hamartia fork, mock evaluator.
+"""Tests for Lachesis agent v2.1 — JSON parsers, mock evaluator, parse response.
 
 Covers: _clean_json, _regex_extract, _clamp_deltas, _infer_deltas_from_action,
-_detect_oath, _determine_hamartia_from_vectors, _mock_evaluate, _parse_response.
+_mock_evaluate, _parse_response.
+
+Oath detection and hamartia assignment tests live in test_oath_engine.py
+and test_hamartia_engine.py respectively (P1-002 split).
 """
 
 from app.agents.lachesis import (
     _clean_json,
     _clamp_deltas,
-    _detect_oath,
-    _determine_hamartia_from_vectors,
     _infer_deltas_from_action,
     _mock_evaluate,
     _parse_response,
@@ -144,81 +145,6 @@ class TestInferDeltas:
 
 
 # ---------------------------------------------------------------------------
-# _detect_oath
-# ---------------------------------------------------------------------------
-
-class TestDetectOath:
-    def test_i_swear(self):
-        assert _detect_oath("I swear to protect the innocent") is not None
-
-    def test_i_promise(self):
-        assert _detect_oath("I promise to return") is not None
-
-    def test_i_vow(self):
-        assert _detect_oath("I vow vengeance") is not None
-
-    def test_on_my_honor(self):
-        assert _detect_oath("On my honor, I will succeed") is not None
-
-    def test_no_oath(self):
-        assert _detect_oath("I attack the goblin") is None
-
-    def test_case_insensitive(self):
-        assert _detect_oath("I SWEAR BY THE GODS") is not None
-
-    def test_returns_trimmed_action(self):
-        result = _detect_oath("  I swear to avenge my father  ")
-        assert result == "I swear to avenge my father"
-
-
-# ---------------------------------------------------------------------------
-# _determine_hamartia_from_vectors
-# ---------------------------------------------------------------------------
-
-class TestDetermineHamartia:
-    def test_metis_dominant(self, unformed_turn10_state: ThreadState):
-        # metis=8.0 is dominant
-        result = _determine_hamartia_from_vectors(unformed_turn10_state)
-        assert result == "Hubris"
-
-    def test_bia_dominant(self, unformed_turn10_state: ThreadState):
-        unformed_turn10_state.soul_ledger.vectors = SoulVectors(
-            metis=3.0, bia=9.0, kleos=4.0, aidos=2.0
-        )
-        result = _determine_hamartia_from_vectors(unformed_turn10_state)
-        assert result == "Wrath"
-
-    def test_kleos_dominant(self, unformed_turn10_state: ThreadState):
-        unformed_turn10_state.soul_ledger.vectors = SoulVectors(
-            metis=3.0, bia=4.0, kleos=9.0, aidos=2.0
-        )
-        result = _determine_hamartia_from_vectors(unformed_turn10_state)
-        assert result == "Vainglory"
-
-    def test_aidos_dominant(self, unformed_turn10_state: ThreadState):
-        unformed_turn10_state.soul_ledger.vectors = SoulVectors(
-            metis=3.0, bia=2.0, kleos=4.0, aidos=9.0
-        )
-        result = _determine_hamartia_from_vectors(unformed_turn10_state)
-        assert result == "Cowardice"
-
-    def test_already_assigned_returns_none(self, mid_game_state: ThreadState):
-        # hamartia is "Wrath of the Untempered", not "Unformed"
-        result = _determine_hamartia_from_vectors(mid_game_state)
-        assert result is None
-
-    def test_wrong_epoch_returns_none(self, unformed_turn10_state: ThreadState):
-        unformed_turn10_state.session.epoch_phase = 2  # not phase 4
-        result = _determine_hamartia_from_vectors(unformed_turn10_state)
-        assert result is None
-
-    def test_requires_both_conditions(self, fresh_state: ThreadState):
-        # Fresh state: hamartia="" (not "Unformed"), epoch_phase=1
-        result = _determine_hamartia_from_vectors(fresh_state)
-        assert result is None
-
-
-# ---------------------------------------------------------------------------
 # _mock_evaluate
 # ---------------------------------------------------------------------------
 
@@ -254,9 +180,10 @@ class TestMockEvaluate:
         # Neutral gives small metis + aidos
         assert "metis" in result.vector_deltas or "aidos" in result.vector_deltas
 
-    def test_oath_detection_in_mock(self, mid_game_state: ThreadState):
+    def test_no_oath_in_mock(self, mid_game_state: ThreadState):
+        """Lachesis mock no longer detects oaths — kernel handles it."""
         result = _mock_evaluate(mid_game_state, "I swear to avenge my father")
-        assert result.oath_detected is not None
+        assert result.oath_detected is None
 
     def test_updated_state_is_copy(self, mid_game_state: ThreadState):
         result = _mock_evaluate(mid_game_state, "attack")
@@ -264,13 +191,9 @@ class TestMockEvaluate:
         assert result.updated_state is not mid_game_state
         assert result.updated_state.last_action == "attack"
 
-    def test_hamartia_fork_at_turn10(self, unformed_turn10_state: ThreadState):
+    def test_no_hamartia_in_mock(self, unformed_turn10_state: ThreadState):
+        """Lachesis mock no longer assigns hamartia — kernel handles it."""
         result = _mock_evaluate(unformed_turn10_state, "look around")
-        assert result.assigned_hamartia is not None
-        assert result.assigned_hamartia == "Hubris"  # metis=8.0 dominant
-
-    def test_no_hamartia_fork_before_turn10(self, mid_game_state: ThreadState):
-        result = _mock_evaluate(mid_game_state, "look around")
         assert result.assigned_hamartia is None
 
 
@@ -318,21 +241,22 @@ class TestParseResponse:
         result = _parse_response(raw, mid_game_state, "attack")
         assert result.vector_deltas["bia"] == 3.0  # clamped
 
-    def test_oath_fallback_to_regex(self, mid_game_state: ThreadState):
+    def test_no_oath_fallback_in_parse(self, mid_game_state: ThreadState):
+        """_parse_response no longer detects oaths — kernel handles it."""
         raw = '{"valid_action": true, "vector_deltas": {"aidos": 1.0}}'
         result = _parse_response(raw, mid_game_state, "I swear to protect the child")
-        assert result.oath_detected is not None
+        assert result.oath_detected is None
 
     def test_hamartia_fork_via_parse(self, unformed_turn10_state: ThreadState):
         raw = '{"valid_action": true, "vector_deltas": {"metis": 1.0}, "assigned_hamartia": "Hubris"}'
         result = _parse_response(raw, unformed_turn10_state, "ponder the riddle")
         assert result.assigned_hamartia == "Hubris"
 
-    def test_hamartia_fallback_when_llm_omits(self, unformed_turn10_state: ThreadState):
+    def test_no_hamartia_fallback_in_parse(self, unformed_turn10_state: ThreadState):
+        """_parse_response no longer assigns hamartia — kernel handles it."""
         raw = '{"valid_action": true, "vector_deltas": {"metis": 1.0}}'
         result = _parse_response(raw, unformed_turn10_state, "ponder the riddle")
-        # Deterministic fallback should kick in (metis=8.0 dominant)
-        assert result.assigned_hamartia == "Hubris"
+        assert result.assigned_hamartia is None
 
     def test_completely_broken_json_uses_regex(self, mid_game_state: ThreadState):
         raw = 'This is not JSON at all but "valid_action": true and "vector_deltas": {"bia": 2.0}'

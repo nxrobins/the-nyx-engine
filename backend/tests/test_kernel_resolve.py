@@ -123,6 +123,43 @@ class TestResolveOathProcessing:
         assert len(ids) == len(set(ids))  # all unique
 
 
+class TestResolveHamartiaFork:
+    """Kernel assigns hamartia at Turn 10 via deterministic engine."""
+
+    @pytest.mark.asyncio
+    async def test_hamartia_assigned_at_turn_10(self, kernel: NyxKernel):
+        """Unformed hamartia is overwritten when epoch reaches phase 4."""
+        await _init(kernel)
+        # Set turn to 9 so next _resolve_turn increments to 10 → phase 4
+        kernel.state.session.turn_count = 9
+        kernel.state.soul_ledger.hamartia = "Unformed"
+        # Make bia dominant
+        kernel.state.soul_ledger.vectors.bia = 9.0
+        kernel.state.soul_ledger.vectors.metis = 2.0
+        kernel.state.soul_ledger.vectors.kleos = 2.0
+        kernel.state.soul_ledger.vectors.aidos = 2.0
+        ctx = await kernel._resolve_turn("attack the beast")
+        assert ctx.outcome.state.soul_ledger.hamartia == "Wrath"
+
+    @pytest.mark.asyncio
+    async def test_hamartia_not_overwritten_when_already_set(self, kernel: NyxKernel):
+        """If hamartia is already assigned (not Unformed), kernel skips."""
+        await _init(kernel)
+        kernel.state.session.turn_count = 9
+        kernel.state.soul_ledger.hamartia = "Hubris"  # already assigned
+        ctx = await kernel._resolve_turn("attack the beast")
+        assert ctx.outcome.state.soul_ledger.hamartia == "Hubris"
+
+    @pytest.mark.asyncio
+    async def test_hamartia_not_assigned_before_phase_4(self, kernel: NyxKernel):
+        """Unformed stays Unformed if epoch hasn't reached phase 4."""
+        await _init(kernel)
+        kernel.state.session.turn_count = 4  # next turn = 5 → phase 2
+        kernel.state.soul_ledger.hamartia = "Unformed"
+        ctx = await kernel._resolve_turn("look around")
+        assert ctx.outcome.state.soul_ledger.hamartia == "Unformed"
+
+
 class TestResolveEpochMachine:
     """Epoch phase is computed correctly during resolution."""
 

@@ -1,8 +1,14 @@
-"""The Nyx Kernel - Asynchronous Orchestrator v5.0 (The Unbroken Thread).
+"""The Nyx Kernel - Asynchronous Orchestrator v5.1 (Responsibility Split).
 
 The central nervous system of the engine. Receives player input,
 dispatches to agents in parallel, resolves conflicts, and produces
 the final turn result.
+
+v5.1 — Lachesis Responsibility Split (P1-002):
+  Oath detection and hamartia assignment are now kernel-owned via
+  dedicated service modules (oath_engine, hamartia_engine). Lachesis
+  LLM output is treated as an optional enhancement; deterministic
+  engines provide the guaranteed fallback. Steps 2b and 3 updated.
 
 v5.0 — Kernel Decomposition (P0-003):
   The 10-step pipeline is split into three reusable methods:
@@ -55,6 +61,8 @@ from app.db import (
 )
 from app.services import llm
 from app.services.bfl import generate_image
+from app.services.hamartia_engine import determine_hamartia
+from app.services.oath_engine import detect_oath
 from app.services.rag import NyxRAGStore
 from app.services.soul_math import SoulVectorEngine
 
@@ -419,11 +427,17 @@ class NyxKernel:
             logger.info(f"Vectors after deltas: {SoulVectorEngine.vector_summary(working_state.soul_ledger.vectors)}")
 
         # Step 2b: Hamartia fork (Turn 10 overwrite)
-        if lachesis_result.assigned_hamartia:
-            working_state.soul_ledger.hamartia = lachesis_result.assigned_hamartia
-            logger.info(f"HAMARTIA FORKED: 'Unformed' → '{lachesis_result.assigned_hamartia}'")
+        # LLM suggestion takes priority; deterministic engine is the fallback.
+        assigned_hamartia = (
+            lachesis_result.assigned_hamartia
+            or determine_hamartia(working_state)
+        )
+        if assigned_hamartia:
+            working_state.soul_ledger.hamartia = assigned_hamartia
+            logger.info(f"HAMARTIA FORKED: 'Unformed' → '{assigned_hamartia}'")
 
         # Step 3: Process oaths (detect new, check violations)
+        # LLM suggestion takes priority; deterministic engine is the fallback.
         oath_broken_id: str | None = None
 
         if lachesis_result.oath_violation:
@@ -434,10 +448,11 @@ class NyxKernel:
                     logger.info(f"Oath BROKEN: {oath.text}")
                     break
 
-        if lachesis_result.oath_detected:
+        oath_text = lachesis_result.oath_detected or detect_oath(action)
+        if oath_text:
             new_oath = Oath(
                 oath_id=f"oath_{uuid.uuid4().hex[:8]}",
-                text=lachesis_result.oath_detected,
+                text=oath_text,
                 turn_sworn=turn,
             )
             working_state.soul_ledger.active_oaths.append(new_oath)
