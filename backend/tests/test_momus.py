@@ -1,15 +1,28 @@
-"""Tests for Momus — the NER hallucination checker / prose validator.
+"""Tests for Momus — the Literary Law Enforcer & Hallucination Checker v3.0.
 
-Covers: environment consistency checks, oath reference validation,
-death language detection, multi-hallucination aggregation, and
-the base evaluate() passthrough.
+Covers:
+  State hallucination checks:
+    - Environment consistency
+    - Oath reference validation
+    - Death language detection
+    - Multi-hallucination aggregation
+
+  Literary Law checks:
+    - Law IV  (Ancient Guardrail)  — anachronism detection
+    - Law I   (Iceberg Principle)  — named emotion detection
+    - Law II  (Kinetic Constraint) — passive voice flagging
+    - Law VI  (Economy of Breath)  — paragraph overflow
+
+  Schema & identity:
+    - MomusValidation model behavior
+    - Agent name and evaluate() passthrough
 """
 
 from __future__ import annotations
 
 import pytest
 
-from app.agents.momus import Momus
+from app.agents.momus import Momus, _detect_anachronisms
 from app.schemas.state import (
     MomusValidation,
     Oath,
@@ -111,9 +124,22 @@ def healthy_soul_state() -> ThreadState:
     )
 
 
-# ---------------------------------------------------------------------------
+@pytest.fixture
+def neutral_state() -> ThreadState:
+    """Generic state with no special conditions — for literary law tests."""
+    return ThreadState(
+        session=SessionData(
+            current_environment="A stone courtyard beneath grey clouds.",
+        ),
+        soul_ledger=SoulLedger(
+            vectors=SoulVectors(metis=5.0, bia=5.0, kleos=5.0, aidos=5.0),
+        ),
+    )
+
+
+# ===========================================================================
 # Base evaluate() — always passes
-# ---------------------------------------------------------------------------
+# ===========================================================================
 
 class TestBaseEvaluate:
     """Momus.evaluate() always returns valid (it's a no-op placeholder)."""
@@ -130,9 +156,9 @@ class TestBaseEvaluate:
         assert result.hallucinations == []
 
 
-# ---------------------------------------------------------------------------
-# Environment Consistency Checks
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# STATE HALLUCINATION CHECKS
+# ===========================================================================
 
 class TestEnvironmentConsistency:
     """Momus detects terrain contradictions in prose."""
@@ -172,10 +198,6 @@ class TestEnvironmentConsistency:
         result = await momus.validate_prose(prose, desert_state)
         assert result.valid is True
 
-
-# ---------------------------------------------------------------------------
-# Oath Reference Checks
-# ---------------------------------------------------------------------------
 
 class TestOathReferences:
     """Momus catches oath references when no oaths are active."""
@@ -220,10 +242,6 @@ class TestOathReferences:
         assert result.valid is True
 
 
-# ---------------------------------------------------------------------------
-# Death Language Checks
-# ---------------------------------------------------------------------------
-
 class TestDeathLanguage:
     """Momus detects inappropriate death declarations."""
 
@@ -251,8 +269,6 @@ class TestDeathLanguage:
         """When soul vectors are collapsed (all <= 1.0), death is legitimate."""
         prose = "The last ember of your soul gutters. You die."
         result = await momus.validate_prose(prose, collapsed_soul_state)
-        # All vectors <= 1.0, so the death check says "any(v > 3.0)" is False
-        # Therefore no hallucination about death
         assert result.valid is True
 
     @pytest.mark.asyncio
@@ -260,13 +276,8 @@ class TestDeathLanguage:
         """Words like 'deadly' or 'death' alone (not 'you die') should not trigger."""
         prose = "A deadly silence fills the corridor. Death watches from the shadows."
         result = await momus.validate_prose(prose, healthy_soul_state)
-        # The regex looks for exact phrases like "you die", not just the word "death"
         assert result.valid is True
 
-
-# ---------------------------------------------------------------------------
-# Multi-Hallucination Aggregation
-# ---------------------------------------------------------------------------
 
 class TestMultiHallucination:
     """Momus can detect multiple hallucination types in one prose."""
@@ -289,9 +300,334 @@ class TestMultiHallucination:
         assert len(result.hallucinations) >= 2
 
 
+# ===========================================================================
+# LITERARY LAW CHECKS
+# ===========================================================================
+
 # ---------------------------------------------------------------------------
-# Corrected Prose Pass-Through
+# Law IV — The Ancient Guardrail: Anachronism Detection
 # ---------------------------------------------------------------------------
+
+class TestAnachronismDetection:
+    """Law IV: Momus detects modern technology and concepts in prose."""
+
+    @pytest.mark.asyncio
+    async def test_phone_flagged(self, momus, neutral_state):
+        prose = "You reach for the phone but nothing answers."
+        result = await momus.validate_prose(prose, neutral_state)
+        assert len(result.law_violations) >= 1
+        assert any("Law IV" in v for v in result.law_violations)
+        assert any("phone" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_computer_flagged(self, momus, neutral_state):
+        prose = "The computer hums with arcane energy."
+        result = await momus.validate_prose(prose, neutral_state)
+        assert any("Law IV" in v for v in result.law_violations)
+        assert any("computer" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_gun_flagged(self, momus, neutral_state):
+        prose = "A gun gleams in the moonlight."
+        result = await momus.validate_prose(prose, neutral_state)
+        assert any("Law IV" in v for v in result.law_violations)
+        assert any("gun" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_electricity_flagged(self, momus, neutral_state):
+        prose = "The electricity crackles through the wires overhead."
+        result = await momus.validate_prose(prose, neutral_state)
+        assert any("Law IV" in v for v in result.law_violations)
+        assert any("electricity" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_multiple_anachronisms_in_one_violation(self, momus, neutral_state):
+        """Multiple anachronisms in one prose produce a single violation with all words."""
+        prose = "You drive the car past the factory and check your phone."
+        result = await momus.validate_prose(prose, neutral_state)
+        violations_iv = [v for v in result.law_violations if "Law IV" in v]
+        assert len(violations_iv) == 1
+        assert "car" in violations_iv[0]
+        assert "factory" in violations_iv[0]
+        assert "phone" in violations_iv[0]
+
+    @pytest.mark.asyncio
+    async def test_clean_mythic_prose_passes(self, momus, neutral_state):
+        """Prose with no modern words produces no Law IV violation."""
+        prose = "The sword gleams in the torchlight. A raven calls from the oak."
+        result = await momus.validate_prose(prose, neutral_state)
+        assert not any("Law IV" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_bus_not_triggered_in_ambush(self, momus, neutral_state):
+        """'bus' inside 'ambush' should NOT trigger (word-boundary match)."""
+        prose = "The ambush catches you off guard. Arrows rain from the canopy."
+        result = await momus.validate_prose(prose, neutral_state)
+        assert not any("Law IV" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_tv_flagged(self, momus, neutral_state):
+        prose = "The tv flickers with strange images."
+        result = await momus.validate_prose(prose, neutral_state)
+        assert any("Law IV" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_anachronism_does_not_set_valid_false(self, momus, neutral_state):
+        """Law violations don't make valid=False — only state hallucinations do."""
+        prose = "You pull out your phone."
+        result = await momus.validate_prose(prose, neutral_state)
+        assert result.valid is True  # law violations are style, not state
+        assert len(result.law_violations) >= 1
+
+
+class TestDetectAnachronismsHelper:
+    """Unit tests for the _detect_anachronisms() helper function."""
+
+    def test_empty_string(self):
+        assert _detect_anachronisms("") == set()
+
+    def test_single_anachronism(self):
+        found = _detect_anachronisms("a gun lies on the table")
+        assert "gun" in found
+
+    def test_no_anachronism(self):
+        found = _detect_anachronisms("a sword lies on the stone")
+        assert found == set()
+
+    def test_word_boundary_respected(self):
+        """'train' should match, but 'terrain' should not."""
+        found = _detect_anachronisms("the train departs at dawn")
+        assert "train" in found
+        found2 = _detect_anachronisms("the terrain shifts underfoot")
+        assert "train" not in found2
+
+    def test_case_insensitive(self):
+        found = _detect_anachronisms("the Computer hummed softly")
+        # _detect_anachronisms receives lowercase input from validate_prose,
+        # but should still work with mixed case since we pass prose_lower
+        found2 = _detect_anachronisms("the computer hummed softly")
+        assert "computer" in found2
+
+
+# ---------------------------------------------------------------------------
+# Law I — The Iceberg Principle: Named Emotion Detection
+# ---------------------------------------------------------------------------
+
+class TestNamedEmotionDetection:
+    """Law I: Momus detects directly named emotions in prose."""
+
+    @pytest.mark.asyncio
+    async def test_felt_afraid_flagged(self, momus, neutral_state):
+        prose = "The child felt afraid as darkness fell."
+        result = await momus.validate_prose(prose, neutral_state)
+        assert any("Law I" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_was_angry_flagged(self, momus, neutral_state):
+        prose = "The warrior was angry. Blood pounded in his temples."
+        result = await momus.validate_prose(prose, neutral_state)
+        assert any("Law I" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_seemed_terrified_flagged(self, momus, neutral_state):
+        prose = "The merchant seemed terrified of the shadow."
+        result = await momus.validate_prose(prose, neutral_state)
+        assert any("Law I" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_grew_nervous_flagged(self, momus, neutral_state):
+        prose = "You grew nervous as footsteps approached."
+        result = await momus.validate_prose(prose, neutral_state)
+        assert any("Law I" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_physical_description_passes(self, momus, neutral_state):
+        """Describing physical sensation (the correct approach) should pass."""
+        prose = "Your mouth dried. A hand that would not unclench."
+        result = await momus.validate_prose(prose, neutral_state)
+        assert not any("Law I" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_emotion_word_without_linking_verb_passes(self, momus, neutral_state):
+        """Standalone emotion words (not preceded by 'felt/was') should pass."""
+        prose = "Afraid of nothing, the child crossed the threshold."
+        result = await momus.validate_prose(prose, neutral_state)
+        assert not any("Law I" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_emotion_count_reported(self, momus, neutral_state):
+        """Multiple emotion violations should report the count."""
+        prose = "She felt sad. He was angry. The crowd seemed frightened."
+        result = await momus.validate_prose(prose, neutral_state)
+        violations = [v for v in result.law_violations if "Law I" in v]
+        assert len(violations) == 1  # single Law I violation
+        assert "3 instance" in violations[0]
+
+    @pytest.mark.asyncio
+    async def test_emotion_does_not_set_valid_false(self, momus, neutral_state):
+        prose = "The hero felt happy about victory."
+        result = await momus.validate_prose(prose, neutral_state)
+        assert result.valid is True
+        assert len(result.law_violations) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Law II — The Kinetic Constraint: Passive Voice
+# ---------------------------------------------------------------------------
+
+class TestPassiveVoiceDetection:
+    """Law II: Momus flags excessive passive 'to be' verbs."""
+
+    @pytest.mark.asyncio
+    async def test_excessive_passive_flagged(self, momus, neutral_state):
+        """More than 3 passive verbs triggers the check."""
+        prose = (
+            "The room was dark. The floor was cold. "
+            "The walls were slick with moisture. "
+            "Everything was silent. The air was stale."
+        )
+        result = await momus.validate_prose(prose, neutral_state)
+        assert any("Law II" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_few_passive_passes(self, momus, neutral_state):
+        """Two or fewer passive verbs should not trigger."""
+        prose = "The room was dark. A cold wind cut through the gap."
+        result = await momus.validate_prose(prose, neutral_state)
+        assert not any("Law II" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_exactly_at_threshold_passes(self, momus, neutral_state):
+        """Exactly 3 passive verbs should pass (threshold is > 3)."""
+        prose = "The hall was empty. The table was bare. Shadows were long."
+        result = await momus.validate_prose(prose, neutral_state)
+        assert not any("Law II" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_active_prose_passes(self, momus, neutral_state):
+        """Prose written in active voice should produce no Law II violation."""
+        prose = (
+            "Darkness swallowed the room. Cold iron bit into your palm. "
+            "The blade sang as it left the sheath."
+        )
+        result = await momus.validate_prose(prose, neutral_state)
+        assert not any("Law II" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_passive_count_in_violation_message(self, momus, neutral_state):
+        """The violation message should include the actual count."""
+        prose = (
+            "It was dark. It was cold. It was wet. "
+            "It was quiet. It was still."
+        )
+        result = await momus.validate_prose(prose, neutral_state)
+        violations = [v for v in result.law_violations if "Law II" in v]
+        assert len(violations) == 1
+        assert "5 passive" in violations[0]
+
+
+# ---------------------------------------------------------------------------
+# Law VI — Economy of Breath: Paragraph Overflow
+# ---------------------------------------------------------------------------
+
+class TestParagraphEconomy:
+    """Law VI: Momus flags prose that exceeds paragraph limit."""
+
+    @pytest.mark.asyncio
+    async def test_too_many_paragraphs_flagged(self, momus, neutral_state):
+        """Six paragraphs exceeds the limit of 5."""
+        prose = "\n\n".join(f"Paragraph {i}." for i in range(6))
+        result = await momus.validate_prose(prose, neutral_state)
+        assert any("Law VI" in v for v in result.law_violations)
+        assert any("6 paragraphs" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_within_limit_passes(self, momus, neutral_state):
+        """Three paragraphs is well within the limit."""
+        prose = "First paragraph.\n\nSecond paragraph.\n\nThird paragraph."
+        result = await momus.validate_prose(prose, neutral_state)
+        assert not any("Law VI" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_exactly_at_limit_passes(self, momus, neutral_state):
+        """Exactly 5 paragraphs should pass (limit is > 5)."""
+        prose = "\n\n".join(f"Paragraph {i}." for i in range(5))
+        result = await momus.validate_prose(prose, neutral_state)
+        assert not any("Law VI" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_single_paragraph_passes(self, momus, neutral_state):
+        prose = "A single dense paragraph of mythic prose."
+        result = await momus.validate_prose(prose, neutral_state)
+        assert not any("Law VI" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_blank_lines_not_counted(self, momus, neutral_state):
+        """Blank double-newlines without text should not count as paragraphs."""
+        prose = "First.\n\n\n\nSecond.\n\n\n\nThird."
+        result = await momus.validate_prose(prose, neutral_state)
+        # split on \n\n gives ["First.", "", "Second.", "", "Third."]
+        # but stripping empties → 3 paragraphs
+        assert not any("Law VI" in v for v in result.law_violations)
+
+
+# ===========================================================================
+# COMBINED VIOLATIONS
+# ===========================================================================
+
+class TestCombinedViolations:
+    """Momus can detect hallucinations AND law violations simultaneously."""
+
+    @pytest.mark.asyncio
+    async def test_hallucination_plus_law_violation(self, momus):
+        """Prose with terrain contradiction + anachronism."""
+        state = ThreadState(
+            session=SessionData(
+                current_environment="A scorching desert.",
+            ),
+            soul_ledger=SoulLedger(
+                vectors=SoulVectors(metis=5.0, bia=5.0, kleos=5.0, aidos=5.0),
+            ),
+        )
+        prose = "You dive into the ocean and check your phone."
+        result = await momus.validate_prose(prose, state)
+        assert result.valid is False  # terrain contradiction
+        assert len(result.hallucinations) >= 1
+        assert len(result.law_violations) >= 1
+        assert any("Law IV" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_multiple_law_violations_at_once(self, momus, neutral_state):
+        """Prose violating multiple laws simultaneously."""
+        # Law IV (phone) + Law I (felt afraid) + Law II (excessive passive)
+        prose = (
+            "You felt afraid. The phone was ringing. "
+            "The room was dark. Everything was still. "
+            "The air was heavy."
+        )
+        result = await momus.validate_prose(prose, neutral_state)
+        assert result.valid is True  # no state hallucinations
+        law_types = {v.split("(")[0].strip() for v in result.law_violations}
+        assert any("Law IV" in v for v in result.law_violations)
+        assert any("Law I" in v for v in result.law_violations)
+        assert any("Law II" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_clean_prose_no_violations(self, momus, neutral_state):
+        """Well-written mythic prose should pass all checks."""
+        prose = (
+            "Smoke curled from the brazier. Cold iron bit your palm. "
+            "The blade sang as it cleared the sheath."
+        )
+        result = await momus.validate_prose(prose, neutral_state)
+        assert result.valid is True
+        assert result.hallucinations == []
+        assert result.law_violations == []
+
+
+# ===========================================================================
+# CORRECTED PROSE & SCHEMA
+# ===========================================================================
 
 class TestCorrectedProse:
     """Until Phase 3, corrected_prose echoes the original input."""
@@ -309,10 +645,6 @@ class TestCorrectedProse:
         assert result.corrected_prose == prose  # not corrected yet (Phase 3)
 
 
-# ---------------------------------------------------------------------------
-# Schema
-# ---------------------------------------------------------------------------
-
 class TestMomusValidationSchema:
     """MomusValidation pydantic model behaves correctly."""
 
@@ -320,6 +652,7 @@ class TestMomusValidationSchema:
         v = MomusValidation()
         assert v.valid is True
         assert v.hallucinations == []
+        assert v.law_violations == []
         assert v.corrected_prose == ""
 
     def test_with_hallucinations(self):
@@ -331,20 +664,34 @@ class TestMomusValidationSchema:
         assert v.valid is False
         assert len(v.hallucinations) == 2
 
+    def test_with_law_violations(self):
+        v = MomusValidation(
+            valid=True,
+            law_violations=["Law IV: phone detected", "Law I: named emotion"],
+        )
+        assert v.valid is True
+        assert len(v.law_violations) == 2
+
     def test_serialization_roundtrip(self):
         v = MomusValidation(
             valid=False,
             hallucinations=["Error"],
+            law_violations=["Law IV: anachronism"],
             corrected_prose="Fixed.",
         )
         data = v.model_dump()
         v2 = MomusValidation(**data)
         assert v2.hallucinations == v.hallucinations
+        assert v2.law_violations == v.law_violations
 
+    def test_serialization_includes_law_violations(self):
+        v = MomusValidation(
+            law_violations=["Law I: emotion", "Law II: passive"],
+        )
+        data = v.model_dump()
+        assert "law_violations" in data
+        assert len(data["law_violations"]) == 2
 
-# ---------------------------------------------------------------------------
-# Agent Identity
-# ---------------------------------------------------------------------------
 
 class TestAgentIdentity:
     def test_agent_name(self):

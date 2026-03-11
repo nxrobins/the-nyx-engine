@@ -534,8 +534,10 @@ class NyxKernel:
         # Momus validation
         validation = await self.momus.validate_prose(prose, outcome.state)
         if not validation.valid:
-            logger.warning(f"Momus flagged: {validation.hallucinations}")
+            logger.warning(f"Momus hallucinations: {validation.hallucinations}")
             prose = validation.corrected_prose or prose
+        if validation.law_violations:
+            logger.warning(f"Momus law violations: {validation.law_violations}")
 
         # Milestone check (any vector == 10)
         is_milestone, milestone_vec = SoulVectorEngine.is_milestone(

@@ -128,9 +128,14 @@ class ClothoResponse(BaseModel):
 
 
 class MomusValidation(BaseModel):
-    """Momus validates Clotho's output against state."""
+    """Momus validates Clotho's output against state.
+
+    hallucinations — factual contradictions against thread state (env, oaths, death).
+    law_violations — breaches of the Laws of the Loom (literary style rules).
+    """
     valid: bool = True
     hallucinations: list[str] = Field(default_factory=list)
+    law_violations: list[str] = Field(default_factory=list)
     corrected_prose: str = ""
 
 

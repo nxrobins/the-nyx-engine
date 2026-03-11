@@ -1,14 +1,21 @@
-"""Momus - The Validator / NER Hallucination Checker v2.0.
+"""Momus - The Validator / Literary Law Enforcer v3.0.
 
-Deterministic scan of Clotho's output against Lachesis's state.
-Prevents the prose from referencing items, NPCs, or locations
-that don't exist in the thread state.
+Two categories of validation:
 
-v2.0 changes:
-- No inventory to check against; validate environment consistency
-- Check soul vector references are plausible
-- Oath references must match active oaths
-- Phase 3: Full spaCy NER pipeline
+1. **Hallucinations** — factual contradictions against thread state:
+   environment terrain, oath references, death language.
+   These set `valid=False` and are logged as warnings.
+
+2. **Law Violations** — breaches of the Laws of the Loom:
+   Law I   (Iceberg Principle) — named emotions
+   Law II  (Kinetic Constraint) — excessive passive voice
+   Law IV  (Ancient Guardrail) — anachronisms
+   Law VI  (Economy of Breath) — paragraph overflow
+   These are tracked in `law_violations` for observability
+   but do NOT set `valid=False` (style, not state).
+
+All checks are deterministic. No LLM calls.
+Phase 3 will add spaCy NER pipeline for entity tracking.
 """
 
 from __future__ import annotations
@@ -18,6 +25,74 @@ import re
 
 from app.agents.base import AgentBase
 from app.schemas.state import MomusValidation, ThreadState
+
+# ---------------------------------------------------------------------------
+# Static rule tables
+# ---------------------------------------------------------------------------
+
+_TERRAIN_PAIRS: list[tuple[str, str]] = [
+    ("ocean", "desert"), ("sea", "desert"), ("forest", "ocean"),
+    ("mountain", "underwater"), ("cave", "sky"), ("dungeon", "meadow"),
+]
+
+# Law IV — The Ancient Guardrail: modern technology & concepts
+_ANACHRONISMS: set[str] = {
+    # communication
+    "phone", "telephone", "cellphone", "smartphone", "email",
+    "internet", "wifi", "website", "computer", "laptop", "tablet",
+    "radio", "television", "tv", "broadcast",
+    # transport
+    "car", "automobile", "truck", "bus", "train", "railroad",
+    "airplane", "helicopter", "jet", "subway", "motorcycle",
+    # weapons (post-gunpowder)
+    "gun", "pistol", "rifle", "bullet", "bomb", "grenade",
+    "cannon", "missile", "rocket", "dynamite", "explosive",
+    # power & materials
+    "electricity", "battery", "generator", "motor", "engine",
+    "plastic", "nylon", "concrete", "asphalt", "semiconductor",
+    # industry
+    "factory", "skyscraper", "elevator", "escalator",
+    "robot", "machine", "microchip", "software", "hardware",
+    # media
+    "photograph", "camera", "video", "film", "cinema",
+    "newspaper", "magazine",
+    # timekeeping (mechanical)
+    "clock", "wristwatch",
+    # optics
+    "glasses", "spectacles", "binoculars", "telescope", "microscope",
+    # political systems (modern)
+    "democracy", "communism", "capitalism", "socialism",
+}
+
+# Law I — The Iceberg Principle: named emotions
+_EMOTION_WORDS: list[str] = [
+    "afraid", "angry", "anxious", "ashamed", "bitter",
+    "cheerful", "confused", "content", "delighted", "depressed",
+    "desperate", "disappointed", "disgusted", "embarrassed", "envious",
+    "excited", "frightened", "frustrated", "furious", "grateful",
+    "guilty", "happy", "heartbroken", "hopeful", "hopeless",
+    "horrified", "humiliated", "impatient", "irritated", "jealous",
+    "joyful", "lonely", "melancholy", "miserable", "nervous",
+    "nostalgic", "overjoyed", "panicked", "peaceful", "proud",
+    "regretful", "relieved", "resentful", "sad", "satisfied",
+    "scared", "shocked", "sorrowful", "surprised", "terrified",
+    "thrilled", "tormented", "troubled", "uneasy", "worried",
+]
+
+_EMOTION_PATTERN: re.Pattern[str] = re.compile(
+    r"\b(?:felt|feeling|feels|was|were|is|are|seemed|appeared|looked|became|grew)\s+"
+    + r"(?:" + "|".join(re.escape(e) for e in _EMOTION_WORDS) + r")\b",
+    re.IGNORECASE,
+)
+
+# Law II — The Kinetic Constraint: passive "to be" verbs
+_PASSIVE_PATTERN: re.Pattern[str] = re.compile(
+    r"\b(?:was|were|is|are|been)\b", re.IGNORECASE,
+)
+_PASSIVE_THRESHOLD = 3  # flag if more than this many instances
+
+# Law VI — Economy of Breath: max paragraphs per turn
+_PARAGRAPH_LIMIT = 5  # generous threshold (Laws say 2-3, allow some margin)
 
 
 class Momus(AgentBase):
@@ -35,21 +110,17 @@ class Momus(AgentBase):
     async def validate_prose(
         self, prose: str, state: ThreadState
     ) -> MomusValidation:
-        """Check Clotho's prose against the thread state for hallucinations."""
+        """Check Clotho's prose for state hallucinations and Literary Law violations."""
         await asyncio.sleep(0.1)
 
         hallucinations: list[str] = []
-
-        # --- Check 1: Environment consistency ---
-        # If prose mentions a specific location type that contradicts the environment
-        env_lower = state.session.current_environment.lower()
+        law_violations: list[str] = []
         prose_lower = prose.lower()
 
-        # Simple heuristic: detect obvious contradictions
-        _TERRAIN_PAIRS = [
-            ("ocean", "desert"), ("sea", "desert"), ("forest", "ocean"),
-            ("mountain", "underwater"), ("cave", "sky"), ("dungeon", "meadow"),
-        ]
+        # ── STATE HALLUCINATION CHECKS ────────────────────────────────
+
+        # Check 1: Environment consistency
+        env_lower = state.session.current_environment.lower()
         for a, b in _TERRAIN_PAIRS:
             if a in env_lower and b in prose_lower:
                 hallucinations.append(
@@ -60,15 +131,14 @@ class Momus(AgentBase):
                     f"Prose mentions '{a}' but environment is '{b}'-related."
                 )
 
-        # --- Check 2: Oath references ---
-        # If prose references "your oath" or "sworn", verify oaths exist
+        # Check 2: Oath references without active oaths
         if re.search(r"\b(oath|sworn|vow|promise)\b", prose_lower):
             if not state.soul_ledger.active_oaths:
                 hallucinations.append(
                     "Prose references oaths/vows but no active oaths in state."
                 )
 
-        # --- Check 3: Death/dying language when soul is healthy ---
+        # Check 3: Death language when soul is healthy
         death_words = re.findall(
             r"\b(you die|you are dead|your life ends|you perish)\b", prose_lower
         )
@@ -79,11 +149,54 @@ class Momus(AgentBase):
                     "Prose declares player death but soul vectors are not collapsed."
                 )
 
-        if hallucinations:
-            return MomusValidation(
-                valid=False,
-                hallucinations=hallucinations,
-                corrected_prose=prose,  # Phase 3: actually correct it
+        # ── LITERARY LAW CHECKS ───────────────────────────────────────
+
+        # Law IV — The Ancient Guardrail: anachronism detection
+        found_anachronisms = _detect_anachronisms(prose_lower)
+        if found_anachronisms:
+            law_violations.append(
+                f"Law IV (Ancient Guardrail): anachronism detected — "
+                f"{', '.join(sorted(found_anachronisms))}."
             )
 
-        return MomusValidation(valid=True, corrected_prose=prose)
+        # Law I — The Iceberg Principle: named emotions
+        emotion_matches = _EMOTION_PATTERN.findall(prose)
+        if emotion_matches:
+            law_violations.append(
+                f"Law I (Iceberg Principle): named emotion in prose — "
+                f"found {len(emotion_matches)} instance(s)."
+            )
+
+        # Law II — The Kinetic Constraint: passive voice
+        passive_count = len(_PASSIVE_PATTERN.findall(prose))
+        if passive_count > _PASSIVE_THRESHOLD:
+            law_violations.append(
+                f"Law II (Kinetic Constraint): {passive_count} passive 'to be' "
+                f"verbs (threshold: {_PASSIVE_THRESHOLD})."
+            )
+
+        # Law VI — Economy of Breath: paragraph count
+        paragraphs = [p.strip() for p in prose.split("\n\n") if p.strip()]
+        if len(paragraphs) > _PARAGRAPH_LIMIT:
+            law_violations.append(
+                f"Law VI (Economy of Breath): {len(paragraphs)} paragraphs "
+                f"(limit: {_PARAGRAPH_LIMIT})."
+            )
+
+        return MomusValidation(
+            valid=len(hallucinations) == 0,
+            hallucinations=hallucinations,
+            law_violations=law_violations,
+            corrected_prose=prose,  # Phase 3: actually correct it
+        )
+
+
+def _detect_anachronisms(prose_lower: str) -> set[str]:
+    """Return set of anachronistic words found in the prose."""
+    found: set[str] = set()
+    for word in _ANACHRONISMS:
+        # Word-boundary match to avoid substring false positives
+        # e.g. "bus" shouldn't match inside "ambush"
+        if re.search(rf"\b{re.escape(word)}\b", prose_lower):
+            found.add(word)
+    return found
