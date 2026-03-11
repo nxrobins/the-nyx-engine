@@ -1,8 +1,16 @@
-"""The Nyx Kernel - Asynchronous Orchestrator v3.0 (Epoch + Persistence).
+"""The Nyx Kernel - Asynchronous Orchestrator v4.0 (Supremum Patch).
 
 The central nervous system of the engine. Receives player input,
 dispatches to agents in parallel, resolves conflicts, and produces
 the final turn result.
+
+v4.0 additions (The Supremum Patch):
+- Chronicler agent: recursive memory compression every 5 turns
+- Stratified Context Builder: [Chronicle] + [Short-Term] + [Soul Mirror]
+- Soul Mirror: style directives injected based on dominant vector ≥ 7.0
+- prose_history + chronicle fields on ThreadState for rolling context
+- DB chronicle column (JSONB) on threads table
+- Clotho Literary Laws: Iceberg, Kinetic, Sense Supremacy, Ancient Guardrail
 
 v3.0 additions:
 - Epoch State Machine (_compute_epoch) controls UI mode + Clotho paragraph count
@@ -20,6 +28,7 @@ import logging
 import uuid
 
 from app.agents.atropos import Atropos
+from app.agents.chronicler import Chronicler
 from app.agents.clotho import Clotho
 from app.agents.eris import Eris
 from app.agents.hypnos import Hypnos
@@ -33,7 +42,7 @@ from app.schemas.state import (
     ThreadState,
     TurnResult,
 )
-from app.db import ensure_player, create_thread, update_thread_death, create_turn, get_last_ancestor
+from app.db import ensure_player, create_thread, update_thread_death, create_turn, append_chronicle, get_last_ancestor
 from app.services import llm
 from app.services.bfl import generate_image
 from app.services.rag import NyxRAGStore
@@ -64,6 +73,97 @@ def _compute_epoch(turn_count: int) -> tuple[int, str]:
         return 4, "open"
 
 
+# ---------------------------------------------------------------------------
+# Soul Mirror Directives (style injection based on dominant vector)
+# ---------------------------------------------------------------------------
+
+_SOUL_MIRROR: dict[str, str] = {
+    "bia": (
+        "STYLE DIRECTIVE (The World of Force): "
+        "The world feels fragile and obstructive. Use verbs of impact — "
+        "shatter, crack, split, crush. Surfaces resist and then give. "
+        "Even stillness trembles with the threat of violence."
+    ),
+    "metis": (
+        "STYLE DIRECTIVE (The World of Riddles): "
+        "The world is a riddle with teeth. Use verbs of observation and "
+        "dissection — peel, unravel, trace, measure. Every shadow hides "
+        "a mechanism. Silence is a language the player reads fluently."
+    ),
+    "kleos": (
+        "STYLE DIRECTIVE (The World of Witnesses): "
+        "The world watches. Use verbs of display and echo — ring, blaze, "
+        "carve, proclaim. Light seeks the player. Crowds are always near, "
+        "even when absent — the weight of unseen eyes never lifts."
+    ),
+    "aidos": (
+        "STYLE DIRECTIVE (The World of Shadows): "
+        "The world retreats and conceals. Use verbs of withholding and "
+        "fading — shrink, muffle, dim, fold. Borders blur. The player "
+        "moves through the world like smoke, leaving no mark."
+    ),
+}
+
+
+def _build_stratified_context(state: ThreadState) -> str:
+    """Assemble the Stratified Context for Clotho's system prompt.
+
+    Architecture (token-budget ~2,000 tokens total):
+        TOP    — The Theology:  Literary Laws (already baked into CLOTHO_SYSTEM_PROMPT)
+        MID    — The Chronicle: Mythic history sentences (long-term memory)
+        ACTIVE — The Short-Term: Last 2 turns of raw prose (immediate continuity)
+        BOTTOM — The Mirror:    Style directive from dominant soul vector
+
+    Returns an assembled string that the kernel prepends to Clotho's system prompt.
+    The Literary Laws live in CLOTHO_SYSTEM_PROMPT itself, so this function
+    builds only the dynamic layers: Chronicle + Short-Term + Mirror.
+    """
+    sections: list[str] = []
+
+    # ── MID: The Chronicle (long-term compressed memory) ──────────
+    if state.chronicle:
+        chronicle_block = "\n".join(f"  • {s}" for s in state.chronicle)
+        sections.append(
+            "═══ THE CHRONICLE (mythic history of this soul) ═══\n"
+            f"{chronicle_block}"
+        )
+
+    # ── ACTIVE: Last 2 turns of raw prose (short-term memory) ─────
+    recent = state.prose_history[-2:] if state.prose_history else []
+    if recent:
+        recent_block = "\n\n---\n\n".join(recent)
+        sections.append(
+            "═══ RECENT THREAD (last scene — maintain continuity) ═══\n"
+            f"{recent_block}"
+        )
+
+    # ── BOTTOM: The Soul Mirror (style directive) ─────────────────
+    vectors = state.soul_ledger.vectors
+    pairs = [
+        ("metis", vectors.metis), ("bia", vectors.bia),
+        ("kleos", vectors.kleos), ("aidos", vectors.aidos),
+    ]
+    dominant_name, dominant_val = max(pairs, key=lambda x: x[1])
+
+    # Only inject mirror if the dominant vector is pronounced enough
+    if dominant_val >= 7.0:
+        mirror = _SOUL_MIRROR.get(dominant_name, "")
+        if mirror:
+            sections.append(f"═══ THE SOUL MIRROR ═══\n{mirror}")
+
+    if not sections:
+        return ""
+
+    return "\n\n".join(sections)
+
+
+# ---------------------------------------------------------------------------
+# Chronicler Integration Constants
+# ---------------------------------------------------------------------------
+
+CHRONICLE_INTERVAL = 5  # compress every N turns
+
+
 class NyxKernel:
     """The heart of the engine. Orchestrates all agents per turn."""
 
@@ -76,6 +176,7 @@ class NyxKernel:
         self.clotho = Clotho()
         self.hypnos = Hypnos()
         self.momus = Momus()
+        self.chronicler = Chronicler()
 
         # Systems
         self.resolver = ConflictResolver()
@@ -168,6 +269,9 @@ class NyxKernel:
             action=birth_prompt,
             epoch_phase=phase,
         )
+
+        # Seed prose history with the birth scene
+        self.state.prose_history.append(clotho_result.prose)
 
         # Persist Turn 1 to DB
         await create_turn(
@@ -344,11 +448,15 @@ class NyxKernel:
         elif outcome.eris_struck:
             outcome.state.last_outcome = "eris"
 
+        # Build stratified context (Chronicle + Short-Term + Soul Mirror)
+        stratified = _build_stratified_context(outcome.state)
+
         clotho_result = await self.clotho.evaluate(
             outcome.state, action,
             nemesis_desc=outcome.nemesis_description,
             eris_desc=outcome.eris_description,
             epoch_phase=phase,
+            stratified_context=stratified,
         )
 
         # Append Nemesis/Eris flavor to prose
@@ -382,6 +490,32 @@ class NyxKernel:
         else:
             outcome.state.the_loom.milestone_reached = False
             outcome.state.the_loom.image_prompt_trigger = ""
+
+        # ----------------------------------------------------------
+        # Step 10b: Track prose history + Chronicler compression
+        # ----------------------------------------------------------
+        outcome.state.prose_history.append(prose)
+
+        # Chronicler fires every CHRONICLE_INTERVAL turns
+        if turn % CHRONICLE_INTERVAL == 0 and len(outcome.state.prose_history) >= CHRONICLE_INTERVAL:
+            window = outcome.state.prose_history[-CHRONICLE_INTERVAL:]
+            logger.info(f"Chronicler triggered at turn {turn} — compressing {len(window)} turns")
+            chronicle_result = await self.chronicler.evaluate(
+                outcome.state, action, prose_window=window,
+            )
+            if chronicle_result.chronicle_sentence:
+                outcome.state.chronicle.append(chronicle_result.chronicle_sentence)
+                # Persist to DB
+                await append_chronicle(self._thread_id, chronicle_result.chronicle_sentence)
+                logger.info(f"Chronicle [{len(outcome.state.chronicle)}]: {chronicle_result.chronicle_sentence}")
+
+            # Flush the prose history buffer — the chronicle now carries the memory
+            # Keep only the last 2 turns for immediate continuity
+            outcome.state.prose_history = outcome.state.prose_history[-2:]
+
+        # Cap prose_history to prevent unbounded growth between compressions
+        if len(outcome.state.prose_history) > CHRONICLE_INTERVAL + 2:
+            outcome.state.prose_history = outcome.state.prose_history[-(CHRONICLE_INTERVAL + 2):]
 
         # Add turn to RAG store
         try:

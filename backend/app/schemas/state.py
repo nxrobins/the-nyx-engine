@@ -74,6 +74,9 @@ class ThreadState(BaseModel):
     rag_context: list[str] = Field(default_factory=list)  # fallback context
     last_action: str = ""
     last_outcome: str = ""
+    # Chronicler: rolling prose buffer + compressed chronicle
+    prose_history: list[str] = Field(default_factory=list)   # last N raw prose turns
+    chronicle: list[str] = Field(default_factory=list)       # mythic sentence per 5-turn window
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +131,11 @@ class MomusValidation(BaseModel):
     valid: bool = True
     hallucinations: list[str] = Field(default_factory=list)
     corrected_prose: str = ""
+
+
+class ChroniclerResponse(BaseModel):
+    """Chronicler compresses N turns into one mythic sentence."""
+    chronicle_sentence: str = ""
 
 
 class HypnosResponse(BaseModel):
