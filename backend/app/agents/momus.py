@@ -1,4 +1,4 @@
-"""Momus - The Validator / Literary Law Enforcer v3.0.
+"""Momus - The Validator / Literary Law Enforcer v3.1 (Sprint 9: The Voice).
 
 Two categories of validation:
 
@@ -7,10 +7,10 @@ Two categories of validation:
    These set `valid=False` and are logged as warnings.
 
 2. **Law Violations** — breaches of the Laws of the Loom:
-   Law I   (Iceberg Principle) — named emotions
-   Law II  (Kinetic Constraint) — excessive passive voice
-   Law IV  (Ancient Guardrail) — anachronisms
-   Law VI  (Economy of Breath) — paragraph overflow
+   Law I   (Show Then Tell) — excessive emotion naming (threshold: 3)
+   Law II  (Player Acts) — excessive passive voice (threshold: 6)
+   Law IV  (No Anachronisms) — anachronisms
+   Law VI  (Economy) — paragraph overflow
    These are tracked in `law_violations` for observability
    but do NOT set `valid=False` (style, not state).
 
@@ -64,7 +64,9 @@ _ANACHRONISMS: set[str] = {
     "democracy", "communism", "capitalism", "socialism",
 }
 
-# Law I — The Iceberg Principle: named emotions
+# Law I — Show Then Tell: named emotions
+_EMOTION_THRESHOLD = 3  # allow up to 3 instances (show-then-tell permits naming after physical evidence)
+
 _EMOTION_WORDS: list[str] = [
     "afraid", "angry", "anxious", "ashamed", "bitter",
     "cheerful", "confused", "content", "delighted", "depressed",
@@ -85,11 +87,11 @@ _EMOTION_PATTERN: re.Pattern[str] = re.compile(
     re.IGNORECASE,
 )
 
-# Law II — The Kinetic Constraint: passive "to be" verbs
+# Law II — The Player Acts: passive "to be" verbs
 _PASSIVE_PATTERN: re.Pattern[str] = re.compile(
     r"\b(?:was|were|is|are|been)\b", re.IGNORECASE,
 )
-_PASSIVE_THRESHOLD = 3  # flag if more than this many instances
+_PASSIVE_THRESHOLD = 6  # raised from 3; new law allows "was/were" when player is subject
 
 # Law VI — Economy of Breath: max paragraphs per turn
 _PARAGRAPH_LIMIT = 5  # generous threshold (Laws say 2-3, allow some margin)
@@ -159,19 +161,19 @@ class Momus(AgentBase):
                 f"{', '.join(sorted(found_anachronisms))}."
             )
 
-        # Law I — The Iceberg Principle: named emotions
+        # Law I — Show Then Tell: named emotions (threshold-based)
         emotion_matches = _EMOTION_PATTERN.findall(prose)
-        if emotion_matches:
+        if len(emotion_matches) > _EMOTION_THRESHOLD:
             law_violations.append(
-                f"Law I (Iceberg Principle): named emotion in prose — "
-                f"found {len(emotion_matches)} instance(s)."
+                f"Law I (Show Then Tell): excessive emotion naming — "
+                f"found {len(emotion_matches)} instance(s) (threshold: {_EMOTION_THRESHOLD})."
             )
 
-        # Law II — The Kinetic Constraint: passive voice
+        # Law II — The Player Acts: passive voice
         passive_count = len(_PASSIVE_PATTERN.findall(prose))
         if passive_count > _PASSIVE_THRESHOLD:
             law_violations.append(
-                f"Law II (Kinetic Constraint): {passive_count} passive 'to be' "
+                f"Law II (Player Acts): {passive_count} passive 'to be' "
                 f"verbs (threshold: {_PASSIVE_THRESHOLD})."
             )
 

@@ -91,13 +91,13 @@ class TestErrors:
 class TestContentSpotChecks:
     """Verify key phrases survived the YAML migration intact."""
 
-    def test_clotho_has_iceberg_principle(self):
+    def test_clotho_has_show_then_tell(self):
         prompt = load_prompt("clotho")
-        assert "ICEBERG PRINCIPLE" in prompt
+        assert "SHOW THEN TELL" in prompt
 
-    def test_clotho_has_kinetic_constraint(self):
+    def test_clotho_has_player_acts(self):
         prompt = load_prompt("clotho")
-        assert "KINETIC CONSTRAINT" in prompt
+        assert "PLAYER ACTS" in prompt
 
     def test_lachesis_has_soul_ledger(self):
         prompt = load_prompt("lachesis")

@@ -1,4 +1,4 @@
-"""Tests for Momus — the Literary Law Enforcer & Hallucination Checker v3.0.
+"""Tests for Momus — the Literary Law Enforcer & Hallucination Checker v3.1.
 
 Covers:
   State hallucination checks:
@@ -8,10 +8,10 @@ Covers:
     - Multi-hallucination aggregation
 
   Literary Law checks:
-    - Law IV  (Ancient Guardrail)  — anachronism detection
-    - Law I   (Iceberg Principle)  — named emotion detection
-    - Law II  (Kinetic Constraint) — passive voice flagging
-    - Law VI  (Economy of Breath)  — paragraph overflow
+    - Law IV  (No Anachronisms)  — anachronism detection
+    - Law I   (Show Then Tell)   — emotion naming threshold (>3 = violation)
+    - Law II  (Player Acts)      — passive voice threshold (>6 = violation)
+    - Law VI  (Economy)          — paragraph overflow
 
   Schema & identity:
     - MomusValidation model behavior
@@ -410,35 +410,57 @@ class TestDetectAnachronismsHelper:
 
 
 # ---------------------------------------------------------------------------
-# Law I — The Iceberg Principle: Named Emotion Detection
+# Law I — Show Then Tell: Named Emotion Detection (threshold: >3)
 # ---------------------------------------------------------------------------
 
 class TestNamedEmotionDetection:
-    """Law I: Momus detects directly named emotions in prose."""
+    """Law I: Momus allows up to 3 emotion-naming instances (show-then-tell).
+    Only flags when > 3 instances are found."""
 
     @pytest.mark.asyncio
-    async def test_felt_afraid_flagged(self, momus, neutral_state):
+    async def test_single_emotion_passes(self, momus, neutral_state):
+        """One emotion naming is within threshold — no violation."""
         prose = "The child felt afraid as darkness fell."
         result = await momus.validate_prose(prose, neutral_state)
-        assert any("Law I" in v for v in result.law_violations)
+        assert not any("Law I" in v for v in result.law_violations)
 
     @pytest.mark.asyncio
-    async def test_was_angry_flagged(self, momus, neutral_state):
-        prose = "The warrior was angry. Blood pounded in his temples."
+    async def test_two_emotions_passes(self, momus, neutral_state):
+        """Two emotion namings are within threshold."""
+        prose = "The warrior was angry. The merchant seemed terrified."
         result = await momus.validate_prose(prose, neutral_state)
-        assert any("Law I" in v for v in result.law_violations)
+        assert not any("Law I" in v for v in result.law_violations)
 
     @pytest.mark.asyncio
-    async def test_seemed_terrified_flagged(self, momus, neutral_state):
-        prose = "The merchant seemed terrified of the shadow."
+    async def test_three_emotions_at_threshold_passes(self, momus, neutral_state):
+        """Exactly 3 emotion namings — at threshold, should pass."""
+        prose = "She felt sad. He was angry. The crowd seemed frightened."
         result = await momus.validate_prose(prose, neutral_state)
-        assert any("Law I" in v for v in result.law_violations)
+        assert not any("Law I" in v for v in result.law_violations)
 
     @pytest.mark.asyncio
-    async def test_grew_nervous_flagged(self, momus, neutral_state):
-        prose = "You grew nervous as footsteps approached."
+    async def test_four_emotions_exceeds_threshold(self, momus, neutral_state):
+        """4 emotion namings exceeds threshold — should flag."""
+        prose = (
+            "She felt sad. He was angry. The crowd seemed frightened. "
+            "You grew nervous as footsteps approached."
+        )
         result = await momus.validate_prose(prose, neutral_state)
         assert any("Law I" in v for v in result.law_violations)
+        assert any("Show Then Tell" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_five_emotions_flagged_with_count(self, momus, neutral_state):
+        """5 emotion namings reports the count in the violation."""
+        prose = (
+            "She felt sad. He was angry. The crowd seemed frightened. "
+            "You grew nervous. The child appeared scared."
+        )
+        result = await momus.validate_prose(prose, neutral_state)
+        violations = [v for v in result.law_violations if "Law I" in v]
+        assert len(violations) == 1
+        assert "5 instance" in violations[0]
+        assert "threshold: 3" in violations[0]
 
     @pytest.mark.asyncio
     async def test_physical_description_passes(self, momus, neutral_state):
@@ -455,59 +477,83 @@ class TestNamedEmotionDetection:
         assert not any("Law I" in v for v in result.law_violations)
 
     @pytest.mark.asyncio
-    async def test_emotion_count_reported(self, momus, neutral_state):
-        """Multiple emotion violations should report the count."""
-        prose = "She felt sad. He was angry. The crowd seemed frightened."
+    async def test_zero_emotions_passes(self, momus, neutral_state):
+        """No emotion naming at all — clean pass."""
+        prose = "You gripped the hilt until your knuckles whitened."
         result = await momus.validate_prose(prose, neutral_state)
-        violations = [v for v in result.law_violations if "Law I" in v]
-        assert len(violations) == 1  # single Law I violation
-        assert "3 instance" in violations[0]
+        assert not any("Law I" in v for v in result.law_violations)
 
     @pytest.mark.asyncio
     async def test_emotion_does_not_set_valid_false(self, momus, neutral_state):
-        prose = "The hero felt happy about victory."
+        """Even when exceeding threshold, law violations don't set valid=False."""
+        prose = (
+            "She felt sad. He was angry. The crowd seemed frightened. "
+            "You grew nervous. The child appeared scared."
+        )
         result = await momus.validate_prose(prose, neutral_state)
         assert result.valid is True
         assert len(result.law_violations) >= 1
 
 
 # ---------------------------------------------------------------------------
-# Law II — The Kinetic Constraint: Passive Voice
+# Law II — The Player Acts: Passive Voice (threshold: >6)
 # ---------------------------------------------------------------------------
 
 class TestPassiveVoiceDetection:
-    """Law II: Momus flags excessive passive 'to be' verbs."""
+    """Law II: Momus flags excessive passive 'to be' verbs (threshold: >6)."""
 
     @pytest.mark.asyncio
-    async def test_excessive_passive_flagged(self, momus, neutral_state):
-        """More than 3 passive verbs triggers the check."""
+    async def test_two_passive_passes(self, momus, neutral_state):
+        """Two passive verbs — well within threshold."""
+        prose = "The room was dark. A cold wind cut through the gap."
+        result = await momus.validate_prose(prose, neutral_state)
+        assert not any("Law II" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_three_passive_passes(self, momus, neutral_state):
+        """Three passive verbs — within threshold."""
+        prose = "The hall was empty. The table was bare. Shadows were long."
+        result = await momus.validate_prose(prose, neutral_state)
+        assert not any("Law II" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_five_passive_passes(self, momus, neutral_state):
+        """Five passive verbs — still within the raised threshold of 6."""
         prose = (
             "The room was dark. The floor was cold. "
             "The walls were slick with moisture. "
             "Everything was silent. The air was stale."
         )
         result = await momus.validate_prose(prose, neutral_state)
+        assert not any("Law II" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_six_passive_at_threshold_passes(self, momus, neutral_state):
+        """Exactly 6 passive verbs — at threshold, should pass."""
+        prose = (
+            "It was dark. It was cold. It was wet. "
+            "It was quiet. It was still. You were alone."
+        )
+        result = await momus.validate_prose(prose, neutral_state)
+        assert not any("Law II" in v for v in result.law_violations)
+
+    @pytest.mark.asyncio
+    async def test_seven_passive_exceeds_threshold(self, momus, neutral_state):
+        """Seven passive verbs exceeds threshold — should flag."""
+        prose = (
+            "It was dark. It was cold. It was wet. "
+            "It was quiet. It was still. You were alone. "
+            "The ground was frozen."
+        )
+        result = await momus.validate_prose(prose, neutral_state)
         assert any("Law II" in v for v in result.law_violations)
-
-    @pytest.mark.asyncio
-    async def test_few_passive_passes(self, momus, neutral_state):
-        """Two or fewer passive verbs should not trigger."""
-        prose = "The room was dark. A cold wind cut through the gap."
-        result = await momus.validate_prose(prose, neutral_state)
-        assert not any("Law II" in v for v in result.law_violations)
-
-    @pytest.mark.asyncio
-    async def test_exactly_at_threshold_passes(self, momus, neutral_state):
-        """Exactly 3 passive verbs should pass (threshold is > 3)."""
-        prose = "The hall was empty. The table was bare. Shadows were long."
-        result = await momus.validate_prose(prose, neutral_state)
-        assert not any("Law II" in v for v in result.law_violations)
+        assert any("Player Acts" in v for v in result.law_violations)
 
     @pytest.mark.asyncio
     async def test_active_prose_passes(self, momus, neutral_state):
         """Prose written in active voice should produce no Law II violation."""
         prose = (
-            "Darkness swallowed the room. Cold iron bit into your palm. "
+            "You stepped into the room. Cold iron bit into your palm. "
             "The blade sang as it left the sheath."
         )
         result = await momus.validate_prose(prose, neutral_state)
@@ -515,15 +561,17 @@ class TestPassiveVoiceDetection:
 
     @pytest.mark.asyncio
     async def test_passive_count_in_violation_message(self, momus, neutral_state):
-        """The violation message should include the actual count."""
+        """The violation message should include the actual count and threshold."""
         prose = (
             "It was dark. It was cold. It was wet. "
-            "It was quiet. It was still."
+            "It was quiet. It was still. You were alone. "
+            "The ground was frozen. The door was locked."
         )
         result = await momus.validate_prose(prose, neutral_state)
         violations = [v for v in result.law_violations if "Law II" in v]
         assert len(violations) == 1
-        assert "5 passive" in violations[0]
+        assert "8 passive" in violations[0]
+        assert "threshold: 6" in violations[0]
 
 
 # ---------------------------------------------------------------------------
@@ -599,15 +647,14 @@ class TestCombinedViolations:
     @pytest.mark.asyncio
     async def test_multiple_law_violations_at_once(self, momus, neutral_state):
         """Prose violating multiple laws simultaneously."""
-        # Law IV (phone) + Law I (felt afraid) + Law II (excessive passive)
+        # Law IV (phone) + Law I (>3 emotions) + Law II (>6 passive verbs)
         prose = (
-            "You felt afraid. The phone was ringing. "
-            "The room was dark. Everything was still. "
-            "The air was heavy."
+            "You felt afraid. She was angry. He seemed terrified. You grew nervous. "
+            "The phone was ringing. The room was dark. Everything was still. "
+            "The air was heavy. The floor was cold. The walls were wet."
         )
         result = await momus.validate_prose(prose, neutral_state)
         assert result.valid is True  # no state hallucinations
-        law_types = {v.split("(")[0].strip() for v in result.law_violations}
         assert any("Law IV" in v for v in result.law_violations)
         assert any("Law I" in v for v in result.law_violations)
         assert any("Law II" in v for v in result.law_violations)

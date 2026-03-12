@@ -124,27 +124,34 @@ def _mock_prose(state: ThreadState) -> str:
 
 _VOICE_DIRECTIVES: dict[int, str] = {
     1: (
-        "VOICE REGISTER — EARLY CHILDHOOD: "
-        "Simple, sensory, immediate. Short sentences. The world is enormous and new. "
-        "Colours are brighter, sounds are louder, adults are giants. "
-        "Write 5-6 paragraphs. After your prose, output exactly 3 choices."
+        "VOICE — EARLY CHILDHOOD: "
+        "Short, concrete sentences. The child sees and feels but does not analyze. "
+        "Adults are big, voices are loud or quiet, food is good or bad. "
+        "Use words a small child would know. Adults' dialogue should be "
+        "half-understood: the child catches tone and fragments, not meaning. "
+        "Write 4-5 paragraphs. After your prose, output exactly 3 choices."
     ),
     2: (
-        "VOICE REGISTER — MIDDLE CHILDHOOD: "
-        "Growing vocabulary, testing rules, first lies, first loyalties. "
-        "Sentences can compound. The child notices injustice but can't name it. "
-        "Write 4-5 paragraphs. After your prose, output 4-5 choices."
+        "VOICE — MIDDLE CHILDHOOD: "
+        "The child reasons in concretes. Fairness is the highest value. "
+        "Social hierarchy is physical: who sits where, who eats first, who gets hit. "
+        "Dialogue is understood but adult motives are misread. "
+        "Internal thoughts are forming: 'That isn't right' and 'I have to be careful.' "
+        "Write 3-4 paragraphs. After your prose, output 4-5 choices."
     ),
     3: (
-        "VOICE REGISTER — ADOLESCENCE: "
-        "Terse, intense, self-conscious. The body is a stranger. "
-        "Bravado masks terror. First real moral choices. "
+        "VOICE — ADOLESCENCE: "
+        "Full vocabulary. Self-conscious. The body is a problem. "
+        "Emotions run hot and contradictory. Bravado masks fear. "
+        "Sees hypocrisy everywhere, overreacts to everything. "
+        "Dialogue is sharp, defensive, sometimes cruel. "
         "Write 2-3 paragraphs. After your prose, output 5-6 morally ambiguous choices."
     ),
     4: (
-        "VOICE REGISTER — ADULTHOOD: "
-        "Dense, allusive, weight of history. The past is always present. "
-        "Write exactly 1 dense paragraph. No choices — the player types freely."
+        "VOICE — ADULTHOOD: "
+        "Full register. Terse. Every scene carries the weight of "
+        "accumulated choices. Actions have history behind them. "
+        "Write 1-2 dense paragraphs. No choices — the player types freely."
     ),
 }
 
