@@ -48,6 +48,7 @@ from app.agents.momus import Momus
 from app.agents.nemesis import Nemesis
 from app.core.config import settings
 from app.core.resolver import ConflictResolver, ResolvedOutcome
+from app.core.world_seeds import get_world_seed, format_world_context
 from app.schemas.state import (
     LachesisResponse,
     Oath,
@@ -82,19 +83,80 @@ _AGE_MAP: dict[int, int] = {
 
 # Authored beat directives — one per turn, keyed by turn number.
 # Each entry is (beat_position, directive) with epoch-specific narrative guidance.
+# Sprint 10: Scene isolation + physical grounding + named-character mandates.
 _TURN_BEATS: dict[int, tuple[str, str]] = {
-    # Epoch 1: Early Childhood (ages 3-5) — The world is the home
-    1: ("SETUP",        "First conscious memory. Establish parents, home, social class. The world IS the home — nothing exists beyond it."),
-    2: ("COMPLICATION", "The boundary of the home is tested. First encounter with something outside the family unit. Reference the home established in the previous scene."),
-    3: ("RESOLUTION",   "A choice that echoes. The child acts on instinct and something irreversible happens within the small world. Show consequences of both previous beats."),
-    # Epoch 2: Middle Childhood (ages 7-10) — The wider world
-    4: ("SETUP",        "Enters a wider world. New hierarchies, new rules — school, market, temple, or wherever children gather. The home recedes."),
-    5: ("COMPLICATION", "First betrayal or first loyalty tested. A peer, a promise, a secret. Reference the new world established in the previous scene."),
-    6: ("RESOLUTION",   "A public act. The child's reputation begins — others witness and judge. Show consequences of both previous beats."),
-    # Epoch 3: Adolescence (ages 12-17) — The body is a stranger
-    7: ("SETUP",        "The body is a stranger. New desires, new shame. The world seen through different eyes for the first time."),
-    8: ("COMPLICATION", "Authority challenged. A rule broken, a truth demanded. The adolescent refuses the world as given. Reference the previous scene directly."),
-    9: ("RESOLUTION",   "The threshold. One foot in childhood, one in the adult world. A decision that closes a door forever. Show consequences of both previous beats."),
+    # ═══ EPOCH 1: THE HEARTH (ages 3-5) ═══
+    1: ("SETUP",
+        "NEW SCENE. The child is at home. A parent is present and doing "
+        "something specific. Write a mundane domestic moment ALREADY IN "
+        "PROGRESS: a meal, a chore, tending an animal, repairing something. "
+        "Use the parent's NAME from the world context. The active situation "
+        "should create background tension the child senses but doesn't "
+        "understand. End by introducing a disruption: a sound, a visitor, "
+        "something breaking."),
+
+    2: ("COMPLICATION",
+        "NEW SCENE. Time has passed since the last scene. The child is "
+        "slightly older within this epoch. The disruption from the previous "
+        "scene has consequences that are now visible. A NEW character enters "
+        "the child's world (a neighbor, a stranger, another child). This "
+        "person brings a problem or a revelation. Use NAMES. Reference "
+        "the family and settlement from the world context."),
+
+    3: ("RESOLUTION",
+        "NEW SCENE. The conflict from this epoch reaches a breaking point. "
+        "The child must act: protect someone, hide something, speak or stay "
+        "silent. The choice should be physically concrete (not philosophical). "
+        "Show the IMMEDIATE consequence: someone's expression changes, "
+        "something breaks, a door closes. This epoch ends here. After this, "
+        "the child will dream and wake into a new chapter of life."),
+
+    # ═══ EPOCH 2: THE WORLD OUTSIDE (ages 7-10) ═══
+    4: ("SETUP",
+        "NEW SCENE. Years have passed. The child is now in the wider world "
+        "beyond home: a market, a workplace, a gathering place. NEW "
+        "characters: peers, authority figures, rivals. Establish the social "
+        "hierarchy the child must navigate. The family's situation from "
+        "Epoch 1 should have evolved (better or worse based on past choices). "
+        "Ground the scene in a specific physical activity."),
+
+    5: ("COMPLICATION",
+        "NEW SCENE. Time has passed since the last scene. A relationship "
+        "is tested: a friend demands loyalty, an authority figure is unfair, "
+        "a secret is discovered. The stakes are social: reputation, "
+        "belonging, safety. Someone SAYS something that changes things. "
+        "Use DIALOGUE. Reference characters and locations by NAME."),
+
+    6: ("RESOLUTION",
+        "NEW SCENE. The social conflict reaches a crisis. The child must "
+        "act publicly: others are watching. Whatever happens, people will "
+        "remember. Show the IMMEDIATE consequence: how others react, what "
+        "changes in the child's standing. This epoch ends here. After this, "
+        "the child will dream and wake into adolescence."),
+
+    # ═══ EPOCH 3: THE CRUCIBLE (ages 12-17) ═══
+    7: ("SETUP",
+        "NEW SCENE. Years have passed. The adolescent's body has changed. "
+        "The world treats them differently. Establish a new environment "
+        "where the adolescent has a role or responsibility (apprentice, "
+        "laborer, student, soldier-in-training). Introduce a figure of "
+        "authority or mentorship. Show the tension between who they were "
+        "as a child and who they're becoming."),
+
+    8: ("COMPLICATION",
+        "NEW SCENE. Time has passed since the last scene. The authority "
+        "figure or system the adolescent trusted fails them or betrays "
+        "them. A rule is revealed to be a lie, a protector is revealed "
+        "to be complicit, or a promise is broken. The adolescent must "
+        "decide whether to submit or resist. Use DIALOGUE. The "
+        "conversation should be the scene."),
+
+    9: ("RESOLUTION",
+        "NEW SCENE. The final night before adulthood. The adolescent "
+        "faces an adult-sized decision with adolescent tools. Someone "
+        "will be hurt no matter what they choose. A door closes forever. "
+        "Show the IMMEDIATE consequence. After this, the player wakes "
+        "into adulthood and the text box opens. Childhood is over."),
 }
 
 
@@ -172,6 +234,18 @@ def _build_stratified_context(state: ThreadState) -> str:
     builds only the dynamic layers: Chronicle + Factual + Short-Term + Mirror.
     """
     sections: list[str] = []
+
+    # ── TOP: The Origin (immutable birth lore) ────────────────────
+    if state.world_context:
+        sections.append(
+            "═══ THE ORIGIN (Background Lore) ═══\n"
+            "This is the world the player was born into. CRITICAL: Characters "
+            "listed here may have DIED or situations may have CHANGED since "
+            "birth. You MUST prioritize the FACTUAL RECORD and RECENT THREAD "
+            "below for the current truth. The Origin is backstory, not current "
+            "state.\n"
+            f"{state.world_context}"
+        )
 
     # ── MID: The Chronicle (long-term mythic memory) ──────────────
     if state.chronicle:
@@ -347,6 +421,18 @@ class NyxKernel:
                 logger.info(f"Memory seed: {vector_name} +2 ('{keyword}' found)")
                 break
 
+        # -----------------------------------------------------------
+        # Seed the world from first memory archetype (Sprint 10)
+        # -----------------------------------------------------------
+        world_seed = get_world_seed(first_memory)
+        world_context = format_world_context(world_seed, name, gender)
+        self.state.world_context = world_context
+        self.state.session.current_environment = (
+            f"{world_seed.settlement} ({world_seed.settlement_type}, "
+            f"{world_seed.region}). {world_seed.active_situation}"
+        )
+        logger.info(f"World seed: {world_seed.settlement} ('{first_memory[:30]}...')")
+
         # DB: ensure player + create thread
         await ensure_player(player_id)
         self._thread_id = await create_thread(player_id, hamartia)
@@ -371,14 +457,20 @@ class NyxKernel:
         # Tag state so Clotho (mock or real) knows this is a birth scene
         self.state.last_outcome = "birth"
 
-        # Build the birth prompt for Clotho — Age of Ash grounding
+        # Build the birth prompt for Clotho — grounded in world seed
         birth_prompt = (
-            f"The player's earliest memory is: '{first_memory}'. "
-            f"Use this memory to instantly establish their identity in a dark, "
-            f"low-fantasy world (The Age of Ash). Tell the player who their "
-            f"parents or caretakers are, what their social class or tribe is, "
-            f"and what immediate physical event is happening around them right "
-            f"now to drive the plot forward. They are age 3."
+            f"This is the opening scene of a life. The player is {name}, "
+            f"a {gender}, age 3.\n\n"
+            f"{world_context}\n\n"
+            f"The player's earliest memory is: '{first_memory}'.\n\n"
+            f"Write a scene that is ALREADY IN PROGRESS. The child is in the "
+            f"middle of a specific, mundane moment — a meal, a chore, watching "
+            f"their parent work, playing in the dirt. Use the family members "
+            f"BY NAME. Show the settlement through the child's eyes. The "
+            f"'active situation' should be background pressure that the child "
+            f"senses but doesn't understand.\n\n"
+            f"Do NOT begin with waking up. Do NOT begin with a mystical vision. "
+            f"Do NOT begin with a ceremony. Begin in the middle of ordinary life."
         )
 
         # Ancestral echo — flavor for Clotho

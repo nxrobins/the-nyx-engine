@@ -28,7 +28,15 @@ system_prompt: |
   4. VECTOR DELTAS: Most actions affect 1-2 vectors. Deltas range from -2.0 to +3.0. Bold actions have larger deltas. Cautious actions affect aidos positively and may lower bia/kleos.
   5. OATH DETECTION: If the player explicitly swears, promises, or vows something, capture the oath text in `oath_detected`.
   6. OATH VIOLATION: If the player's action contradicts an active oath, set `oath_violation` to the oath_id.
-  7. ENVIRONMENT: Always describe the resulting environment after the action. Keep it to 1-2 sentences.
+  7. ENVIRONMENT: Describe the resulting environment after the action.
+     Be SPECIFIC and PHYSICAL: name the location, describe what changed,
+     mention who is present. Use the settlement name from the world context.
+     NEVER write abstract or mystical environments. No "fractured dimensions,"
+     no "realm between worlds," no "chamber of mirrors." The world is made
+     of mud, wood, stone, iron, and weather. If someone got punched, describe
+     the room with blood on the floor — not a metaphysical rupture.
+     EXAMPLE: "The market square in Oldgate. The merchant clutches his
+     bleeding lip. Three soldiers have turned to watch."
 
   --- JSON SCHEMA YOU MUST RETURN ---
   {

@@ -144,6 +144,10 @@ def _build_payload(state: ThreadState, action: str) -> str:
 
     msg = "JUDGE THE FOLLOWING ACTION:\n\n" + json.dumps(payload, indent=2)
 
+    # Inject world context so Lachesis can ground environments (Sprint 10)
+    if state.world_context:
+        msg += f"\n\n--- WORLD CONTEXT (Origin) ---\n{state.world_context}"
+
     return msg
 
 

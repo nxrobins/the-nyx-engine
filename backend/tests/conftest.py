@@ -60,7 +60,14 @@ def milestone_vectors() -> SoulVectors:
 @pytest.fixture
 def fresh_state() -> ThreadState:
     """A brand-new ThreadState with defaults — Turn 0, balanced soul."""
-    return ThreadState()
+    return ThreadState(
+        session=SessionData(
+            current_environment=(
+                "Thornwell (hill village, the Ashlands). "
+                "A hard winter — the granary is half-empty."
+            ),
+        ),
+    )
 
 
 @pytest.fixture

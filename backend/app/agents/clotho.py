@@ -156,9 +156,24 @@ _VOICE_DIRECTIVES: dict[int, str] = {
 }
 
 _FALLBACK_CHOICES: dict[int, list[str]] = {
-    1: ["Look around carefully", "Cry for help", "Hide in the shadows"],
-    2: ["Investigate further", "Talk to someone nearby", "Search for supplies", "Retreat to safety"],
-    3: ["Strike first", "Set a trap", "Negotiate terms", "Observe from hiding", "Rally allies"],
+    1: [  # Bia / Metis / Aidos
+        "Push them away",
+        "Pretend you didn't see anything",
+        "Hide behind your mother",
+    ],
+    2: [  # Bia / Metis / Aidos / Kleos
+        "Shove your way through",
+        "Tell a lie to get what you want",
+        "Slip away quietly",
+        "Stand up and say something loud",
+    ],
+    3: [  # Bia / Metis / Aidos / Kleos / Wild
+        "Hit first and hard",
+        "Find their weakness and use it",
+        "Walk away before it gets worse",
+        "Challenge them in front of everyone",
+        "Do something nobody expects",
+    ],
     4: [],
 }
 
@@ -277,14 +292,33 @@ def _build_payload(
     if vignette_directive:
         msg += f"\n\n--- SCENE BEAT ({state.session.beat_position}) ---\n{vignette_directive}"
 
-    # Append choice format instructions (Phase 1-3 only)
+    # Append vector-mapped choice instructions (Phase 1-3 only)
     if epoch_phase < 4:
+        choice_count = {1: 3, 2: 4, 3: 5}.get(epoch_phase, 3)
         msg += (
-            "\n\nAFTER your prose paragraphs, output the following on a new line:\n"
-            "---CHOICES---\n"
-            'Then output a JSON array of choice strings. Example:\n'
-            '["Run toward the light", "Hide in the darkness", "Call out to the voice"]\n'
-            "Output ONLY the prose paragraphs, then the separator, then the JSON array. Nothing else."
+            f"\n\n--- CHOICES ---\n"
+            f"After your prose, output exactly {choice_count} choices.\n"
+            f"CHOICE RULES:\n"
+            f"- Each choice is a PHYSICAL ACTION the character can take RIGHT NOW\n"
+            f"- Use concrete verbs: run, grab, say, hide, throw, follow, refuse, lie\n"
+            f"- NEVER use philosophical gestures: 'embrace the shadow', 'accept fate'\n"
+            f"- Map choices to soul vectors:\n"
+            f"  • One FORCEFUL option (Bia): fight, break, intimidate, confront\n"
+            f"  • One CLEVER option (Metis): trick, persuade, steal, outmaneuver\n"
+            f"  • One CAUTIOUS option (Aidos): hide, wait, retreat, observe, show mercy\n"
+        )
+        # Phase 2+ gets a 4th choice; Phase 3 gets a 5th
+        if epoch_phase >= 2:
+            msg += f"  • One BOLD/PUBLIC option (Kleos): declare, challenge, volunteer, stand up\n"
+        if epoch_phase >= 3:
+            msg += f"  • One WILD option: an unexpected action that doesn't fit the other categories\n"
+        msg += (
+            f"- Choices should lead to DIFFERENT outcomes, not different moods\n"
+            f"- At least one choice should involve speaking to someone present\n"
+            f"- Format: ---CHOICES--- then a JSON array\n"
+            f'Example: ["Shove the man away from your mother", '
+            f'"Tell him your father is just around the corner", '
+            f'"Slip behind the cart and hide"]\n'
         )
 
     return msg

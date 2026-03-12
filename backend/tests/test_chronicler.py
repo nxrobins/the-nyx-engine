@@ -174,7 +174,7 @@ class TestDualTrackOutput:
     @pytest.mark.asyncio
     async def test_factual_contains_setting(self, chronicler, fresh_state, sample_prose_window):
         result = await chronicler.evaluate(fresh_state, "walk", sample_prose_window)
-        # fresh_state has "A shadowed threshold between worlds."
+        # fresh_state has a concrete environment from world seed
         assert "Setting:" in result.factual_digest
 
     @pytest.mark.asyncio

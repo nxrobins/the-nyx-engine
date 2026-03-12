@@ -172,31 +172,57 @@ class TestBeatStructure:
 
 
 class TestVignetteDirectives:
-    """Authored directives carry epoch-specific content."""
+    """Sprint 10: Scene isolation + physical grounding directives."""
 
-    def test_turn_1_establishes_home(self):
+    def test_all_beats_start_with_new_scene(self):
+        """Every childhood beat starts with 'NEW SCENE.'"""
+        for t in range(1, 10):
+            *_, directive = _get_turn_metadata(t)
+            assert "NEW SCENE" in directive, f"Turn {t} missing 'NEW SCENE': {directive[:60]}"
+
+    def test_complication_beats_reference_time_passed(self):
+        """COMPLICATION beats (2, 5, 8) mention time passing or previous scene."""
+        for t in (2, 5, 8):
+            *_, directive = _get_turn_metadata(t)
+            has_time = "time has passed" in directive.lower() or "previous scene" in directive.lower()
+            assert has_time, f"Turn {t} COMPLICATION missing time reference: {directive[:80]}"
+
+    def test_resolution_beats_have_consequence(self):
+        """RESOLUTION beats (3, 6, 9) mention immediate consequence."""
+        for t in (3, 6, 9):
+            *_, directive = _get_turn_metadata(t)
+            has_consequence = "consequence" in directive.lower() or "door closes" in directive.lower()
+            assert has_consequence, f"Turn {t} RESOLUTION missing consequence: {directive[:80]}"
+
+    def test_multiple_beats_require_names(self):
+        """Several beats mandate using character NAMES."""
+        name_turns = 0
+        for t in range(1, 10):
+            *_, directive = _get_turn_metadata(t)
+            if "NAME" in directive:
+                name_turns += 1
+        assert name_turns >= 3, f"Only {name_turns} beats mention NAMES"
+
+    def test_dialogue_in_complication_beats(self):
+        """At least some beats mandate DIALOGUE."""
+        dialogue_turns = 0
+        for t in range(1, 10):
+            *_, directive = _get_turn_metadata(t)
+            if "DIALOGUE" in directive:
+                dialogue_turns += 1
+        assert dialogue_turns >= 2, f"Only {dialogue_turns} beats mention DIALOGUE"
+
+    def test_turn_1_home_and_parent(self):
         *_, directive = _get_turn_metadata(1)
-        assert "home" in directive.lower() or "parents" in directive.lower()
+        assert "home" in directive.lower() or "parent" in directive.lower()
 
-    def test_turn_3_has_consequences(self):
-        *_, directive = _get_turn_metadata(3)
-        assert "consequences" in directive.lower() or "irreversible" in directive.lower()
-
-    def test_turn_4_enters_wider_world(self):
+    def test_turn_4_wider_world(self):
         *_, directive = _get_turn_metadata(4)
-        assert "wider world" in directive.lower() or "hierarchies" in directive.lower()
+        assert "wider world" in directive.lower()
 
-    def test_turn_6_public_act(self):
-        *_, directive = _get_turn_metadata(6)
-        assert "public" in directive.lower() or "reputation" in directive.lower()
-
-    def test_turn_7_body_is_stranger(self):
-        *_, directive = _get_turn_metadata(7)
-        assert "body" in directive.lower() or "stranger" in directive.lower()
-
-    def test_turn_9_threshold(self):
+    def test_turn_9_door_or_adulthood(self):
         *_, directive = _get_turn_metadata(9)
-        assert "threshold" in directive.lower() or "door" in directive.lower()
+        assert "door" in directive.lower() or "adulthood" in directive.lower()
 
     def test_phase_4_no_directive(self):
         *_, directive = _get_turn_metadata(10)

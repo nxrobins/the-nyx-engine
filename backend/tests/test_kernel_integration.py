@@ -126,6 +126,111 @@ class TestKernelInitialize:
         assert isinstance(result.ui_choices, list)
 
 
+class TestWorldSeedIntegration:
+    """Sprint 10: World seed is injected at initialization."""
+
+    @pytest.mark.asyncio
+    async def test_light_memory_seeds_thornwell(self, kernel: NyxKernel):
+        result = await kernel.initialize(
+            hamartia="Unformed",
+            player_id="test_player",
+            name="Orpheus",
+            gender="boy",
+            first_memory="A light in the distance I could not reach.",
+        )
+        assert "Thornwell" in result.state.world_context
+
+    @pytest.mark.asyncio
+    async def test_stone_memory_seeds_ashfall(self, kernel: NyxKernel):
+        result = await kernel.initialize(
+            hamartia="Unformed",
+            player_id="test_player",
+            name="Ajax",
+            gender="boy",
+            first_memory="The weight of a heavy stone in my hand.",
+        )
+        assert "Ashfall" in result.state.world_context
+
+    @pytest.mark.asyncio
+    async def test_crowd_memory_seeds_oldgate(self, kernel: NyxKernel):
+        result = await kernel.initialize(
+            hamartia="Unformed",
+            player_id="test_player",
+            name="Helen",
+            gender="girl",
+            first_memory="A crowd shouting a name that was not mine.",
+        )
+        assert "Oldgate" in result.state.world_context
+
+    @pytest.mark.asyncio
+    async def test_shadow_memory_seeds_fenward(self, kernel: NyxKernel):
+        result = await kernel.initialize(
+            hamartia="Unformed",
+            player_id="test_player",
+            name="Nyx",
+            gender="girl",
+            first_memory="A cold shadow that moved when I moved.",
+        )
+        assert "Fenward" in result.state.world_context
+
+    @pytest.mark.asyncio
+    async def test_environment_not_shadowed_threshold(self, kernel: NyxKernel):
+        result = await kernel.initialize(
+            hamartia="Unformed",
+            player_id="test_player",
+            name="Hero",
+            gender="boy",
+            first_memory="The weight of a heavy stone in my hand.",
+        )
+        assert "shadowed threshold" not in result.state.session.current_environment
+
+    @pytest.mark.asyncio
+    async def test_environment_contains_active_situation(self, kernel: NyxKernel):
+        result = await kernel.initialize(
+            hamartia="Unformed",
+            player_id="test_player",
+            name="Hero",
+            gender="boy",
+            first_memory="The weight of a heavy stone in my hand.",
+        )
+        assert "shaft collapsed" in result.state.session.current_environment
+
+    @pytest.mark.asyncio
+    async def test_world_context_nonempty_after_init(self, kernel: NyxKernel):
+        result = await kernel.initialize(
+            hamartia="Unformed",
+            player_id="test_player",
+            name="Hero",
+            gender="boy",
+        )
+        assert result.state.world_context != ""
+
+    @pytest.mark.asyncio
+    async def test_world_context_in_stratified_context(self, kernel: NyxKernel):
+        """World context should appear in stratified context via Origin wrapper."""
+        from app.core.kernel import _build_stratified_context
+        await kernel.initialize(
+            hamartia="Unformed",
+            player_id="test_player",
+            name="Hero",
+            gender="boy",
+            first_memory="A light in the distance I could not reach.",
+        )
+        ctx = _build_stratified_context(kernel.state)
+        assert "THE ORIGIN" in ctx
+        assert "Thornwell" in ctx
+
+    @pytest.mark.asyncio
+    async def test_origin_absent_when_world_context_empty(self, kernel: NyxKernel):
+        """If world_context is empty, Origin section should not appear."""
+        from app.core.kernel import _build_stratified_context
+        # Manually create a state with empty world_context
+        from app.schemas.state import ThreadState
+        empty_state = ThreadState()
+        ctx = _build_stratified_context(empty_state)
+        assert "THE ORIGIN" not in ctx
+
+
 class TestKernelProcessTurn:
     """Turn 1+: Full pipeline execution."""
 

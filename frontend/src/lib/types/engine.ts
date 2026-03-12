@@ -46,6 +46,7 @@ export interface ThreadState {
 	soul_ledger: SoulLedger;
 	the_loom: TheLoom;
 	rag_context: string[];
+	world_context: string;
 	last_action: string;
 	last_outcome: string;
 	current_dream: string; // Hypnos dream text (consumed by next Clotho call)

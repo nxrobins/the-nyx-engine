@@ -57,7 +57,7 @@ class SessionData(BaseModel):
     first_memory: str = ""
     turn_count: int = 0
     run_number: int = 1
-    current_environment: str = "A shadowed threshold between worlds."
+    current_environment: str = ""
     epoch_phase: int = 1        # 1-4, computed from turn_count
     ui_mode: str = "buttons"    # "buttons" | "open"
     player_age: int = 3         # deterministic age per turn
@@ -74,6 +74,7 @@ class ThreadState(BaseModel):
     soul_ledger: SoulLedger = Field(default_factory=SoulLedger)
     the_loom: TheLoom = Field(default_factory=TheLoom)
     rag_context: list[str] = Field(default_factory=list)  # fallback context
+    world_context: str = ""    # formatted world seed, fed to Clotho every turn
     last_action: str = ""
     last_outcome: str = ""
     current_dream: str = ""    # Hypnos dream text (consumed by next Clotho call)
