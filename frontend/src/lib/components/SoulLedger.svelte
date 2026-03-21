@@ -4,7 +4,7 @@
 -->
 <script lang="ts">
 	import { gameState } from '$lib/stores/engine';
-	import type { SoulVectors, Oath } from '$lib/types/engine';
+	import type { LegacyEcho, Oath, PressureState, SoulVectors } from '$lib/types/engine';
 
 	let vectors = $derived<SoulVectors | null>(
 		$gameState?.soul_ledger.vectors ?? null
@@ -16,6 +16,14 @@
 
 	let oaths = $derived<Oath[]>(
 		$gameState?.soul_ledger.active_oaths ?? []
+	);
+
+	let pressures = $derived<PressureState | null>(
+		$gameState?.pressures ?? null
+	);
+
+	let legacyEchoes = $derived<LegacyEcho[]>(
+		$gameState?.legacy_echoes ?? []
 	);
 
 	/** Format a vector value as whole number */
@@ -39,6 +47,15 @@
 		if (val <= 3) return 'text-[var(--nyx-text-dim)]';
 		return 'text-[var(--nyx-text)]';
 	}
+
+	const pressureKeys: { key: keyof PressureState; label: string }[] = [
+		{ key: 'suspicion', label: 'SUSPICION' },
+		{ key: 'scarcity', label: 'SCARCITY' },
+		{ key: 'wounds', label: 'WOUNDS' },
+		{ key: 'debt', label: 'DEBT' },
+		{ key: 'faction_heat', label: 'FACTION' },
+		{ key: 'omen', label: 'OMEN' }
+	];
 </script>
 
 <aside class="h-full overflow-y-auto border-r border-[var(--nyx-border)] px-5 py-6 flex flex-col gap-8 bg-[var(--nyx-void)]">
@@ -54,6 +71,21 @@
 			>
 				{hamartia}
 			</p>
+		</div>
+	{/if}
+
+	{#if legacyEchoes.length > 0}
+		<div class="flex flex-col gap-3">
+			<p class="text-[10px] uppercase tracking-[0.25em]" style="color: var(--nyx-text-dim);">
+				Legacy Echo
+			</p>
+
+			{#each legacyEchoes as echo}
+				<div class="text-sm leading-relaxed pl-3 border-l-2 border-[var(--nyx-oracle-gold)]/50" style="font-family: var(--font-prose);">
+					<p class="text-[var(--nyx-oracle-gold)]/90">{echo.inherited_mark}</p>
+					<p class="text-[var(--nyx-text-dim)] text-xs mt-1">{echo.mechanical_effect}</p>
+				</div>
+			{/each}
 		</div>
 	{/if}
 
@@ -95,6 +127,46 @@
 		</div>
 	{/if}
 
+	{#if pressures}
+		<div class="flex flex-col gap-3">
+			<p class="text-[10px] uppercase tracking-[0.25em]" style="color: var(--nyx-text-dim);">
+				World Pressure
+			</p>
+
+			{#each pressureKeys as { key, label }}
+				{@const val = pressures[key]}
+				{#if typeof val === 'number' && val >= 0.4}
+					<div class="flex items-center justify-between gap-3">
+						<span
+							class="text-xs tracking-[0.15em] w-20"
+							style="font-family: var(--font-mono); color: var(--nyx-text-dim);"
+						>
+							{label}
+						</span>
+						<div class="flex-1 h-[2px] bg-[var(--nyx-border)] relative">
+							<div
+								class="absolute inset-y-0 left-0 bg-[var(--nyx-oracle-gold)]/70 transition-all duration-700 ease-out"
+								style="width: {(Math.min(val, 5) / 5) * 100}%;"
+							></div>
+						</div>
+						<span
+							class="text-xs tabular-nums w-8 text-right text-[var(--nyx-text)]"
+							style="font-family: var(--font-mono);"
+						>
+							{val.toFixed(1)}
+						</span>
+					</div>
+				{/if}
+			{/each}
+
+			{#if pressures.stability_streak >= 2}
+				<p class="text-[10px] leading-relaxed" style="color: var(--nyx-text-dim);">
+					Stability streak {pressures.stability_streak} — the world is waiting to break its calm.
+				</p>
+			{/if}
+		</div>
+	{/if}
+
 	<!-- Active Oaths -->
 	{#if oaths.length > 0}
 		<div class="flex flex-col gap-3">
@@ -105,17 +177,22 @@
 			{#each oaths as oath}
 				<div
 					class="text-sm leading-relaxed pl-3 border-l-2 transition-all duration-300
-						{oath.broken
+						{oath.status === 'broken'
 							? 'border-[var(--nyx-oracle-gold)] kintsugi kintsugi-line'
 							: 'border-[var(--nyx-border)]'}"
 					style="font-family: var(--font-prose);"
 				>
-					<p class={oath.broken ? 'text-[var(--nyx-oracle-gold)]/70' : 'text-[var(--nyx-text)]'}>
+					<p class={oath.status === 'broken' ? 'text-[var(--nyx-oracle-gold)]/70' : 'text-[var(--nyx-text)]'}>
 						"{oath.text}"
 					</p>
 					<p class="text-[10px] mt-1" style="color: var(--nyx-text-dim);">
-						Turn {oath.turn_sworn}{oath.broken ? ' — BROKEN' : ''}
+						Turn {oath.turn_sworn} — {oath.status.toUpperCase()}
 					</p>
+					{#if oath.fulfillment_note}
+						<p class="text-[10px] mt-1" style="color: var(--nyx-text-dim);">
+							{oath.fulfillment_note}
+						</p>
+					{/if}
 				</div>
 			{/each}
 		</div>

@@ -1,9 +1,11 @@
-"""Tests for the Oath Engine — deterministic oath detection service.
+"""Tests for the Oath Engine — deterministic oath detection and verification.
 
 Extracted from TestDetectOath in test_lachesis.py (P1-002).
 """
 
-from app.services.oath_engine import detect_oath
+from app.schemas.state import Oath, OathTerms, SoulLedger, ThreadState
+from app.services.oath_engine import detect_oath, verify_oaths
+from app.services.oath_parser import parse_oath_text
 
 
 class TestDetectOath:
@@ -56,3 +58,92 @@ class TestDetectOath:
         # because the \b after 'swear' would need a word boundary
         # Actually \bi swear\b looks for "i swear" as a whole phrase
         assert result is None
+
+
+class TestParseOathText:
+    """Structured oath terms are extracted for later verification."""
+
+    def test_extracts_protected_target_and_price(self):
+        terms = parse_oath_text("On my honor, I swear to protect Sera before dawn")
+        assert terms is not None
+        assert terms.protected_target == "Sera"
+        assert terms.price == "honor"
+        assert terms.deadline == "before dawn"
+
+    def test_extracts_forbidden_action(self):
+        terms = parse_oath_text("I vow to never betray the village")
+        assert terms is not None
+        assert terms.forbidden_action is not None
+        assert "betray the village" in terms.forbidden_action.lower()
+
+
+class TestVerifyOaths:
+    """Active oaths can be broken, fulfilled, or transformed."""
+
+    def test_protect_oath_breaks_when_target_is_attacked(self):
+        state = ThreadState(
+            soul_ledger=SoulLedger(
+                active_oaths=[
+                    Oath(
+                        oath_id="oath_1",
+                        text="I swear to protect Sera.",
+                        turn_sworn=2,
+                        terms=OathTerms(
+                            subject="Hero",
+                            promised_action="protect Sera",
+                            protected_target="Sera",
+                            price="honor",
+                        ),
+                    )
+                ]
+            )
+        )
+
+        broken, fulfilled, transformed = verify_oaths(state, "I attack Sera with my knife")
+        assert broken == ["oath_1"]
+        assert fulfilled == []
+        assert transformed == []
+
+    def test_promised_action_can_be_fulfilled(self):
+        state = ThreadState(
+            soul_ledger=SoulLedger(
+                active_oaths=[
+                    Oath(
+                        oath_id="oath_2",
+                        text="I promise to return the stolen coin.",
+                        turn_sworn=2,
+                        terms=OathTerms(
+                            subject="Hero",
+                            promised_action="return the stolen coin",
+                        ),
+                    )
+                ]
+            )
+        )
+
+        broken, fulfilled, transformed = verify_oaths(state, "I return the stolen coin to the widow")
+        assert broken == []
+        assert fulfilled == ["oath_2"]
+        assert transformed == []
+
+    def test_oath_can_be_transformed(self):
+        state = ThreadState(
+            soul_ledger=SoulLedger(
+                active_oaths=[
+                    Oath(
+                        oath_id="oath_3",
+                        text="I swear to serve the king.",
+                        turn_sworn=2,
+                        terms=OathTerms(
+                            subject="Hero",
+                            promised_action="serve the king",
+                        ),
+                    )
+                ]
+            )
+        )
+
+        broken, fulfilled, transformed = verify_oaths(state, "I renounce my oath before the court")
+        assert broken == []
+        assert fulfilled == []
+        assert transformed == ["oath_3"]

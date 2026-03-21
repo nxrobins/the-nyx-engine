@@ -140,6 +140,8 @@ class TestResolveHamartiaFork:
         kernel.state.soul_ledger.vectors.aidos = 2.0
         ctx = await kernel._resolve_turn("attack the beast")
         assert ctx.outcome.state.soul_ledger.hamartia == "Wrath"
+        assert ctx.outcome.state.soul_ledger.hamartia_profile is not None
+        assert ctx.outcome.state.soul_ledger.hamartia_profile.name == "Wrath"
 
     @pytest.mark.asyncio
     async def test_hamartia_not_overwritten_when_already_set(self, kernel: NyxKernel):

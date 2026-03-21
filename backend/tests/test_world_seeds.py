@@ -83,6 +83,21 @@ class TestWorldSeedContent:
                 assert npc.role, f"NPC '{npc.name}' in '{key}' has empty role"
                 assert npc.trait, f"NPC '{npc.name}' in '{key}' has empty trait"
 
+    def test_each_seed_has_home_location_metadata(self):
+        for key, seed in WORLD_SEEDS.items():
+            assert seed.home_location_id, f"Seed '{key}' missing home_location_id"
+            assert seed.home_location_name, f"Seed '{key}' missing home_location_name"
+            assert seed.home_location_kind, f"Seed '{key}' missing home_location_kind"
+
+    def test_each_seed_has_faction_stub(self):
+        for key, seed in WORLD_SEEDS.items():
+            assert seed.faction_id, f"Seed '{key}' missing faction_id"
+            assert seed.faction_name, f"Seed '{key}' missing faction_name"
+
+    def test_each_seed_has_default_scene_problem(self):
+        for key, seed in WORLD_SEEDS.items():
+            assert seed.default_scene_problem, f"Seed '{key}' missing default scene problem"
+
     def test_no_duplicate_settlement_names(self):
         settlements = [seed.settlement for seed in WORLD_SEEDS.values()]
         assert len(settlements) == len(set(settlements))

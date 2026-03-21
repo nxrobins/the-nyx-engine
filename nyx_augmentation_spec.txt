@@ -1,0 +1,786 @@
+NYX ENGINE AUGMENTATION SPEC
+Toward the stated intent: competing personas, friction, irreversible tragedy, and legacy
+
+Context
+Nyx already has a strong tone, a real orchestration loop, and a coherent moral math layer. The gap is that several of its headline claims are only partially mechanized:
+
+- The agents do not yet truly compete over the shape of the scene. The kernel resolves coarse flags and deltas, then Clotho does most of the authored work.
+- The world model is still mostly string-based memory: environment text, RAG summaries, and prompt wrappers.
+- Hamartia, oaths, death, and legacy exist, but they are thinner than the fiction implies.
+- Friction is mostly internal soul pressure plus occasional Nemesis and Eris intervention, rather than a persistent external economy of consequences.
+- Momus can detect some drift, but it does not yet repair it, and the player cannot really feel the hidden contest of the Fates.
+
+This spec moves Nyx from "mythic narrated loop" toward "hostile multi-agent tragedy engine" without throwing away the current kernel, childhood epochs, soul vectors, or streaming UX.
+
+Core Product Goal
+Make the README claims mechanically true:
+
+- Eight personas do not just decorate a story. They materially fight over what becomes true.
+- The world persists causally across scenes, adulthood, death, and reincarnation.
+- The player is pressured by both inner corruption and outer consequence.
+- Hamartia, oaths, and death permanently reshape future play.
+- The player can feel divine adjudication in the interface, not just in the prompt stack.
+
+Non-Goals
+
+- Do not replace the existing kernel with an entirely new architecture in one pass.
+- Do not remove the soul vector system.
+- Do not turn the game into a tactics RPG with menus, inventories, or combat stats.
+- Do not expose raw debug JSON to the player.
+- Do not make persistence depend on PostgreSQL being present.
+
+Design Principles
+
+1. Structured state outranks prose.
+Clotho and the chronicle are narrative surfaces, not the source of truth.
+
+2. The resolver should merge competing proposals, not just pick a winner textually.
+
+3. Every phase must ship cleanly.
+No "big bang" rewrite. Each phase should leave the game playable and improved.
+
+4. Persistent tragedy matters more than infinite content breadth.
+Better one reliable legacy system than fifty shallow world variants.
+
+5. The player should feel pressure every turn.
+Friction is not an occasional punishment event. It is the game.
+
+
+PHASE 1: THE CANON
+Structured world state, scene state, and named social reality
+
+Problem This Solves
+Today the engine still relies heavily on string memory:
+
+- session.current_environment
+- rag_context
+- world_context
+- factual_chronicle
+
+That is enough for flavor and short-run continuity, but not enough for strong causal play. It leaves adulthood vulnerable to generic drift, dead-NPC confusion, and weak scene grounding.
+
+Goal
+Introduce a canonical world model that survives scene changes and becomes the real source of truth for Lachesis, Momus, Clotho, and future legacy systems.
+
+Deliverables
+
+1. Add canonical state models.
+File: backend/app/schemas/state.py
+
+Add new models:
+
+- CanonNPC
+  - npc_id: str
+  - name: str
+  - role: str
+  - home_location_id: str
+  - current_location_id: str
+  - status: str  # alive | dead | missing | departed
+  - trust: float
+  - fear: float
+  - obligation: float
+  - tags: list[str]
+  - last_seen_turn: int
+
+- CanonLocation
+  - location_id: str
+  - name: str
+  - region: str
+  - kind: str
+  - current_condition: str
+  - tags: list[str]
+
+- CanonFaction
+  - faction_id: str
+  - name: str
+  - stance: str
+  - leverage: float
+  - hostility: float
+  - notes: str
+
+- SceneClock
+  - clock_id: str
+  - label: str
+  - progress: int
+  - max_segments: int
+  - stakes: str
+  - resolution_hint: str
+
+- SceneState
+  - scene_id: str
+  - location_id: str
+  - present_npc_ids: list[str]
+  - active_clock_ids: list[str]
+  - immediate_problem: str
+  - scene_objective: str
+  - carryover_consequence: str
+
+- WorldCanon
+  - npcs: dict[str, CanonNPC]
+  - locations: dict[str, CanonLocation]
+  - factions: dict[str, CanonFaction]
+  - clocks: dict[str, SceneClock]
+  - current_scene: SceneState
+
+Add to ThreadState:
+
+- canon: WorldCanon | None = None
+
+Keep world_context and factual_chronicle. They remain useful prompt layers. Canon becomes the live truth. World context becomes the immutable birth record.
+
+2. Create a canonical bootstrap service.
+New file: backend/app/services/canon.py
+
+Responsibilities:
+
+- Build a WorldCanon from a WorldSeed and player identity.
+- Map family members into CanonNPC records.
+- Create starting locations and a first scene.
+- Provide helper functions:
+  - bootstrap_canon(seed, player_name, player_gender) -> WorldCanon
+  - render_scene_snapshot(state) -> str
+  - derive_environment_string(state) -> str
+
+3. Extend world seeds from prompt lore into canon bootstrap data.
+File: backend/app/core/world_seeds.py
+
+Keep the current authored seeds, but add enough metadata to hydrate canon:
+
+- location ids
+- faction stubs where useful
+- relationship hints
+- default scene problem
+
+4. Initialize canon during Turn 0.
+File: backend/app/core/kernel.py
+
+In initialize():
+
+- build canon from the selected world seed
+- assign self.state.canon
+- derive self.state.session.current_environment from canon instead of only raw text
+
+5. Feed canon to prompts through a snapshot helper.
+Files:
+
+- backend/app/agents/clotho.py
+- backend/app/agents/lachesis.py
+- backend/app/agents/nemesis.py
+- backend/app/agents/eris.py
+
+Do not dump the whole canon blindly. Create a compact scene snapshot:
+
+- current location
+- who is present
+- active clocks
+- unresolved consequence
+- 2-4 high-signal world facts
+
+6. Make current_environment derived, not authoritative.
+File: backend/app/core/kernel.py
+
+After every state mutation, refresh session.current_environment from canon so the UI keeps working while the backend transitions away from string truth.
+
+Implementation Notes
+
+- Do not remove prose_history, chronicle, or factual_chronicle in this phase.
+- Do not add inventories or complex combat state.
+- This is a social and narrative canon, not a simulation sandbox.
+
+Tests
+
+New test file:
+- backend/tests/test_canon.py
+
+Cover:
+
+- bootstrap_canon creates named NPC records from each world seed
+- initialize() sets ThreadState.canon
+- derive_environment_string reflects the active scene
+- an NPC set to dead stays dead when the scene advances
+- render_scene_snapshot stays compact and stable
+
+Acceptance Criteria
+
+- The backend has a live structured world model.
+- Clotho can be grounded from canon rather than only prose residue.
+- Current environment display still works.
+- The same named characters and places survive across time skips.
+
+
+PHASE 2: THE CONTEST
+Agent proposal protocol and visible arbitration
+
+Problem This Solves
+The code has multiple agents, but most of them still act like narrow evaluators. The player mostly receives final prose plus occasional intervention text. That undersells the central promise: divine personas competing over the fate of the thread.
+
+Goal
+Make agents compete over what becomes true before Clotho narrates the winning state.
+
+Deliverables
+
+1. Add a shared proposal schema.
+File: backend/app/schemas/state.py
+
+Add:
+
+- AgentProposal
+  - agent: str
+  - allow_action: bool = True
+  - refusal_reason: str = ""
+  - scene_patch: dict[str, str | int | float | list | dict]
+  - vector_patch: dict[str, float]
+  - pressure_patch: dict[str, float]
+  - prophecy_patch: str
+  - death_flag: bool = False
+  - death_reason: str = ""
+  - intervention_copy: str = ""
+  - priority_note: str = ""
+  - confidence: float = 0.5
+
+- DeliberationTrace
+  - turn_number: int
+  - proposals: list[AgentProposal]
+  - winner_order: list[str]
+  - final_reason: str
+
+Add to ThreadState:
+
+- recent_traces: list[DeliberationTrace] = []
+
+2. Migrate agent outputs to proposals.
+Files:
+
+- backend/app/agents/lachesis.py
+- backend/app/agents/nemesis.py
+- backend/app/agents/eris.py
+- backend/app/agents/atropos.py
+
+Each agent should still return its existing typed response for compatibility during rollout, but also emit an AgentProposal internally or through a thin adapter.
+
+Examples:
+
+- Lachesis proposal: validates the action, advances scene clocks, updates location, and classifies vector movement.
+- Nemesis proposal: marks a prophecy shift, punishment, or karmic cost.
+- Eris proposal: injects a destabilizing scene mutation, not just flavor.
+- Atropos proposal: asserts terminal finality or warning state.
+
+3. Upgrade the resolver from flag arbitration to patch arbitration.
+File: backend/app/core/resolver.py
+
+Current tiering stays:
+
+- Lachesis validity first
+- Atropos finality second
+- Nemesis vs Eris third
+- Clotho last
+
+But the output becomes a merged scene outcome containing:
+
+- canonical state mutations
+- external pressure changes
+- vector changes
+- prophecy changes
+- visible interventions
+- a stored deliberation trace
+
+4. Add a resolved scene contract for Clotho.
+File: backend/app/core/kernel.py
+
+Before Clotho is called, create a single structured SceneOutcome with:
+
+- what materially changed
+- who is now present
+- what immediate problem remains
+- which Fate interfered
+- what must not be contradicted
+
+Clotho then narrates the resolved truth instead of inventing the turn from looser context.
+
+5. Stream deliberation to the client.
+Files:
+
+- backend/app/core/kernel.py
+- backend/app/api/routes.py
+- frontend/src/lib/stores/engine.ts
+- frontend/src/lib/types/engine.ts
+
+Add a new SSE event:
+
+- type: "deliberation"
+- payload: compact trace
+
+Do not force the player to read it. It should be available as an optional diegetic reveal.
+
+Tests
+
+New test file:
+- backend/tests/test_deliberation.py
+
+Cover:
+
+- proposals are captured from multiple agents
+- Lachesis invalidation still short-circuits
+- Atropos death still overrides
+- Nemesis and Eris can each materially alter scene state
+- final DeliberationTrace is stored on state
+
+Acceptance Criteria
+
+- Agents affect scene truth, not only prose garnish.
+- The resolver returns a richer merged outcome.
+- The game can surface why a turn resolved the way it did.
+
+
+PHASE 3: THE COST
+Persistent pressure, irreversible systems, and legacy that survives restarts
+
+Problem This Solves
+Nyx says "the game tests you" and "death is permanent," but much of the current pressure is internal and some of the permanence disappears if a database is not configured. Oaths and hamartia exist, but they do not yet reshape enough of the run.
+
+Goal
+Make consequence durable, systemic, and replay-visible.
+
+PHASE 3A: PRESSURE ECONOMY
+
+Deliverables
+
+1. Add external pressure state.
+File: backend/app/schemas/state.py
+
+Add:
+
+- PressureState
+  - suspicion: float
+  - scarcity: float
+  - wounds: float
+  - debt: float
+  - faction_heat: float
+  - omen: float
+  - exploit_score: float
+  - stability_streak: int
+
+Add to ThreadState:
+
+- pressures: PressureState = Field(default_factory=PressureState)
+
+2. Add a pressure service.
+New file: backend/app/services/pressure.py
+
+Responsibilities:
+
+- evolve pressures from actions and scene outcomes
+- track stability streaks for Eris
+- track exploit loops for Nemesis
+- create human-readable pressure summary for prompts
+
+3. Make Nemesis react to pattern, not only imbalance.
+File: backend/app/agents/nemesis.py
+
+Nemesis should consider:
+
+- soul imbalance
+- repeated exploit patterns
+- oath hypocrisy
+- high suspicion or public shame
+- whether the player is gaming a stable winning loop
+
+4. Make Eris target brittle stability.
+File: backend/app/agents/eris.py
+
+Replace pure probability gating with a hybrid trigger:
+
+- base random chance remains
+- chance rises with stability_streak and unresolved clocks
+- chance rises when the player is "too in control"
+
+5. Require choice generation to reflect external pressure.
+File: backend/app/agents/clotho.py
+
+At least one generated choice in open play should answer an active pressure:
+
+- flee suspicion
+- treat wounds
+- pay debt
+- face a witness
+- manage an oath cost
+
+Acceptance Criteria
+
+- The player is pressured by the world every turn, not just by moral drift.
+- Eris feels like a destabilizer, not just a coin flip.
+- Nemesis feels like judgment, not only threshold punishment.
+
+
+PHASE 3B: OATHS AND HAMARTIA AS LIVE SYSTEMS
+
+Deliverables
+
+1. Expand oath structure.
+File: backend/app/schemas/state.py
+
+Replace raw oath-as-text with:
+
+- OathTerms
+  - subject: str
+  - promised_action: str
+  - protected_target: str | None
+  - forbidden_action: str | None
+  - deadline: str | None
+  - witness: str | None
+  - price: str | None
+
+Extend Oath:
+
+- terms: OathTerms | None = None
+- status: str  # active | fulfilled | broken | transformed
+- fulfillment_note: str = ""
+
+2. Split oath handling into detect -> parse -> verify.
+Files:
+
+- backend/app/services/oath_engine.py
+- new backend/app/services/oath_parser.py
+
+Pipeline:
+
+- deterministic regex still detects likely oath language
+- parser extracts structured terms
+- later verification compares action plus canon state against oath terms
+
+3. Turn hamartia into a profile, not only a label.
+File: backend/app/schemas/state.py
+
+Add:
+
+- HamartiaProfile
+  - name: str
+  - choice_bias: str
+  - nemesis_multiplier: float
+  - eris_bias: float
+  - style_directive: str
+  - refusal_pattern: str
+  - social_cost_bias: str
+
+Add to SoulLedger:
+
+- hamartia_profile: HamartiaProfile | None = None
+
+Update:
+
+- backend/app/services/hamartia_engine.py
+
+At adulthood, assign both hamartia string and a live profile.
+
+4. Apply hamartia mechanically after assignment.
+Affected files:
+
+- backend/app/core/kernel.py
+- backend/app/agents/clotho.py
+- backend/app/agents/nemesis.py
+- backend/app/agents/eris.py
+
+Examples:
+
+- Wrath profile lowers the threshold for violent overreach.
+- Hubris profile makes public, risky options more tempting.
+- Cowardice profile increases the social cost of avoidance.
+- Vainglory profile makes public humiliation harsher.
+
+Acceptance Criteria
+
+- Oaths can be fulfilled, broken, or transformed in a structured way.
+- Hamartia changes future play, not just future text.
+
+
+PHASE 3C: LEGACY AND DEFAULT PERSISTENCE
+
+Deliverables
+
+1. Introduce a storage abstraction.
+New file:
+- backend/app/db/store.py
+
+Define a ThreadStore interface used by the kernel and API:
+
+- ensure_player
+- create_thread
+- update_thread_death
+- create_turn
+- append_chronicle
+- append_factual_chronicle
+- get_dead_threads
+- get_last_ancestor
+
+2. Make durable local persistence the default.
+Recommended implementation:
+
+- SQLite-backed store for local play
+- PostgreSQL-backed store remains optional
+
+Files:
+
+- backend/app/db/__init__.py
+- new backend/app/db/sqlite_store.py
+- optionally backend/app/db/postgres_store.py
+
+Important rule:
+If no DATABASE_URL is set, the engine should still persist runs locally.
+
+3. Add explicit legacy echoes to state.
+File: backend/app/schemas/state.py
+
+Add:
+
+- LegacyEcho
+  - source_thread_id: str
+  - epitaph: str
+  - hamartia: str
+  - inherited_mark: str
+  - mechanical_effect: str
+
+Add to ThreadState:
+
+- legacy_echoes: list[LegacyEcho] = []
+
+4. Seed a legacy echo at initialization.
+File: backend/app/core/kernel.py
+
+At Turn 0:
+
+- fetch the most recent dead thread
+- create one narrative echo and one light mechanical modifier
+- apply it to state.legacy_echoes
+
+Examples:
+
+- ancestor died by oath-breaking -> suspicion starts slightly higher
+- ancestor died in disgrace -> public authority reacts faster
+- ancestor died gloriously -> crowds notice the player sooner
+
+5. Surface legacy on the title screen.
+Files:
+
+- frontend/src/lib/stores/vestibule.ts
+- frontend/src/lib/components/TitleScreen.svelte
+- frontend/src/lib/types/vestibule.ts
+
+Acceptance Criteria
+
+- Runs persist even without PostgreSQL.
+- Past lives appear after restart.
+- Ancestor legacy has at least one mechanical effect and one narrative trace in the next run.
+
+
+PHASE 4: THE WITNESS
+Momus repair loop and diegetic presentation of divine pressure
+
+Problem This Solves
+Nyx currently knows more than it shows. The player cannot really see the struggle among the agents, and Momus still detects more than it repairs.
+
+Goal
+Let the player witness the Fates at work while tightening prose consistency before commit.
+
+Deliverables
+
+1. Upgrade Momus from checker to checker-plus-repair.
+File: backend/app/agents/momus.py
+
+New responsibilities:
+
+- extract named entities from Clotho output
+- compare them to canon and scene state
+- detect contradictions in location, presence, death, oath state, and pressure state
+- produce a repair brief if needed
+
+Add:
+
+- repair_needed: bool
+- repair_brief: str
+
+to MomusValidation.
+
+2. Add a one-retry repair loop in the kernel.
+File: backend/app/core/kernel.py
+
+Flow:
+
+- Clotho produces prose
+- Momus validates
+- if repair_needed, re-prompt Clotho once with the repair brief and the canonical scene outcome
+- if second pass still fails, keep the safer version and log the issue
+
+3. Surface the contest in the UI without breaking immersion.
+Files:
+
+- frontend/src/lib/stores/engine.ts
+- frontend/src/lib/types/engine.ts
+- frontend/src/lib/components/TheOracle.svelte
+- frontend/src/lib/components/SoulLedger.svelte
+- frontend/src/lib/components/TheThread.svelte
+
+Add:
+
+- an optional "The Fates Deliberated" reveal in TheThread
+- omen / Nemesis / Eris marks in TheOracle
+- oath fulfillment and pressure indicators in SoulLedger
+- legacy marks in the title screen and incarnation flow
+
+4. Fix state and type drift while doing the UI work.
+Files to audit:
+
+- frontend/src/routes/+page.svelte
+- frontend/src/lib/types/engine.ts
+- frontend/src/lib/components/SoulLedger.svelte
+
+Known mismatch to fix:
+
+- the frontend currently references session.hamartia in one place even though hamartia lives under soul_ledger
+
+Acceptance Criteria
+
+- Contradictory prose can be corrected before state commit.
+- The player can understand when Lachesis forbids, Nemesis marks, Eris distorts, or Atropos closes in.
+- The interface feels more like a tribunal and less like a single narrator with a stats panel.
+
+
+RECOMMENDED IMPLEMENTATION ORDER
+
+Do not implement this as one giant branch. Use stacked, reviewable phases.
+
+PR 1
+- Phase 1 schema additions
+- canon bootstrap service
+- kernel init wiring
+- canon tests
+
+PR 2
+- proposal schema
+- resolver upgrade
+- kernel scene outcome contract
+- deliberation SSE event
+
+PR 3
+- pressure state and service
+- Nemesis and Eris trigger rewrite
+- Clotho choice pressure integration
+
+PR 4
+- oath parsing upgrade
+- hamartia profile
+- adulthood behavior changes
+
+PR 5
+- storage abstraction
+- SQLite default persistence
+- legacy echo seeding
+- title screen legacy surfacing
+
+PR 6
+- Momus repair loop
+- final UI witness pass
+- state/type cleanup
+
+
+FILE SUMMARY
+
+New backend files likely needed
+
+- backend/app/services/canon.py
+- backend/app/services/pressure.py
+- backend/app/services/oath_parser.py
+- backend/app/db/store.py
+- backend/app/db/sqlite_store.py
+- backend/tests/test_canon.py
+- backend/tests/test_deliberation.py
+- backend/tests/test_pressure.py
+- backend/tests/test_legacy.py
+
+Backend files that will change materially
+
+- backend/app/schemas/state.py
+- backend/app/core/kernel.py
+- backend/app/core/resolver.py
+- backend/app/core/world_seeds.py
+- backend/app/agents/lachesis.py
+- backend/app/agents/nemesis.py
+- backend/app/agents/eris.py
+- backend/app/agents/atropos.py
+- backend/app/agents/clotho.py
+- backend/app/agents/momus.py
+- backend/app/services/hamartia_engine.py
+- backend/app/services/oath_engine.py
+- backend/app/db/__init__.py
+- backend/app/api/routes.py
+
+Frontend files that will change materially
+
+- frontend/src/lib/types/engine.ts
+- frontend/src/lib/stores/engine.ts
+- frontend/src/lib/stores/vestibule.ts
+- frontend/src/lib/components/TheThread.svelte
+- frontend/src/lib/components/TheOracle.svelte
+- frontend/src/lib/components/SoulLedger.svelte
+- frontend/src/lib/components/TitleScreen.svelte
+- frontend/src/routes/+page.svelte
+
+
+TEST STRATEGY
+
+Unit tests
+
+- canon bootstrap and scene derivation
+- proposal generation and resolver merge behavior
+- pressure evolution rules
+- oath parse and oath verification
+- hamartia profile assignment
+- SQLite persistence adapter
+- Momus repair decision logic
+
+Integration tests
+
+- initialize -> canon seeded -> first turn grounded
+- multi-agent turn produces a deliberation trace
+- broken oath can kill a thread and persist it
+- restart can load past lives locally
+- adulthood hamartia profile changes later turn behavior
+- Momus repair loop prevents a contradiction from being committed
+
+Playtest targets
+
+- the player can tell what immediate worldly problem exists in every scene
+- scenes feel causally linked instead of atmospherically adjacent
+- Nemesis feels judgmental, not random
+- Eris feels destabilizing, not ornamental
+- adulthood feels mechanically different from childhood
+- dying and starting again changes what the next life feels like
+
+
+RISKS AND GUARDRAILS
+
+Risk: overbuilding the world model
+Guardrail: keep canon social and scene-focused. Do not create a full simulation engine.
+
+Risk: too much debug UI
+Guardrail: present deliberation as diegetic fragments, not raw developer logs.
+
+Risk: phase overlap causes rewrite churn
+Guardrail: keep compatibility shims until each phase is complete.
+
+Risk: persistence migration complexity
+Guardrail: introduce a store interface before changing concrete storage.
+
+Risk: Clotho prompt bloat
+Guardrail: pass compact scene snapshots, not full canon dumps.
+
+
+SUCCESS DEFINITION
+
+Nyx reaches its stated intent when:
+
+- the player experiences active opposition every run
+- named people and places persist reliably across scenes
+- the Fates visibly compete over what becomes true
+- hamartia and oaths materially reshape play
+- death leaves a mark on future lives
+- the engine feels authored because the rules are strong, not because the prose is decorative

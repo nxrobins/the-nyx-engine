@@ -12,7 +12,13 @@
  */
 
 import { writable } from 'svelte/store';
-import type { ThreadState, TurnResult, HamartiaOptions, MechanicEvent } from '$lib/types/engine';
+import type {
+	ThreadState,
+	TurnResult,
+	HamartiaOptions,
+	MechanicEvent,
+	DeliberationTrace
+} from '$lib/types/engine';
 import { vestibuleState } from '$lib/stores/vestibule';
 
 // ── Session ID ──────────────────────────────────────────────────
@@ -38,6 +44,7 @@ export const streamingProse = writable<string>('');
 
 /** Mechanic toast — flashed on screen after Lachesis math resolves */
 export const mechanicToast = writable<MechanicEvent | null>(null);
+export const deliberationTrace = writable<DeliberationTrace | null>(null);
 
 /** Whether the engine is mid-turn */
 export const isProcessing = writable<boolean>(false);
@@ -105,6 +112,7 @@ export async function initGame(params: {
 	gameState.set(result.state);
 	proseHistory.set([result.prose]);
 	uiChoices.set(result.ui_choices || []);
+	deliberationTrace.set(result.state.recent_traces?.at(-1) ?? null);
 	isInitialized.set(true);
 
 	return result;
@@ -126,6 +134,7 @@ export async function submitAction(action: string): Promise<void> {
 	isProcessing.set(true);
 	streamingProse.set('');
 	mechanicToast.set(null);
+	deliberationTrace.set(null);
 	uiChoices.set([]);
 	activeDream.set('');
 
@@ -218,6 +227,12 @@ function handleStreamEvent(data: Record<string, unknown>): void {
 			break;
 		}
 
+		case 'deliberation': {
+			const payload = data.payload as DeliberationTrace;
+			deliberationTrace.set(payload);
+			break;
+		}
+
 		case 'prose': {
 			const text = data.text as string;
 			streamingProse.update((current) => current + text);
@@ -242,6 +257,7 @@ function handleStreamEvent(data: Record<string, unknown>): void {
 			}
 
 			gameState.set(payload);
+			deliberationTrace.set(payload.recent_traces?.at(-1) ?? null);
 			uiChoices.set(choices);
 
 			if (terminal) {
@@ -303,6 +319,7 @@ export async function resetGame(): Promise<void> {
 	proseHistory.set([]);
 	streamingProse.set('');
 	mechanicToast.set(null);
+	deliberationTrace.set(null);
 	backgroundImage.set('');
 	isProcessing.set(false);
 	isTerminal.set(false);

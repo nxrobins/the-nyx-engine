@@ -4,6 +4,7 @@
   Hamartia hardcoded as "Unformed" — Lachesis overwrites at Turn 10.
 -->
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
 	import { vestibuleState, playerId } from '$lib/stores/vestibule';
 	import { initGame } from '$lib/stores/engine';
@@ -15,6 +16,7 @@
 	let loading = $state(false);
 	let fading = $state(false);
 	let error = $state('');
+	let nameInput = $state<HTMLInputElement | null>(null);
 
 	const MEMORIES = [
 		'A light in the distance I could not reach.',
@@ -22,6 +24,10 @@
 		'A crowd shouting a name that was not mine.',
 		'A cold shadow that moved when I moved.',
 	];
+
+	onMount(() => {
+		nameInput?.focus();
+	});
 
 	function handleNameSubmit(e: KeyboardEvent) {
 		if (e.key !== 'Enter') return;
@@ -89,13 +95,13 @@
 				</p>
 				<p class="incarnation-prompt">What name does this soul carry?</p>
 				<input
+					bind:this={nameInput}
 					class="incarnation-input"
 					type="text"
 					placeholder="Speak your name..."
 					bind:value={playerName}
 					onkeydown={handleNameSubmit}
 					maxlength={30}
-					autofocus
 				/>
 				{#if error}
 					<p class="incarnation-error step-enter">{error}</p>

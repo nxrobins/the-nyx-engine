@@ -17,11 +17,37 @@ import logging
 
 from app.agents.base import AgentBase
 from app.core.config import settings
-from app.schemas.state import AtroposResponse, ThreadState
+from app.schemas.state import AgentProposal, AtroposResponse, ThreadState
 from app.services import llm
 from app.services.soul_math import SoulVectorEngine
 
 logger = logging.getLogger("nyx.atropos")
+
+
+def _attach_proposal(
+    response: AtroposResponse,
+    *,
+    action: str,
+    nemesis_lethal: bool,
+) -> AtroposResponse:
+    """Attach a structured proposal to an Atropos response."""
+    scene_patch: dict[str, object] = {}
+    if response.death_reason:
+        scene_patch["warning"] = response.death_reason
+    if nemesis_lethal:
+        scene_patch["trigger"] = "broken_oath"
+
+    response.proposal = AgentProposal(
+        agent="atropos",
+        allow_action=True,
+        scene_patch=scene_patch,
+        death_flag=response.terminal_state,
+        death_reason=response.death_reason if response.terminal_state else "",
+        intervention_copy=response.death_reason,
+        priority_note="Finality and irreversible consequence.",
+        confidence=1.0 if response.terminal_state else 0.8,
+    )
+    return response
 
 
 # Death triggers loaded from settings (configurable via .env)
@@ -49,33 +75,33 @@ class Atropos(AgentBase):
         # --- Trigger 1: Nemesis lethal punishment (broken oath) ---
         if nemesis_lethal:
             logger.info("Atropos: Thread severed — Oath broken, Nemesis demands death.")
-            return AtroposResponse(
+            return _attach_proposal(AtroposResponse(
                 terminal_state=True,
                 death_reason=(
                     "You broke a sacred oath. The thread of your fate snaps — "
                     "Nemesis claims what was promised."
                 ),
-            )
+            ), action=action, nemesis_lethal=nemesis_lethal)
 
         # --- Trigger 2: Dead soul (all vectors <= 1.0) ---
         if SoulVectorEngine.is_dead_soul(state.soul_ledger.vectors):
             logger.info("Atropos: Thread severed — Dead soul (all vectors collapsed).")
-            return AtroposResponse(
+            return _attach_proposal(AtroposResponse(
                 terminal_state=True,
                 death_reason=(
                     "Your soul gutters like a candle in wind. Every dimension "
                     "of your being has faded to nothing. The thread dissolves."
                 ),
-            )
+            ), action=action, nemesis_lethal=nemesis_lethal)
 
         # --- Trigger 3: Self-destruction keywords ---
         action_lower = action.lower()
         if any(trigger in action_lower for trigger in settings.atropos_death_keywords):
             logger.info("Atropos: Thread severed — Self-destruction detected.")
-            return AtroposResponse(
+            return _attach_proposal(AtroposResponse(
                 terminal_state=True,
                 death_reason="You chose oblivion. The thread ends by your own hand.",
-            )
+            ), action=action, nemesis_lethal=nemesis_lethal)
 
         # --- Trigger 4: LLM narrative dead-end check (Phase 2) ---
         # Only check if we have enough turns of context
@@ -83,24 +109,28 @@ class Atropos(AgentBase):
             is_dead_end = await self._check_narrative_dead_end(state, action)
             if is_dead_end:
                 logger.info("Atropos: Thread severed — Narrative dead-end.")
-                return AtroposResponse(
+                return _attach_proposal(AtroposResponse(
                     terminal_state=True,
                     death_reason=(
                         "The story has nowhere left to go. Your thread frays "
                         "at the edges, unraveling into silence."
                     ),
-                )
+                ), action=action, nemesis_lethal=nemesis_lethal)
 
         # --- Warning state: vectors getting dangerously low ---
         vectors = state.soul_ledger.vectors
         vals = list(vectors.model_dump().values())
         if all(v <= 2.0 for v in vals):
-            return AtroposResponse(
+            return _attach_proposal(AtroposResponse(
                 terminal_state=False,
                 death_reason="The Fates grow restless. Your soul dims.",
-            )
+            ), action=action, nemesis_lethal=nemesis_lethal)
 
-        return AtroposResponse(terminal_state=False)
+        return _attach_proposal(
+            AtroposResponse(terminal_state=False),
+            action=action,
+            nemesis_lethal=nemesis_lethal,
+        )
 
     async def _check_narrative_dead_end(
         self, state: ThreadState, action: str

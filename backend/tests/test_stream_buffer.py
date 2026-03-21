@@ -65,26 +65,29 @@ class TestStreamEventSequence:
 
     @pytest.mark.asyncio
     async def test_normal_turn_emits_mechanic_prose_state(self, kernel: NyxKernel):
-        """A normal valid turn should emit: mechanic → prose → state."""
+        """A normal valid turn should emit: mechanic → deliberation → prose → state."""
         await _init(kernel)
         events = await _collect_events(kernel, "look around")
         types = [e["type"] for e in events]
 
         assert "mechanic" in types
+        assert "deliberation" in types
         assert "prose" in types
         assert "state" in types
-        # mechanic before prose before state
-        assert types.index("mechanic") < types.index("prose")
+        # mechanic before deliberation before prose before state
+        assert types.index("mechanic") < types.index("deliberation")
+        assert types.index("deliberation") < types.index("prose")
         assert types.index("prose") < types.index("state")
 
     @pytest.mark.asyncio
     async def test_invalid_action_emits_prose_then_state(self, kernel: NyxKernel):
-        """Invalid action: prose (rejection) → state, no mechanic."""
+        """Invalid action: deliberation → prose (rejection) → state, no mechanic."""
         await _init(kernel)
         events = await _collect_events(kernel, "fly into the sky")
         types = [e["type"] for e in events]
 
         assert "mechanic" not in types
+        assert "deliberation" in types
         assert "prose" in types
         assert "state" in types
 
@@ -211,3 +214,17 @@ class TestMechanicEvent:
         mechanic_events = _filter_events(events, "mechanic")
         if mechanic_events:
             assert "eris_struck" in mechanic_events[0]["payload"]
+
+
+class TestDeliberationEvent:
+    """The deliberation event exposes the resolver trace."""
+
+    @pytest.mark.asyncio
+    async def test_deliberation_payload_has_winner_order(self, kernel: NyxKernel):
+        await _init(kernel)
+        events = await _collect_events(kernel, "look around")
+        deliberation_events = _filter_events(events, "deliberation")
+        assert len(deliberation_events) == 1
+        payload = deliberation_events[0]["payload"]
+        assert "winner_order" in payload
+        assert "proposals" in payload

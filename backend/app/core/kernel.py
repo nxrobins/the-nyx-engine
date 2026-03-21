@@ -50,20 +50,31 @@ from app.core.config import settings
 from app.core.resolver import ConflictResolver, ResolvedOutcome
 from app.core.world_seeds import get_world_seed, format_world_context
 from app.schemas.state import (
+    DeliberationTrace,
     LachesisResponse,
     Oath,
+    SceneOutcome,
     ThreadState,
     TurnResult,
 )
 from app.db import (
     ensure_player, create_thread, update_thread_death,
     create_turn, append_chronicle, append_factual_chronicle,
-    get_last_ancestor,
+    get_dead_threads, get_last_ancestor,
 )
 from app.services import llm
 from app.services.bfl import generate_image
-from app.services.hamartia_engine import determine_hamartia
-from app.services.oath_engine import detect_oath
+from app.services.canon import (
+    apply_environment_update,
+    bootstrap_canon,
+    derive_environment_string,
+    render_scene_snapshot,
+)
+from app.services.hamartia_engine import determine_hamartia, get_hamartia_profile
+from app.services.legacy import build_legacy_echo
+from app.services.oath_engine import detect_oath, verify_oaths
+from app.services.oath_parser import parse_oath_text
+from app.services.pressure import apply_pressure_delta, evolve_pressures, pressure_summary
 from app.services.rag import NyxRAGStore
 from app.services.soul_math import SoulVectorEngine
 
@@ -247,6 +258,30 @@ def _build_stratified_context(state: ThreadState) -> str:
             f"{state.world_context}"
         )
 
+    scene_snapshot = render_scene_snapshot(state)
+    if scene_snapshot:
+        sections.append(
+            "═══ THE CANON NOW (Structured Scene Truth) ═══\n"
+            "This is the current scene state. Treat it as canonical when prose, "
+            "memory, or atmosphere would otherwise drift.\n"
+            f"{scene_snapshot}"
+        )
+
+    if state.legacy_echoes:
+        legacy_block = "\n".join(
+            f"  • {echo.inherited_mark}: {echo.mechanical_effect}"
+            for echo in state.legacy_echoes[:2]
+        )
+        sections.append(
+            "═══ THE DEAD STILL SPEAK ═══\n"
+            f"{legacy_block}"
+        )
+
+    sections.append(
+        "═══ WORLD PRESSURE ═══\n"
+        f"{pressure_summary(state)}"
+    )
+
     # ── MID: The Chronicle (long-term mythic memory) ──────────────
     if state.chronicle:
         chronicle_block = "\n".join(f"  • {s}" for s in state.chronicle)
@@ -286,6 +321,12 @@ def _build_stratified_context(state: ThreadState) -> str:
         if mirror:
             sections.append(f"═══ THE SOUL MIRROR ═══\n{mirror}")
 
+    if state.soul_ledger.hamartia_profile is not None:
+        sections.append(
+            "═══ THE FLAW HARDENS ═══\n"
+            f"{state.soul_ledger.hamartia_profile.style_directive}"
+        )
+
     # ── DREAM BLEED: Hypnos residue (ephemeral, consumed once) ────
     if state.current_dream:
         sections.append(
@@ -297,6 +338,13 @@ def _build_stratified_context(state: ThreadState) -> str:
         return ""
 
     return "\n\n".join(sections)
+
+
+def _refresh_derived_environment(state: ThreadState) -> None:
+    """Keep the UI-facing environment string aligned with canonical state."""
+    derived = derive_environment_string(state)
+    if derived:
+        state.session.current_environment = derived
 
 
 # ---------------------------------------------------------------------------
@@ -351,6 +399,9 @@ class TurnContext:
     player_age: int = 3
     beat_position: str = "SETUP"
     vignette_directive: str = ""
+    scene_outcome: SceneOutcome | None = None
+    deliberation_trace: DeliberationTrace | None = None
+    pressure_summary: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -404,6 +455,8 @@ class NyxKernel:
         self.state.session.player_gender = gender
         self.state.session.first_memory = first_memory
         self.state.soul_ledger.hamartia = hamartia
+        if hamartia and hamartia != "Unformed":
+            self.state.soul_ledger.hamartia_profile = get_hamartia_profile(hamartia)
 
         # -----------------------------------------------------------
         # Seed soul vectors from first memory archetype (+2 boost)
@@ -427,15 +480,21 @@ class NyxKernel:
         world_seed = get_world_seed(first_memory)
         world_context = format_world_context(world_seed, name, gender)
         self.state.world_context = world_context
-        self.state.session.current_environment = (
-            f"{world_seed.settlement} ({world_seed.settlement_type}, "
-            f"{world_seed.region}). {world_seed.active_situation}"
-        )
+        self.state.canon = bootstrap_canon(world_seed, name, gender)
+        _refresh_derived_environment(self.state)
         logger.info(f"World seed: {world_seed.settlement} ('{first_memory[:30]}...')")
 
         # DB: ensure player + create thread
         await ensure_player(player_id)
+        prior_threads = await get_dead_threads(player_id)
+        self.state.session.run_number = len(prior_threads) + 1
         self._thread_id = await create_thread(player_id, hamartia)
+
+        ancestor = await get_last_ancestor(player_id)
+        legacy_echo, legacy_delta = build_legacy_echo(ancestor)
+        if legacy_echo is not None:
+            self.state.legacy_echoes = [legacy_echo]
+            self.state.pressures = apply_pressure_delta(self.state.pressures, legacy_delta)
 
         # Generate initial prophecy via Nemesis
         nemesis_result = await self.nemesis.generate_initial_prophecy(self.state)
@@ -473,11 +532,15 @@ class NyxKernel:
             f"Do NOT begin with a ceremony. Begin in the middle of ordinary life."
         )
 
-        # Ancestral echo — flavor for Clotho
-        ancestor = await get_last_ancestor(player_id)
-        if ancestor and ancestor.get("epitaph"):
-            birth_prompt += f" An ancestor's echo haunts this world: '{ancestor['epitaph']}'."
-            logger.info(f"Ancestral echo from previous thread (hamartia: {ancestor.get('hamartia')})")
+        if legacy_echo is not None:
+            birth_prompt += (
+                f" An ancestor's echo haunts this world: '{legacy_echo.epitaph}'. "
+                f"It leaves the mark '{legacy_echo.inherited_mark}'."
+            )
+            logger.info(
+                f"Ancestral echo from previous thread "
+                f"(hamartia: {legacy_echo.hamartia}, mark: {legacy_echo.inherited_mark})"
+            )
 
         # Clotho generates the opening scene
         clotho_result = await self.clotho.evaluate(
@@ -520,6 +583,7 @@ class NyxKernel:
         Returns a TurnContext with everything Clotho needs, or a terminal
         context if the player has died.
         """
+        previous_state = copy.deepcopy(self.state)
         self.state.session.turn_count += 1
         turn = self.state.session.turn_count
         logger.info(f"Turn {turn}: '{action}'")
@@ -532,15 +596,18 @@ class NyxKernel:
         self.state.session.beat_position = beat_position
         logger.info(f"Epoch: phase={phase}, age={age}, beat={beat_position}")
 
-        # Store last action for reference
-        self.state.last_action = action
-
         # Step 1: Lachesis evaluates state + action validity
         lachesis_result = await self.lachesis.evaluate(self.state, action)
 
         if not lachesis_result.valid_action:
             logger.info(f"Lachesis BLOCKED: {lachesis_result.reason}")
             self.state.session.turn_count -= 1  # Don't count invalid turns
+            invalid_trace = DeliberationTrace(
+                turn_number=max(turn - 1, 1),
+                proposals=[lachesis_result.proposal] if lachesis_result.proposal else [],
+                winner_order=["lachesis"],
+                final_reason="Lachesis rejected the action as invalid.",
+            )
             # Return a "rejected" context — callers handle the rejection
             return TurnContext(
                 turn=turn,
@@ -560,10 +627,21 @@ class NyxKernel:
                 player_age=age,
                 beat_position=beat_position,
                 vignette_directive=vignette_directive,
+                scene_outcome=SceneOutcome(
+                    material_changes=[lachesis_result.reason] if lachesis_result.reason else [],
+                    present_npcs=[],
+                    immediate_problem=self.state.session.current_environment,
+                    intervening_fates=["lachesis"],
+                    must_not_contradict=["Invalid actions do not occur."],
+                    pressure_summary=pressure_summary(self.state),
+                ),
+                deliberation_trace=invalid_trace,
+                pressure_summary=pressure_summary(self.state),
             )
 
         # Step 2: Apply vector deltas from Lachesis
         working_state = lachesis_result.updated_state or copy.deepcopy(self.state)
+        _refresh_derived_environment(working_state)
         if lachesis_result.vector_deltas:
             working_state.soul_ledger.vectors = SoulVectorEngine.apply_deltas(
                 working_state.soul_ledger.vectors,
@@ -579,32 +657,64 @@ class NyxKernel:
         )
         if assigned_hamartia:
             working_state.soul_ledger.hamartia = assigned_hamartia
+            working_state.soul_ledger.hamartia_profile = get_hamartia_profile(assigned_hamartia)
             logger.info(f"HAMARTIA FORKED: 'Unformed' → '{assigned_hamartia}'")
+        elif (
+            working_state.soul_ledger.hamartia
+            and working_state.soul_ledger.hamartia != "Unformed"
+            and working_state.soul_ledger.hamartia_profile is None
+        ):
+            working_state.soul_ledger.hamartia_profile = get_hamartia_profile(
+                working_state.soul_ledger.hamartia
+            )
 
-        # Step 3: Process oaths (detect new, check violations)
-        # LLM suggestion takes priority; deterministic engine is the fallback.
+        # Step 3: Process oaths (detect -> parse -> verify)
         oath_broken_id: str | None = None
-
+        broken_ids, fulfilled_ids, transformed_ids = verify_oaths(working_state, action)
         if lachesis_result.oath_violation:
-            oath_broken_id = lachesis_result.oath_violation
-            for oath in working_state.soul_ledger.active_oaths:
-                if oath.oath_id == oath_broken_id:
-                    oath.broken = True
-                    logger.info(f"Oath BROKEN: {oath.text}")
-                    break
+            broken_ids.append(lachesis_result.oath_violation)
+
+        seen_ids: set[str] = set()
+        broken_ids = [oath_id for oath_id in broken_ids if not (oath_id in seen_ids or seen_ids.add(oath_id))]
+        if broken_ids:
+            oath_broken_id = broken_ids[0]
+
+        for oath in working_state.soul_ledger.active_oaths:
+            if oath.oath_id in broken_ids:
+                oath.broken = True
+                oath.status = "broken"
+                oath.fulfillment_note = f"Broken on turn {turn}."
+                logger.info(f"Oath BROKEN: {oath.text}")
+            elif oath.oath_id in fulfilled_ids and oath.status == "active":
+                oath.status = "fulfilled"
+                oath.fulfillment_note = f"Fulfilled on turn {turn}."
+                logger.info(f"Oath FULFILLED: {oath.text}")
+            elif oath.oath_id in transformed_ids and oath.status == "active":
+                oath.status = "transformed"
+                oath.fulfillment_note = f"Transformed on turn {turn}."
+                logger.info(f"Oath TRANSFORMED: {oath.text}")
 
         oath_text = lachesis_result.oath_detected or detect_oath(action)
-        if oath_text:
+        if oath_text and not any(
+            oath.text.lower() == oath_text.lower() and oath.status == "active"
+            for oath in working_state.soul_ledger.active_oaths
+        ):
             new_oath = Oath(
                 oath_id=f"oath_{uuid.uuid4().hex[:8]}",
                 text=oath_text,
                 turn_sworn=turn,
+                terms=parse_oath_text(
+                    oath_text,
+                    subject=working_state.session.player_name or "I",
+                ),
             )
             working_state.soul_ledger.active_oaths.append(new_oath)
             logger.info(f"New oath sworn: '{new_oath.text}'")
 
         if lachesis_result.environment_update:
-            working_state.session.current_environment = lachesis_result.environment_update
+            apply_environment_update(working_state, lachesis_result.environment_update)
+        else:
+            _refresh_derived_environment(working_state)
 
         # Step 4: Parallel agent evaluation
         atropos_result, nemesis_result, eris_result = await asyncio.gather(
@@ -655,11 +765,33 @@ class NyxKernel:
             outcome.state.the_loom.current_prophecy = outcome.prophecy_updated
             logger.info(f"Prophecy updated: '{outcome.prophecy_updated}'")
 
+        pressure_evolution = evolve_pressures(
+            previous_state,
+            action,
+            outcome,
+            proposal_pressure=outcome.pressure_delta,
+        )
+        outcome.state.pressures = apply_pressure_delta(
+            previous_state.pressures,
+            pressure_evolution.delta,
+            stable_turn=pressure_evolution.stable_turn,
+        )
+        if outcome.scene_outcome is not None:
+            outcome.scene_outcome.pressure_changes = pressure_evolution.delta
+            outcome.scene_outcome.pressure_summary = pressure_evolution.summary
+        outcome.state.last_action = action
+
+        _refresh_derived_environment(outcome.state)
+
         # Set last_outcome for Clotho's context
         if outcome.nemesis_struck:
             outcome.state.last_outcome = "nemesis"
         elif outcome.eris_struck:
             outcome.state.last_outcome = "eris"
+        elif fulfilled_ids:
+            outcome.state.last_outcome = "oath_fulfilled"
+        elif transformed_ids:
+            outcome.state.last_outcome = "oath_transformed"
 
         # Build stratified context (Chronicle + Short-Term + Soul Mirror)
         stratified = _build_stratified_context(outcome.state)
@@ -684,6 +816,9 @@ class NyxKernel:
             player_age=age,
             beat_position=beat_position,
             vignette_directive=vignette_directive,
+            scene_outcome=outcome.scene_outcome,
+            deliberation_trace=outcome.deliberation_trace,
+            pressure_summary=pressure_evolution.summary,
         )
 
     # ------------------------------------------------------------------
@@ -777,6 +912,7 @@ class NyxKernel:
 
         # Commit state
         self.state = outcome.state
+        _refresh_derived_environment(self.state)
 
         # Clear consumed dream (it was already fed to Clotho via stratified context)
         self.state.current_dream = ""
@@ -815,7 +951,8 @@ class NyxKernel:
     async def _handle_death(self, ctx: TurnContext) -> TurnResult:
         """Terminal path: epitaph generation + DB persist + death result."""
         self.state = ctx.outcome.state
-        await self._generate_epitaph(ctx.outcome.state, ctx.turn)
+        _refresh_derived_environment(self.state)
+        await self._generate_epitaph(ctx.outcome.state, ctx.turn, ctx.death_reason)
 
         # DB persist
         await create_turn(
@@ -876,6 +1013,7 @@ class NyxKernel:
             epoch_phase=ctx.phase,
             stratified_context=ctx.stratified_context,
             vignette_directive=ctx.vignette_directive,
+            scene_outcome=ctx.scene_outcome,
         )
         prose, choices = _parse_clotho_output(clotho_result.prose, ctx.phase)
         prose = self._append_interventions(prose, ctx)
@@ -913,6 +1051,11 @@ class NyxKernel:
 
             # Invalid action — emit rejection
             if not ctx.outcome.action_valid:
+                if ctx.deliberation_trace is not None:
+                    yield "data: " + json.dumps({
+                        "type": "deliberation",
+                        "payload": ctx.deliberation_trace.model_dump(),
+                    }) + "\n\n"
                 yield "data: " + json.dumps({
                     "type": "prose",
                     "text": f"*{ctx.outcome.invalid_reason}*\nThe world does not bend to impossible demands.",
@@ -938,6 +1081,12 @@ class NyxKernel:
                     "valid": True,
                 },
             }) + "\n\n"
+
+            if ctx.deliberation_trace is not None:
+                yield "data: " + json.dumps({
+                    "type": "deliberation",
+                    "payload": ctx.deliberation_trace.model_dump(),
+                }) + "\n\n"
 
             # Terminal — emit death
             if ctx.terminal:
@@ -968,6 +1117,7 @@ class NyxKernel:
                 epoch_phase=ctx.phase,
                 stratified_context=ctx.stratified_context,
                 vignette_directive=ctx.vignette_directive,
+                scene_outcome=ctx.scene_outcome,
             ):
                 full_prose_buffer += token
 
@@ -1047,7 +1197,12 @@ class NyxKernel:
     # Death Hook: Epitaph Generation
     # ------------------------------------------------------------------
 
-    async def _generate_epitaph(self, state: ThreadState, turn: int) -> None:
+    async def _generate_epitaph(
+        self,
+        state: ThreadState,
+        turn: int,
+        death_reason: str,
+    ) -> None:
         """Generate mythic epitaph + persist to DB.
 
         MUST be awaited (not fire-and-forget) to ensure the epitaph
@@ -1080,7 +1235,13 @@ class NyxKernel:
                 logger.error(f"Epitaph generation failed: {e}. Using fallback.")
 
         logger.info(f"Epitaph: {epitaph}")
-        await update_thread_death(self._thread_id, epitaph, turn)
+        await update_thread_death(
+            self._thread_id,
+            epitaph,
+            turn,
+            death_reason=death_reason,
+            final_soul_vectors=state.soul_ledger.vectors.model_dump(),
+        )
 
     def reset(self) -> None:
         """Destroy session and reset state."""

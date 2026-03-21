@@ -88,6 +88,16 @@
 			<p class="epitaph-meta">
 				Flaw: {hoveredThread.hamartia} · Fell at turn {hoveredThread.final_turn}
 			</p>
+			{#if hoveredThread.legacy_mark}
+				<p class="epitaph-meta" style="margin-top: 0.6rem;">
+					Mark: {hoveredThread.legacy_mark}
+				</p>
+			{/if}
+			{#if hoveredThread.legacy_effect}
+				<p class="epitaph-meta" style="max-width: 32rem; text-align: center; letter-spacing: 0.04em; margin-top: 0.35rem;">
+					{hoveredThread.legacy_effect}
+				</p>
+			{/if}
 		</div>
 	{/if}
 </div>

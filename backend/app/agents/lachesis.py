@@ -27,8 +27,9 @@ import re
 
 from app.agents.base import AgentBase
 from app.core.config import settings
-from app.schemas.state import LachesisResponse, ThreadState
+from app.schemas.state import AgentProposal, LachesisResponse, ThreadState
 from app.services import llm
+from app.services.canon import render_scene_snapshot
 from app.services.prompt_loader import load_prompt
 
 logger = logging.getLogger("nyx.lachesis")
@@ -39,6 +40,30 @@ logger = logging.getLogger("nyx.lachesis")
 # ---------------------------------------------------------------------------
 
 LACHESIS_SYSTEM_PROMPT = load_prompt("lachesis")
+
+
+def _attach_proposal(response: LachesisResponse, fallback_state: ThreadState) -> LachesisResponse:
+    """Attach a structured proposal to a Lachesis response."""
+    updated = response.updated_state or fallback_state
+    scene_patch: dict[str, object] = {}
+    if response.environment_update:
+        scene_patch["environment_update"] = response.environment_update
+    if updated.last_outcome:
+        scene_patch["outcome_type"] = updated.last_outcome
+    if updated.canon and updated.canon.current_scene:
+        scene_patch["location_id"] = updated.canon.current_scene.location_id
+
+    response.proposal = AgentProposal(
+        agent="lachesis",
+        allow_action=response.valid_action,
+        refusal_reason=response.reason,
+        scene_patch=scene_patch,
+        vector_patch=dict(response.vector_deltas),
+        intervention_copy=response.reason if not response.valid_action else "",
+        priority_note="State validity, continuity, and grounded consequence.",
+        confidence=1.0 if not response.valid_action else 0.95,
+    )
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +154,7 @@ def _build_payload(state: ThreadState, action: str) -> str:
     ]
 
     recent_context = state.rag_context[-10:] if state.rag_context else []
+    scene_snapshot = render_scene_snapshot(state)
 
     payload = {
         "player_action": action,
@@ -136,6 +162,7 @@ def _build_payload(state: ThreadState, action: str) -> str:
         "hamartia": state.soul_ledger.hamartia,
         "active_oaths": oaths_summary,
         "environment": state.session.current_environment,
+        "scene_snapshot": scene_snapshot or None,
         "rag_context": recent_context,
         "turn_number": state.session.turn_count,  # kernel already incremented
         "player_name": state.session.player_name,
@@ -335,7 +362,7 @@ class Lachesis(AgentBase):
         # --- Mock mode ---
         if model == "mock":
             await asyncio.sleep(0.3)
-            return _mock_evaluate(state, action)
+            return _attach_proposal(_mock_evaluate(state, action), state)
 
         # --- Real LLM mode ---
         user_message = _build_payload(state, action)
@@ -359,8 +386,8 @@ class Lachesis(AgentBase):
                 f"deltas={result.vector_deltas}, "
                 f"oath={result.oath_detected is not None}"
             )
-            return result
+            return _attach_proposal(result, state)
 
         except Exception as e:
             logger.error(f"Lachesis LLM failed: {e}. Falling back to mock.")
-            return _mock_evaluate(state, action)
+            return _attach_proposal(_mock_evaluate(state, action), state)

@@ -20,8 +20,10 @@ import re
 
 from app.agents.base import AgentBase
 from app.core.config import settings
-from app.schemas.state import ErisResponse, ThreadState
+from app.schemas.state import AgentProposal, ErisResponse, ThreadState
 from app.services import llm
+from app.services.canon import render_scene_snapshot
+from app.services.pressure import pressure_summary
 from app.services.prompt_loader import load_prompt
 from app.services.soul_math import SoulVectorEngine
 
@@ -35,14 +37,47 @@ logger = logging.getLogger("nyx.eris")
 ERIS_SYSTEM_PROMPT = load_prompt("eris")
 
 
+def _attach_proposal(response: ErisResponse) -> ErisResponse:
+    """Attach a structured proposal to an Eris response."""
+    response.proposal = AgentProposal(
+        agent="eris",
+        allow_action=True,
+        scene_patch={
+            "chaos_description": response.chaos_description,
+            "chaos_severity": response.chaos_severity,
+        } if response.chaos_triggered else {},
+        vector_patch=dict(response.vector_chaos),
+        pressure_patch=(
+            {
+                "omen": round(0.4 + response.chaos_severity * 0.4, 2),
+                "scarcity": round(response.chaos_severity * 0.2, 2),
+                "wounds": round(response.chaos_severity * 0.15, 2),
+            }
+            if response.chaos_triggered else {}
+        ),
+        intervention_copy=response.chaos_description,
+        priority_note="Instability, wildcard disruption, and misrule.",
+        confidence=0.7 if response.chaos_triggered else 0.4,
+    )
+    return response
+
+
 def _build_payload(state: ThreadState, action: str) -> str:
     """Build the context payload for Eris."""
     vectors = state.soul_ledger.vectors
+    scene_snapshot = render_scene_snapshot(state)
     return json.dumps({
         "soul_vectors": vectors.model_dump(),
+        "hamartia_profile": (
+            state.soul_ledger.hamartia_profile.model_dump()
+            if state.soul_ledger.hamartia_profile else None
+        ),
         "dominant_vector": SoulVectorEngine.dominant_vector(vectors),
         "imbalance_score": round(SoulVectorEngine.imbalance_score(vectors), 2),
+        "pressures": state.pressures.model_dump(),
+        "pressure_summary": pressure_summary(state),
         "environment": state.session.current_environment,
+        "scene_snapshot": scene_snapshot or None,
         "rag_context": state.rag_context[-8:],
         "last_action": action,
         "turn_number": state.session.turn_count,
@@ -146,18 +181,34 @@ class Eris(AgentBase):
     async def evaluate(
         self, state: ThreadState, action: str
     ) -> ErisResponse:
-        # --- Gate: probability roll ---
-        roll = random.random()
-        if roll > settings.eris_chaos_probability:
-            return ErisResponse(chaos_triggered=False)
+        unresolved_clocks = len(state.canon.current_scene.active_clock_ids) if (
+            state.canon and state.canon.current_scene
+        ) else 0
+        profile = state.soul_ledger.hamartia_profile
+        chance = settings.eris_chaos_probability
+        chance += min(state.pressures.stability_streak * 0.05, 0.35)
+        chance += min(unresolved_clocks * 0.04, 0.2)
+        if state.pressures.stability_streak >= 2 and state.pressures.exploit_score < 1.0:
+            chance += 0.08
+        if profile is not None:
+            chance += profile.eris_bias
+        chance = max(0.02, min(chance, 0.9))
 
-        logger.info(f"Eris chaos triggered! Roll={roll:.3f}")
+        # --- Gate: hybrid probability roll ---
+        roll = random.random()
+        if roll > chance:
+            return _attach_proposal(ErisResponse(chaos_triggered=False))
+
+        logger.info(
+            f"Eris chaos triggered! roll={roll:.3f}, chance={chance:.3f}, "
+            f"stability={state.pressures.stability_streak}, clocks={unresolved_clocks}"
+        )
 
         model = settings.eris_model
 
         if model == "mock":
             await asyncio.sleep(0.15)
-            return _mock_chaos()
+            return _attach_proposal(_mock_chaos())
 
         # LLM-generated creative chaos
         user_message = _build_payload(state, action)
@@ -170,7 +221,7 @@ class Eris(AgentBase):
                 max_tokens=250,
                 json_mode=("anthropic" not in model),
             )
-            return _parse_response(raw)
+            return _attach_proposal(_parse_response(raw))
         except Exception as e:
             logger.error(f"Eris LLM failed: {e}. Falling back to mock.")
-            return _mock_chaos()
+            return _attach_proposal(_mock_chaos())

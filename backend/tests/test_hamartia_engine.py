@@ -4,7 +4,12 @@ Extracted from TestDetermineHamartia in test_lachesis.py (P1-002).
 """
 
 from app.schemas.state import SoulVectors, ThreadState
-from app.services.hamartia_engine import VECTOR_HAMARTIA_MAP, determine_hamartia
+from app.services.hamartia_engine import (
+    HAMARTIA_PROFILES,
+    VECTOR_HAMARTIA_MAP,
+    determine_hamartia,
+    get_hamartia_profile,
+)
 
 
 class TestDetermineHamartia:
@@ -62,3 +67,22 @@ class TestVectorHamartiaMap:
         for v in VECTOR_HAMARTIA_MAP.values():
             assert isinstance(v, str)
             assert len(v) > 0
+
+
+class TestHamartiaProfiles:
+    """Profiles turn a flaw into a live mechanical bias."""
+
+    def test_profile_lookup_matches_simple_label(self):
+        profile = get_hamartia_profile("Wrath")
+        assert profile is not None
+        assert profile.name == "Wrath"
+        assert profile.nemesis_multiplier > 1.0
+
+    def test_profile_lookup_matches_verbose_label(self):
+        profile = get_hamartia_profile("Cowardice Veiled as Wisdom")
+        assert profile is not None
+        assert profile.name == "Cowardice"
+        assert "avoidance" in profile.choice_bias
+
+    def test_profiles_cover_core_hamartiai(self):
+        assert {"hubris", "wrath", "vainglory", "cowardice"} <= set(HAMARTIA_PROFILES.keys())

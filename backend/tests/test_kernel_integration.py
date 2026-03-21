@@ -193,7 +193,9 @@ class TestWorldSeedIntegration:
             gender="boy",
             first_memory="The weight of a heavy stone in my hand.",
         )
-        assert "shaft collapsed" in result.state.session.current_environment
+        env = result.state.session.current_environment.lower()
+        assert "ashfall" in env
+        assert "shaft" in env
 
     @pytest.mark.asyncio
     async def test_world_context_nonempty_after_init(self, kernel: NyxKernel):
@@ -204,6 +206,17 @@ class TestWorldSeedIntegration:
             gender="boy",
         )
         assert result.state.world_context != ""
+
+    @pytest.mark.asyncio
+    async def test_canon_seeded_after_init(self, kernel: NyxKernel):
+        result = await kernel.initialize(
+            hamartia="Unformed",
+            player_id="test_player",
+            name="Hero",
+            gender="boy",
+        )
+        assert result.state.canon is not None
+        assert result.state.canon.current_scene is not None
 
     @pytest.mark.asyncio
     async def test_world_context_in_stratified_context(self, kernel: NyxKernel):

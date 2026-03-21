@@ -22,8 +22,11 @@ import re
 
 from app.agents.base import AgentBase
 from app.core.config import settings
-from app.schemas.state import NemesisResponse, ThreadState
+from app.schemas.state import AgentProposal, NemesisResponse, ThreadState
 from app.services import llm
+from app.services.canon import render_scene_snapshot
+from app.services.oath_engine import oath_hypocrisy_score
+from app.services.pressure import pressure_summary
 from app.services.prompt_loader import load_prompt
 from app.services.soul_math import SoulVectorEngine
 
@@ -37,6 +40,53 @@ logger = logging.getLogger("nyx.nemesis")
 NEMESIS_SYSTEM_PROMPT = load_prompt("nemesis")
 
 
+def _pressure_patch_for_response(
+    response: NemesisResponse,
+    hypocrisy_score: float = 0.0,
+) -> dict[str, float]:
+    if not response.intervene:
+        return {}
+
+    patch = {"omen": 0.4}
+    if response.intervention_type == "punishment":
+        patch.update({"suspicion": 0.3, "exploit_score": 0.5, "omen": 0.8})
+    elif response.intervention_type == "lethal_punishment":
+        patch.update(
+            {"suspicion": 0.8, "faction_heat": 0.6, "exploit_score": 1.0, "omen": 1.0}
+        )
+    if hypocrisy_score > 0:
+        patch["suspicion"] = patch.get("suspicion", 0.0) + min(hypocrisy_score * 0.3, 0.6)
+    return {key: round(value, 2) for key, value in patch.items()}
+
+
+def _attach_proposal(
+    response: NemesisResponse,
+    *,
+    hypocrisy_score: float = 0.0,
+) -> NemesisResponse:
+    """Attach a structured proposal to a Nemesis response."""
+    scene_patch: dict[str, object] = {}
+    if response.intervention_type:
+        scene_patch["intervention_type"] = response.intervention_type
+    if response.updated_prophecy:
+        scene_patch["updated_prophecy"] = response.updated_prophecy
+    if response.punishment_description:
+        scene_patch["punishment_description"] = response.punishment_description
+
+    response.proposal = AgentProposal(
+        agent="nemesis",
+        allow_action=True,
+        scene_patch=scene_patch,
+        vector_patch=dict(response.vector_penalty),
+        pressure_patch=_pressure_patch_for_response(response, hypocrisy_score),
+        prophecy_patch=response.updated_prophecy,
+        intervention_copy=response.punishment_description or response.updated_prophecy,
+        priority_note="Judgment, prophecy, and karmic rebalancing.",
+        confidence=0.85 if response.intervene else 0.45,
+    )
+    return response
+
+
 # ---------------------------------------------------------------------------
 # Payload Builder
 # ---------------------------------------------------------------------------
@@ -44,19 +94,33 @@ NEMESIS_SYSTEM_PROMPT = load_prompt("nemesis")
 def _build_payload(state: ThreadState, action: str, oath_broken: str | None) -> str:
     """Build context payload for Nemesis."""
     vectors = state.soul_ledger.vectors
+    scene_snapshot = render_scene_snapshot(state)
     oaths_summary = [
-        {"oath_id": o.oath_id, "text": o.text, "broken": o.broken}
+        {
+            "oath_id": o.oath_id,
+            "text": o.text,
+            "broken": o.broken,
+            "status": o.status,
+            "terms": o.terms.model_dump() if o.terms else None,
+        }
         for o in state.soul_ledger.active_oaths
     ]
     return json.dumps({
         "soul_vectors": vectors.model_dump(),
         "hamartia": state.soul_ledger.hamartia,
+        "hamartia_profile": (
+            state.soul_ledger.hamartia_profile.model_dump()
+            if state.soul_ledger.hamartia_profile else None
+        ),
         "dominant_vector": SoulVectorEngine.dominant_vector(vectors),
         "weakest_vector": SoulVectorEngine.weakest_vector(vectors),
         "imbalance_score": round(SoulVectorEngine.imbalance_score(vectors), 2),
+        "pressures": state.pressures.model_dump(),
+        "pressure_summary": pressure_summary(state),
         "active_oaths": oaths_summary,
         "oath_broken": oath_broken,
         "current_prophecy": state.the_loom.current_prophecy,
+        "scene_snapshot": scene_snapshot or None,
         "rag_context": state.rag_context[-8:],
         "last_action": action,
         "turn_number": state.session.turn_count,
@@ -201,34 +265,77 @@ class Nemesis(AgentBase):
         vectors = state.soul_ledger.vectors
         imbalance = SoulVectorEngine.imbalance_score(vectors)
         threshold = settings.nemesis_imbalance_threshold
+        profile = state.soul_ledger.hamartia_profile
+        hypocrisy = oath_hypocrisy_score(state.soul_ledger.active_oaths, action)
+        lowered_action = action.lower()
+
+        effective_imbalance = imbalance * (
+            profile.nemesis_multiplier if profile is not None else 1.0
+        )
+        if profile and "violent" in profile.choice_bias and any(
+            word in lowered_action for word in ("attack", "strike", "stab", "kill", "fight")
+        ):
+            effective_imbalance += 1.0
+        if profile and "public" in profile.choice_bias and any(
+            word in lowered_action for word in ("declare", "challenge", "boast", "shout")
+        ):
+            effective_imbalance += 0.5
+
+        exploit = state.pressures.exploit_score
+        suspicion = state.pressures.suspicion
+        omen = state.pressures.omen
+        faction_heat = state.pressures.faction_heat
 
         # --- Broken oath → lethal (always triggers) ---
         if oath_broken:
             logger.info(f"Nemesis: LETHAL — Oath {oath_broken} broken!")
-            return await self._generate(state, action, oath_broken, force_type="lethal_punishment")
+            result = await self._generate(state, action, oath_broken, force_type="lethal_punishment")
+            return _attach_proposal(result, hypocrisy_score=max(hypocrisy, 1.0))
 
-        # --- Extreme imbalance (>= threshold + 2) → punishment ---
-        if imbalance >= threshold + 2.0:
-            logger.info(f"Nemesis: PUNISHMENT — Imbalance {imbalance:.1f} (extreme)")
-            return await self._generate(state, action, None, force_type="punishment")
+        # --- Patterned abuse, public shame, or extreme imbalance → punishment ---
+        if (
+            effective_imbalance >= threshold + 1.5
+            or exploit >= 2.0
+            or suspicion >= 2.75
+            or faction_heat >= 2.5
+            or hypocrisy >= 1.0
+        ):
+            logger.info(
+                "Nemesis: PUNISHMENT — "
+                f"effective_imbalance={effective_imbalance:.1f}, exploit={exploit:.1f}, "
+                f"suspicion={suspicion:.1f}, hypocrisy={hypocrisy:.1f}"
+            )
+            result = await self._generate(state, action, None, force_type="punishment")
+            return _attach_proposal(result, hypocrisy_score=hypocrisy)
 
-        # --- Standard imbalance (>= threshold) → prophecy update ---
-        if imbalance >= threshold:
-            logger.info(f"Nemesis: Prophecy update — Imbalance {imbalance:.1f}")
-            return await self._generate(state, action, None, force_type="prophecy_update")
+        # --- Lower-level prophetic warning ---
+        if (
+            effective_imbalance >= threshold
+            or exploit >= 1.25
+            or omen >= 1.5
+            or hypocrisy >= 0.5
+        ):
+            logger.info(
+                "Nemesis: Prophecy update — "
+                f"effective_imbalance={effective_imbalance:.1f}, omen={omen:.1f}, "
+                f"exploit={exploit:.1f}"
+            )
+            result = await self._generate(state, action, None, force_type="prophecy_update")
+            return _attach_proposal(result, hypocrisy_score=hypocrisy)
 
         # --- No intervention ---
-        return NemesisResponse(intervene=False)
+        return _attach_proposal(NemesisResponse(intervene=False), hypocrisy_score=hypocrisy)
 
     async def generate_initial_prophecy(
         self, state: ThreadState
     ) -> NemesisResponse:
         """Generate the Turn 0 prophecy based on chosen hamartia."""
         logger.info(f"Nemesis: Generating initial prophecy for hamartia='{state.soul_ledger.hamartia}'")
-        return await self._generate(
+        result = await self._generate(
             state, action="Session begins.", oath_broken=None,
             force_type="prophecy_update",
         )
+        return _attach_proposal(result)
 
     async def _generate(
         self, state: ThreadState, action: str,

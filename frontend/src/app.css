@@ -88,6 +88,10 @@ html, body {
 	align-items: center;
 	justify-content: center;
 	cursor: pointer;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	appearance: none;
 }
 
 .pane-edge-left { left: 0; }
@@ -111,6 +115,9 @@ html, body {
 	inset: 0;
 	z-index: 45;
 	background: rgba(0, 0, 0, 0.5);
+	padding: 0;
+	border: 0;
+	cursor: pointer;
 }
 
 /* ── Thread Anchor (Vertical Centering) ──────────────────────── */

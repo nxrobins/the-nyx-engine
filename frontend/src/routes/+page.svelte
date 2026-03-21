@@ -44,16 +44,31 @@
 	{/if}
 
 	<!-- Edge triggers (always visible) -->
-	<div class="pane-edge pane-edge-left" onclick={() => leftOpen = true}>
-		<span class="edge-glyph">‹</span>
-	</div>
-	<div class="pane-edge pane-edge-right" onclick={() => rightOpen = true}>
-		<span class="edge-glyph">›</span>
-	</div>
+	<button
+		type="button"
+		class="pane-edge pane-edge-left"
+		aria-label="Open soul ledger"
+		onclick={() => leftOpen = true}
+	>
+		<span class="edge-glyph" aria-hidden="true">‹</span>
+	</button>
+	<button
+		type="button"
+		class="pane-edge pane-edge-right"
+		aria-label="Open oracle"
+		onclick={() => rightOpen = true}
+	>
+		<span class="edge-glyph" aria-hidden="true">›</span>
+	</button>
 
 	<!-- Dismiss overlay (when either pane is open) -->
 	{#if leftOpen || rightOpen}
-		<div class="pane-dismiss" onclick={dismissPanes}></div>
+		<button
+			type="button"
+			class="pane-dismiss"
+			aria-label="Dismiss side panes"
+			onclick={dismissPanes}
+		></button>
 	{/if}
 
 	<!-- Side pane overlays -->

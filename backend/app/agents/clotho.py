@@ -22,8 +22,10 @@ from typing import AsyncGenerator
 
 from app.agents.base import AgentBase
 from app.core.config import settings
-from app.schemas.state import ClothoResponse, ThreadState
+from app.schemas.state import ClothoResponse, SceneOutcome, ThreadState
 from app.services import llm
+from app.services.canon import render_scene_snapshot
+from app.services.pressure import pressure_summary, salient_pressure_prompt
 from app.services.prompt_loader import load_prompt
 from app.services.soul_math import SoulVectorEngine
 
@@ -178,6 +180,45 @@ _FALLBACK_CHOICES: dict[int, list[str]] = {
 }
 
 
+def _pressure_fallback_choice(state: ThreadState) -> str:
+    """Return one deterministic choice that answers the loudest active pressure."""
+    pressures = state.pressures
+    if pressures.suspicion >= 1.5:
+        return "Ask who has been whispering your name"
+    if pressures.wounds >= 1.5:
+        return "Bind your wounds before you move again"
+    if pressures.debt >= 1.5:
+        return "Go to the one you owe and settle the debt"
+    if pressures.scarcity >= 1.5:
+        return "Search for food, water, or coin"
+    if pressures.faction_heat >= 1.5:
+        return "Slip away before authority closes its hand"
+    if pressures.omen >= 1.5:
+        return "Follow the omen before it fades"
+
+    active_oath = next(
+        (o for o in state.soul_ledger.active_oaths if o.status == "active"),
+        None,
+    )
+    if active_oath and active_oath.terms and active_oath.terms.price:
+        return f"Count the price of your oath to {active_oath.terms.promised_action}"
+    return ""
+
+
+def _fallback_choices_for_state(state: ThreadState, epoch_phase: int) -> list[str]:
+    """Phase-aware fallback choices with one slot reserved for pressure response."""
+    choices = list(_FALLBACK_CHOICES.get(epoch_phase, []))
+    pressure_choice = _pressure_fallback_choice(state)
+    if epoch_phase >= 4 or not pressure_choice:
+        return choices
+    if pressure_choice not in choices:
+        if choices:
+            choices[-1] = pressure_choice
+        else:
+            choices.append(pressure_choice)
+    return choices
+
+
 # ---------------------------------------------------------------------------
 # Choice Parser
 # ---------------------------------------------------------------------------
@@ -219,9 +260,11 @@ def _build_payload(
     eris_desc: str = "",
     epoch_phase: int = 1,
     vignette_directive: str = "",
+    scene_outcome: SceneOutcome | None = None,
 ) -> str:
     """Build the structured JSON payload for Clotho's user message."""
     vectors = state.soul_ledger.vectors
+    scene_snapshot = render_scene_snapshot(state)
 
     # Determine narrative directives from outcome + soul state
     directives: list[str] = []
@@ -257,9 +300,26 @@ def _build_payload(
         ),
         "nemesis_intervention": nemesis_desc or None,
         "eris_chaos": eris_desc or None,
+        "resolved_scene_outcome": scene_outcome.model_dump() if scene_outcome else None,
         "soul_vectors": vectors.model_dump(),
+        "pressures": state.pressures.model_dump(),
+        "pressure_summary": pressure_summary(state),
+        "active_oaths": [
+            {
+                "text": oath.text,
+                "status": oath.status,
+                "terms": oath.terms.model_dump() if oath.terms else None,
+            }
+            for oath in state.soul_ledger.active_oaths[:3]
+        ],
+        "legacy_echoes": [echo.model_dump() for echo in state.legacy_echoes[:2]],
+        "hamartia_profile": (
+            state.soul_ledger.hamartia_profile.model_dump()
+            if state.soul_ledger.hamartia_profile else None
+        ),
         "dominant_vector": dominant,
         "environment": state.session.current_environment,
+        "scene_snapshot": scene_snapshot or None,
         "prophecy": state.the_loom.current_prophecy or None,
         "hamartia": state.soul_ledger.hamartia or None,
         "turn_number": state.session.turn_count,
@@ -295,6 +355,7 @@ def _build_payload(
     # Append vector-mapped choice instructions (Phase 1-3 only)
     if epoch_phase < 4:
         choice_count = {1: 3, 2: 4, 3: 5}.get(epoch_phase, 3)
+        pressure_directive = salient_pressure_prompt(state)
         msg += (
             f"\n\n--- CHOICES ---\n"
             f"After your prose, output exactly {choice_count} choices.\n"
@@ -320,6 +381,11 @@ def _build_payload(
             f'"Tell him your father is just around the corner", '
             f'"Slip behind the cart and hide"]\n'
         )
+        if pressure_directive:
+            msg += (
+                f"- At least one choice must answer active external pressure.\n"
+                f"  Current pressure: {pressure_directive}\n"
+            )
 
     return msg
 
@@ -338,6 +404,7 @@ class Clotho(AgentBase):
         epoch_phase: int = 1,
         stratified_context: str = "",
         vignette_directive: str = "",
+        scene_outcome: SceneOutcome | None = None,
     ) -> ClothoResponse:
         """Generate literary prose from resolved state.
 
@@ -352,7 +419,7 @@ class Clotho(AgentBase):
         # --- Mock mode ---
         if model == "mock":
             await asyncio.sleep(0.5)
-            choices = _FALLBACK_CHOICES.get(epoch_phase, [])
+            choices = _fallback_choices_for_state(state, epoch_phase)
             return ClothoResponse(
                 prose=_mock_prose(state),
                 scene_tags=[state.last_outcome or "neutral"],
@@ -367,7 +434,9 @@ class Clotho(AgentBase):
 
         user_message = _build_payload(
             state, action, nemesis_desc, eris_desc,
-            epoch_phase=epoch_phase, vignette_directive=vignette_directive,
+            epoch_phase=epoch_phase,
+            vignette_directive=vignette_directive,
+            scene_outcome=scene_outcome,
         )
         logger.info(f"Clotho calling {model} (epoch {epoch_phase}, context={len(stratified_context)} chars)")
 
@@ -388,7 +457,7 @@ class Clotho(AgentBase):
             )
         except Exception as e:
             logger.error(f"Clotho LLM failed: {e}. Falling back to mock.")
-            choices = _FALLBACK_CHOICES.get(epoch_phase, [])
+            choices = _fallback_choices_for_state(state, epoch_phase)
             return ClothoResponse(
                 prose=_mock_prose(state),
                 scene_tags=[state.last_outcome or "neutral"],
@@ -402,6 +471,7 @@ class Clotho(AgentBase):
         epoch_phase: int = 1,
         stratified_context: str = "",
         vignette_directive: str = "",
+        scene_outcome: SceneOutcome | None = None,
     ) -> AsyncGenerator[str, None]:
         """Stream prose tokens for the SSE pipeline.
 
@@ -419,7 +489,7 @@ class Clotho(AgentBase):
             await asyncio.sleep(0.3)
             prose = _mock_prose(state)
             # Append mock choices separator for phases 1-3
-            choices = _FALLBACK_CHOICES.get(epoch_phase, [])
+            choices = _fallback_choices_for_state(state, epoch_phase)
             if epoch_phase < 4 and choices:
                 prose += "\n\n---CHOICES---\n" + json.dumps(choices)
 
@@ -440,7 +510,9 @@ class Clotho(AgentBase):
 
         user_message = _build_payload(
             state, action, nemesis_desc, eris_desc,
-            epoch_phase=epoch_phase, vignette_directive=vignette_directive,
+            epoch_phase=epoch_phase,
+            vignette_directive=vignette_directive,
+            scene_outcome=scene_outcome,
         )
         logger.info(f"Clotho streaming {model} (epoch {epoch_phase})")
 

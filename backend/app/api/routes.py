@@ -26,6 +26,7 @@ from app.core.kernel import NyxKernel
 from app.db import get_dead_threads
 from app.schemas.state import InitRequest, PlayerAction, TurnResult
 from app.services.bfl import generate_image
+from app.services.legacy import augment_thread_summary
 
 logger = logging.getLogger("nyx.api")
 
@@ -226,7 +227,7 @@ async def get_hamartia_options():
 async def get_player_threads(player_id: str):
     """Return all dead threads for a player (past lives)."""
     threads = await get_dead_threads(player_id)
-    return {"threads": threads}
+    return {"threads": [augment_thread_summary(thread) for thread in threads]}
 
 
 # ------------------------------------------------------------------

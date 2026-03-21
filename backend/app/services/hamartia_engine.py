@@ -11,7 +11,7 @@ it calls determine_hamartia() during Step 2b of _resolve_turn().
 
 from __future__ import annotations
 
-from app.schemas.state import ThreadState
+from app.schemas.state import HamartiaProfile, ThreadState
 
 
 # ---------------------------------------------------------------------------
@@ -24,6 +24,54 @@ VECTOR_HAMARTIA_MAP: dict[str, str] = {
     "kleos": "Vainglory",    # obsessive need for recognition
     "aidos": "Cowardice",    # paralytic fear of action
 }
+
+HAMARTIA_PROFILES: dict[str, HamartiaProfile] = {
+    "hubris": HamartiaProfile(
+        name="Hubris",
+        choice_bias="public-risk",
+        nemesis_multiplier=1.1,
+        eris_bias=0.1,
+        style_directive="Tempt the player with public certainty and high-visibility gambles.",
+        refusal_pattern="overreach",
+        social_cost_bias="public display compounds suspicion",
+    ),
+    "wrath": HamartiaProfile(
+        name="Wrath",
+        choice_bias="violent-overreach",
+        nemesis_multiplier=1.25,
+        eris_bias=0.05,
+        style_directive="Violence should feel close, easy, and one choice away.",
+        refusal_pattern="violent impulse",
+        social_cost_bias="avoidance after aggression reads as weakness and draws reprisals",
+    ),
+    "vainglory": HamartiaProfile(
+        name="Vainglory",
+        choice_bias="witness-seeking",
+        nemesis_multiplier=1.15,
+        eris_bias=0.15,
+        style_directive="Offer witness, applause, and public humiliation in equal measure.",
+        refusal_pattern="humiliation",
+        social_cost_bias="public display compounds suspicion",
+    ),
+    "cowardice": HamartiaProfile(
+        name="Cowardice",
+        choice_bias="avoidance",
+        nemesis_multiplier=1.0,
+        eris_bias=0.2,
+        style_directive="Safety should always look one move away, and expensive.",
+        refusal_pattern="retreat",
+        social_cost_bias="avoidance compounds suspicion and faction heat",
+    ),
+}
+
+
+def get_hamartia_profile(hamartia: str) -> HamartiaProfile | None:
+    """Return the live profile for a hamartia label."""
+    lowered = hamartia.lower()
+    for key, profile in HAMARTIA_PROFILES.items():
+        if key in lowered:
+            return profile.model_copy(deep=True)
+    return None
 
 
 def determine_hamartia(state: ThreadState) -> str | None:

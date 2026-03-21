@@ -40,6 +40,7 @@ class Settings(BaseSettings):
 
     # PostgreSQL — empty = in-memory only (no persistence)
     database_url: str = ""
+    sqlite_store_path: str = ""
 
     # Gameplay tuning
     nemesis_imbalance_threshold: float = 6.0

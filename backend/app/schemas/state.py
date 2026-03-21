@@ -24,17 +24,43 @@ class SoulVectors(BaseModel):
     aidos: float = 5.0    # shadow, restraint, humility
 
 
+class OathTerms(BaseModel):
+    """Structured oath terms extracted from oath language."""
+    subject: str = ""
+    promised_action: str = ""
+    protected_target: str | None = None
+    forbidden_action: str | None = None
+    deadline: str | None = None
+    witness: str | None = None
+    price: str | None = None
+
+
 class Oath(BaseModel):
     """A promise the player has sworn. Breaking it invokes Nemesis."""
     oath_id: str
     text: str              # the raw sworn text
     turn_sworn: int
     broken: bool = False
+    terms: OathTerms | None = None
+    status: str = "active"   # active | fulfilled | broken | transformed
+    fulfillment_note: str = ""
+
+
+class HamartiaProfile(BaseModel):
+    """Mechanical profile applied once a tragic flaw hardens into fate."""
+    name: str
+    choice_bias: str
+    nemesis_multiplier: float = 1.0
+    eris_bias: float = 0.0
+    style_directive: str = ""
+    refusal_pattern: str = ""
+    social_cost_bias: str = ""
 
 
 class SoulLedger(BaseModel):
     """The player's soul state — replaces HP/Inventory."""
     hamartia: str = ""     # tragic flaw, immutable after Turn 0
+    hamartia_profile: HamartiaProfile | None = None
     vectors: SoulVectors = Field(default_factory=SoulVectors)
     active_oaths: list[Oath] = Field(default_factory=list)
 
@@ -65,6 +91,140 @@ class SessionData(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Canonical World State
+# ---------------------------------------------------------------------------
+
+class CanonNPC(BaseModel):
+    """A named person in the world canon."""
+    npc_id: str
+    name: str
+    role: str
+    home_location_id: str
+    current_location_id: str
+    status: str = "alive"  # alive | dead | missing | departed
+    trust: float = 0.0
+    fear: float = 0.0
+    obligation: float = 0.0
+    tags: list[str] = Field(default_factory=list)
+    last_seen_turn: int = 0
+
+
+class CanonLocation(BaseModel):
+    """A stable place in the world canon."""
+    location_id: str
+    name: str
+    region: str
+    kind: str
+    current_condition: str = ""
+    tags: list[str] = Field(default_factory=list)
+
+
+class CanonFaction(BaseModel):
+    """A social or political force in the world canon."""
+    faction_id: str
+    name: str
+    stance: str = "neutral"
+    leverage: float = 0.0
+    hostility: float = 0.0
+    notes: str = ""
+
+
+class SceneClock(BaseModel):
+    """A simple progress tracker for unresolved scene pressure."""
+    clock_id: str
+    label: str
+    progress: int = 0
+    max_segments: int = 4
+    stakes: str = ""
+    resolution_hint: str = ""
+
+
+class SceneState(BaseModel):
+    """The immediate playable scene."""
+    scene_id: str
+    location_id: str
+    present_npc_ids: list[str] = Field(default_factory=list)
+    active_clock_ids: list[str] = Field(default_factory=list)
+    immediate_problem: str = ""
+    scene_objective: str = ""
+    carryover_consequence: str = ""
+
+
+class WorldCanon(BaseModel):
+    """Structured world state that outlives prose."""
+    npcs: dict[str, CanonNPC] = Field(default_factory=dict)
+    locations: dict[str, CanonLocation] = Field(default_factory=dict)
+    factions: dict[str, CanonFaction] = Field(default_factory=dict)
+    clocks: dict[str, SceneClock] = Field(default_factory=dict)
+    current_scene: SceneState | None = None
+    world_facts: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Deliberation + Resolved Scene Contracts
+# ---------------------------------------------------------------------------
+
+class AgentProposal(BaseModel):
+    """A single agent's structured bid for what should become true."""
+    agent: str
+    allow_action: bool = True
+    refusal_reason: str = ""
+    scene_patch: dict[str, object] = Field(default_factory=dict)
+    vector_patch: dict[str, float] = Field(default_factory=dict)
+    pressure_patch: dict[str, float] = Field(default_factory=dict)
+    prophecy_patch: str = ""
+    death_flag: bool = False
+    death_reason: str = ""
+    intervention_copy: str = ""
+    priority_note: str = ""
+    confidence: float = 0.5
+
+
+class DeliberationTrace(BaseModel):
+    """A compact record of how the Fates judged the turn."""
+    turn_number: int
+    proposals: list[AgentProposal] = Field(default_factory=list)
+    winner_order: list[str] = Field(default_factory=list)
+    final_reason: str = ""
+
+
+class SceneOutcome(BaseModel):
+    """Canonical facts Clotho must narrate without contradiction."""
+    material_changes: list[str] = Field(default_factory=list)
+    present_npcs: list[str] = Field(default_factory=list)
+    immediate_problem: str = ""
+    intervening_fates: list[str] = Field(default_factory=list)
+    must_not_contradict: list[str] = Field(default_factory=list)
+    pressure_changes: dict[str, float] = Field(default_factory=dict)
+    pressure_summary: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Pressure + Legacy
+# ---------------------------------------------------------------------------
+
+class PressureState(BaseModel):
+    """External consequences that push back on the player each turn."""
+    suspicion: float = 0.0
+    scarcity: float = 0.0
+    wounds: float = 0.0
+    debt: float = 0.0
+    faction_heat: float = 0.0
+    omen: float = 0.0
+    exploit_score: float = 0.0
+    stability_streak: int = 0
+
+
+class LegacyEcho(BaseModel):
+    """A surviving mark from a prior dead thread."""
+    source_thread_id: str
+    epitaph: str
+    hamartia: str
+    inherited_mark: str
+    mechanical_effect: str
+
+
+# ---------------------------------------------------------------------------
 # The Thread State (master game state per session)
 # ---------------------------------------------------------------------------
 
@@ -73,6 +233,8 @@ class ThreadState(BaseModel):
     session: SessionData = Field(default_factory=SessionData)
     soul_ledger: SoulLedger = Field(default_factory=SoulLedger)
     the_loom: TheLoom = Field(default_factory=TheLoom)
+    pressures: PressureState = Field(default_factory=PressureState)
+    canon: WorldCanon | None = None
     rag_context: list[str] = Field(default_factory=list)  # fallback context
     world_context: str = ""    # formatted world seed, fed to Clotho every turn
     last_action: str = ""
@@ -82,6 +244,8 @@ class ThreadState(BaseModel):
     prose_history: list[str] = Field(default_factory=list)       # last N raw prose turns
     chronicle: list[str] = Field(default_factory=list)           # mythic sentence per 5-turn window
     factual_chronicle: list[str] = Field(default_factory=list)   # factual state snapshots per window
+    recent_traces: list[DeliberationTrace] = Field(default_factory=list)
+    legacy_echoes: list[LegacyEcho] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +263,7 @@ class LachesisResponse(BaseModel):
     oath_violation: Optional[str] = None      # oath_id if action violates
     environment_update: str = ""              # new environment description
     assigned_hamartia: Optional[str] = None   # set at Turn 10 when "Unformed"
+    proposal: AgentProposal | None = None
 
 
 class AtroposResponse(BaseModel):
@@ -106,6 +271,7 @@ class AtroposResponse(BaseModel):
     Triggers: oath_broken, narrative_dead_end, self_destruction, dead_soul."""
     terminal_state: bool = False
     death_reason: str = ""
+    proposal: AgentProposal | None = None
 
 
 class NemesisResponse(BaseModel):
@@ -115,6 +281,7 @@ class NemesisResponse(BaseModel):
     updated_prophecy: str = ""
     punishment_description: str = ""
     vector_penalty: dict[str, float] = Field(default_factory=dict)
+    proposal: AgentProposal | None = None
 
 
 class ErisResponse(BaseModel):
@@ -123,6 +290,7 @@ class ErisResponse(BaseModel):
     chaos_description: str = ""
     chaos_severity: float = 0.0
     vector_chaos: dict[str, float] = Field(default_factory=dict)
+    proposal: AgentProposal | None = None
 
 
 class ClothoResponse(BaseModel):
