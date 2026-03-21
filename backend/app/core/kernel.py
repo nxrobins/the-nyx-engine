@@ -52,6 +52,7 @@ from app.core.world_seeds import get_world_seed, format_world_context
 from app.schemas.state import (
     DeliberationTrace,
     LachesisResponse,
+    MomusValidation,
     Oath,
     SceneOutcome,
     ThreadState,
@@ -822,6 +823,71 @@ class NyxKernel:
         )
 
     # ------------------------------------------------------------------
+    # Shared Pipeline: Clotho pass + Momus repair
+    # ------------------------------------------------------------------
+
+    async def _request_clotho_pass(
+        self,
+        ctx: TurnContext,
+        action: str,
+        *,
+        repair_brief: str = "",
+    ) -> tuple[str, list[str]]:
+        """Request one non-streaming Clotho pass and parse it."""
+        clotho_result = await self.clotho.evaluate(
+            ctx.outcome.state,
+            action,
+            nemesis_desc=ctx.nemesis_desc,
+            eris_desc=ctx.eris_desc,
+            epoch_phase=ctx.phase,
+            stratified_context=ctx.stratified_context,
+            vignette_directive=ctx.vignette_directive,
+            scene_outcome=ctx.scene_outcome,
+            repair_brief=repair_brief,
+        )
+        prose, choices = _parse_clotho_output(clotho_result.prose, ctx.phase)
+        return self._append_interventions(prose, ctx), choices
+
+    async def _repair_prose_if_needed(
+        self,
+        ctx: TurnContext,
+        action: str,
+        prose: str,
+        choices: list[str],
+    ) -> tuple[str, list[str], MomusValidation, bool]:
+        """Validate prose and retry Clotho once if Momus demands repair."""
+        validation = await self.momus.validate_prose(prose, ctx.outcome.state)
+        if not validation.repair_needed:
+            return prose, choices, validation, False
+
+        logger.warning(f"Momus hallucinations: {validation.hallucinations}")
+        retry_prose, retry_choices = await self._request_clotho_pass(
+            ctx, action, repair_brief=validation.repair_brief
+        )
+        retry_validation = await self.momus.validate_prose(
+            retry_prose, ctx.outcome.state
+        )
+
+        if retry_validation.repair_needed:
+            safe_prose = (
+                retry_validation.corrected_prose
+                or validation.corrected_prose
+                or prose
+            )
+            logger.warning(
+                "Momus repair retry still drifted; committing safer fallback. "
+                f"Issues: {retry_validation.hallucinations}"
+            )
+            return (
+                safe_prose,
+                retry_choices or choices,
+                retry_validation.model_copy(update={"corrected_prose": safe_prose}),
+                True,
+            )
+
+        return retry_prose, retry_choices or choices, retry_validation, True
+
+    # ------------------------------------------------------------------
     # Shared Pipeline: _finalize_turn (Step 10+)
     # ------------------------------------------------------------------
 
@@ -830,6 +896,7 @@ class NyxKernel:
         ctx: TurnContext,
         prose: str,
         choices: list[str],
+        validation: MomusValidation | None = None,
     ) -> TurnResult:
         """Step 10+: Post-prose bookkeeping. Shared by sync and streaming.
 
@@ -839,9 +906,11 @@ class NyxKernel:
         outcome = ctx.outcome
 
         # Momus validation
-        validation = await self.momus.validate_prose(prose, outcome.state)
-        if not validation.valid:
+        if validation is None:
+            validation = await self.momus.validate_prose(prose, outcome.state)
+        if validation.hallucinations:
             logger.warning(f"Momus hallucinations: {validation.hallucinations}")
+        if validation.repair_needed:
             prose = validation.corrected_prose or prose
         if validation.law_violations:
             logger.warning(f"Momus law violations: {validation.law_violations}")
@@ -1006,19 +1075,12 @@ class NyxKernel:
             return await self._handle_death(ctx)
 
         # Clotho generates prose
-        clotho_result = await self.clotho.evaluate(
-            ctx.outcome.state, action,
-            nemesis_desc=ctx.nemesis_desc,
-            eris_desc=ctx.eris_desc,
-            epoch_phase=ctx.phase,
-            stratified_context=ctx.stratified_context,
-            vignette_directive=ctx.vignette_directive,
-            scene_outcome=ctx.scene_outcome,
+        prose, choices = await self._request_clotho_pass(ctx, action)
+        prose, choices, validation, _ = await self._repair_prose_if_needed(
+            ctx, action, prose, choices
         )
-        prose, choices = _parse_clotho_output(clotho_result.prose, ctx.phase)
-        prose = self._append_interventions(prose, ctx)
 
-        result = await self._finalize_turn(ctx, prose, choices)
+        result = await self._finalize_turn(ctx, prose, choices, validation=validation)
 
         # Dream trigger: fire on Resolution beats (turns 3, 6, 9)
         if ctx.beat_position == "RESOLUTION" and ctx.phase <= 3:
@@ -1147,15 +1209,26 @@ class NyxKernel:
             # Parse the full buffer for choices + interventions
             prose, choices = _parse_clotho_output(full_prose_buffer, ctx.phase)
             prose = self._append_interventions(prose, ctx)
+            prose, choices, validation, repaired = await self._repair_prose_if_needed(
+                ctx, action, prose, choices
+            )
+
+            if repaired:
+                yield "data: " + json.dumps({
+                    "type": "prose_repair",
+                    "text": prose,
+                }) + "\n\n"
 
             # ── PHASE 3: STATE RESOLUTION ────────────────────────
-            result = await self._finalize_turn(ctx, prose, choices)
+            result = await self._finalize_turn(
+                ctx, prose, choices, validation=validation
+            )
             db_saved = True
 
             yield "data: " + json.dumps({
                 "type": "state",
                 "payload": result.state.model_dump(),
-                "ui_choices": choices,
+                "ui_choices": result.ui_choices,
                 "terminal": False,
                 "death_reason": "",
                 "nemesis_struck": result.nemesis_struck,

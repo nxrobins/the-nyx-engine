@@ -17,6 +17,8 @@
 		submitAction,
 		activeDream,
 		dismissDream,
+		deliberationTrace,
+		repairWitness,
 	} from '$lib/stores/engine';
 	import { renderProse } from '$lib/utils/markdown';
 	import Console from './Console.svelte';
@@ -40,6 +42,21 @@
 			visibleIndex = 0;
 		}
 		prevProcessing = $isProcessing;
+	});
+
+	let trace = $derived.by(
+		() => $deliberationTrace ?? $gameState?.recent_traces?.at(-1) ?? null
+	);
+
+	let witnessProposals = $derived.by(() => {
+		if (!trace) return [];
+		return trace.proposals
+			.filter((proposal) =>
+				trace.winner_order.includes(proposal.agent)
+				|| Boolean(proposal.intervention_copy)
+				|| Boolean(proposal.refusal_reason)
+			)
+			.slice(0, 3);
 	});
 
 	function advanceText() {
@@ -102,6 +119,75 @@
 						{@html renderProse(paragraphs[visibleIndex] ?? '')}
 					</div>
 				{/key}
+			{/if}
+
+			{#if !$isProcessing && ($repairWitness || trace)}
+				<div class="mb-6 max-w-2xl mx-auto fade-in">
+					<details class="border border-[var(--nyx-border)]/60 bg-black/20 px-4 py-3">
+						<summary
+							class="cursor-pointer text-[10px] uppercase tracking-[0.22em]"
+							style="font-family: var(--font-mono); color: var(--nyx-text-dim);"
+						>
+							The Fates Deliberated
+						</summary>
+
+						<div class="mt-4 flex flex-col gap-3">
+							{#if $repairWitness}
+								<p
+									class="text-xs leading-relaxed"
+									style="font-family: var(--font-prose); color: var(--nyx-oracle-gold);"
+								>
+									{$repairWitness}
+								</p>
+							{/if}
+
+							{#if trace?.final_reason}
+								<p
+									class="text-sm leading-relaxed"
+									style="font-family: var(--font-prose); color: var(--nyx-text-dim);"
+								>
+									{trace.final_reason}
+								</p>
+							{/if}
+
+							{#if $gameState?.canon?.current_scene?.immediate_problem}
+								<p
+									class="text-xs leading-relaxed"
+									style="font-family: var(--font-prose); color: var(--nyx-text);"
+								>
+									Immediate problem: {$gameState.canon.current_scene.immediate_problem}
+								</p>
+							{/if}
+
+							{#if trace && trace.winner_order.length > 0}
+								<div class="flex flex-wrap gap-2">
+									{#each trace.winner_order as fate}
+										<span
+											class="px-2 py-1 text-[10px] uppercase tracking-[0.16em] border border-[var(--nyx-border)]/60"
+											style="font-family: var(--font-mono); color: var(--nyx-text-dim);"
+										>
+											{fate}
+										</span>
+									{/each}
+								</div>
+							{/if}
+
+							{#if witnessProposals.length > 0}
+								<div class="flex flex-col gap-2">
+									{#each witnessProposals as proposal}
+										<p
+											class="text-xs leading-relaxed"
+											style="font-family: var(--font-prose); color: var(--nyx-text-dim);"
+										>
+											<span style="color: var(--nyx-text);">{proposal.agent}:</span>
+											{proposal.intervention_copy || proposal.refusal_reason || proposal.priority_note}
+										</p>
+									{/each}
+								</div>
+							{/if}
+						</div>
+					</details>
+				</div>
 			{/if}
 
 			<!-- Controls container (auto height for choice buttons) -->

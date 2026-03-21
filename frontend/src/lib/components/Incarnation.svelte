@@ -1,12 +1,11 @@
 <!--
-  Incarnation.svelte — Diegetic Character Creation
-  Step 0: Name (text input) → Step 1: Gender (two buttons) → Step 2: First Memory (four archetypes)
-  Hamartia hardcoded as "Unformed" — Lachesis overwrites at Turn 10.
+  Incarnation: name, shape, and first memory.
+  Legacy marks from prior dead threads are surfaced before the new life begins.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
-	import { vestibuleState, playerId } from '$lib/stores/vestibule';
+	import { vestibuleState, playerId, pastThreads, fetchPastThreads } from '$lib/stores/vestibule';
 	import { initGame } from '$lib/stores/engine';
 
 	let step = $state<0 | 1 | 2>(0);
@@ -22,12 +21,17 @@
 		'A light in the distance I could not reach.',
 		'The weight of a heavy stone in my hand.',
 		'A crowd shouting a name that was not mine.',
-		'A cold shadow that moved when I moved.',
+		'A cold shadow that moved when I moved.'
 	];
 
 	onMount(() => {
 		nameInput?.focus();
+		fetchPastThreads();
 	});
+
+	let legacyPreview = $derived.by(() =>
+		$pastThreads.filter((thread) => thread.legacy_mark).slice(0, 3)
+	);
 
 	function handleNameSubmit(e: KeyboardEvent) {
 		if (e.key !== 'Enter') return;
@@ -56,7 +60,6 @@
 		firstMemory = memory;
 		fading = true;
 
-		// Wait for fade-out animation (2s)
 		await new Promise((resolve) => setTimeout(resolve, 2000));
 
 		loading = true;
@@ -66,11 +69,10 @@
 				name: playerName,
 				gender: playerGender,
 				hamartia: 'Unformed',
-				first_memory: firstMemory,
+				first_memory: firstMemory
 			});
 			vestibuleState.set('playing');
-		} catch (err) {
-			// On failure, undo fade and show error
+		} catch {
 			fading = false;
 			loading = false;
 			error = 'The Loom falters. Try again.';
@@ -79,7 +81,6 @@
 </script>
 
 {#if loading}
-	<!-- Weaving state: atmospheric hold while the Loom initializes -->
 	<div class="incarnation-screen fade-in">
 		<div class="weaving-thread"></div>
 		<p class="weaving-text">The Fates are weaving...</p>
@@ -87,7 +88,6 @@
 {:else}
 	<div class="incarnation-screen" class:incarnation-fade-out={fading}>
 		{#if step === 0}
-			<!-- Step 0: Name -->
 			<div class="step-enter">
 				<p class="incarnation-prose">
 					A thread stirs in the void. Before the Fates can weave,<br />
@@ -108,7 +108,6 @@
 				{/if}
 			</div>
 		{:else if step === 1}
-			<!-- Step 1: Gender -->
 			<div class="step-enter">
 				<p class="incarnation-prose">
 					The thread takes form. <em>{playerName}</em>...<br />
@@ -116,16 +115,10 @@
 				</p>
 				<p class="incarnation-prompt">What shape does this soul wear?</p>
 				<div class="gender-buttons fade-in">
-					<button
-						class="nyx-choice-btn phase-3"
-						onclick={() => selectGender('boy')}
-					>
+					<button class="nyx-choice-btn phase-3" onclick={() => selectGender('boy')}>
 						A Boy
 					</button>
-					<button
-						class="nyx-choice-btn phase-3"
-						onclick={() => selectGender('girl')}
-					>
+					<button class="nyx-choice-btn phase-3" onclick={() => selectGender('girl')}>
 						A Girl
 					</button>
 				</div>
@@ -134,17 +127,46 @@
 				{/if}
 			</div>
 		{:else}
-			<!-- Step 2: World Prologue + First Memory -->
 			<div class="step-enter">
 				<p class="incarnation-prose">
 					The thread is woven. But where does it fall?
 				</p>
-				<p class="incarnation-prose" style="max-width: 520px; font-size: 1.05rem; color: var(--nyx-text-dim); opacity: 0.75;">
-					This is the Age of Ash — a world of crumbled empires and
-					forgotten gods. Iron rusts in the rain. Villages cling to
-					hillsides like scars. The strong devour the weak,
-					and the Fates watch from their Loom, indifferent.
+				<p
+					class="incarnation-prose"
+					style="max-width: 520px; font-size: 1.05rem; color: var(--nyx-text-dim); opacity: 0.75;"
+				>
+					This is the Age of Ash, a world of crumbled empires and forgotten gods.
+					Iron rusts in the rain. Villages cling to hillsides like scars.
+					The strong devour the weak, and the Fates watch from their Loom, indifferent.
 				</p>
+
+				{#if legacyPreview.length > 0}
+					<div class="memory-buttons fade-in" style="gap: 0.6rem; margin-top: 0; margin-bottom: 2rem;">
+						<p class="incarnation-prompt" style="font-size: 0.95rem; margin-bottom: 0.25rem;">
+							The dead lean close.
+						</p>
+						{#each legacyPreview as thread}
+							<div
+								class="w-full text-left px-4 py-3 border border-[var(--nyx-border)]/60"
+								style="max-width: 460px; background: rgba(255,255,255,0.02);"
+							>
+								<p
+									class="text-xs uppercase tracking-[0.18em]"
+									style="font-family: var(--font-mono); color: var(--nyx-text-dim);"
+								>
+									{thread.legacy_mark}
+								</p>
+								<p
+									class="text-sm mt-2"
+									style="font-family: var(--font-prose); color: var(--nyx-text-dim);"
+								>
+									{thread.legacy_effect}
+								</p>
+							</div>
+						{/each}
+					</div>
+				{/if}
+
 				<p class="incarnation-prompt">What is your earliest memory?</p>
 				<div class="memory-buttons fade-in">
 					{#each MEMORIES as memory}

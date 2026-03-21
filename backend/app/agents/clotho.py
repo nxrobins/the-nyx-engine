@@ -120,6 +120,30 @@ def _mock_prose(state: ThreadState) -> str:
     return f"{random.choice(_OPENERS)}\n\n{body}"
 
 
+def _mock_repair_prose(
+    state: ThreadState,
+    scene_outcome: SceneOutcome | None = None,
+) -> str:
+    """Return a deterministic grounded fallback for repair retries."""
+    lines: list[str] = []
+    if state.session.current_environment:
+        lines.append(state.session.current_environment.rstrip(".") + ".")
+    if scene_outcome and scene_outcome.immediate_problem:
+        lines.append(scene_outcome.immediate_problem.rstrip(".") + ".")
+    if scene_outcome and scene_outcome.present_npcs:
+        lines.append(", ".join(scene_outcome.present_npcs) + " remain in the scene.")
+    if scene_outcome and scene_outcome.material_changes:
+        lines.append(scene_outcome.material_changes[0].rstrip(".") + ".")
+
+    if not lines:
+        snapshot = render_scene_snapshot(state)
+        if snapshot:
+            lines.append(snapshot)
+        else:
+            lines.append(_mock_prose(state))
+    return "\n\n".join(dict.fromkeys(lines))
+
+
 # ---------------------------------------------------------------------------
 # Epoch Directives & Fallback Choices
 # ---------------------------------------------------------------------------
@@ -261,6 +285,7 @@ def _build_payload(
     epoch_phase: int = 1,
     vignette_directive: str = "",
     scene_outcome: SceneOutcome | None = None,
+    repair_brief: str = "",
 ) -> str:
     """Build the structured JSON payload for Clotho's user message."""
     vectors = state.soul_ledger.vectors
@@ -352,6 +377,13 @@ def _build_payload(
     if vignette_directive:
         msg += f"\n\n--- SCENE BEAT ({state.session.beat_position}) ---\n{vignette_directive}"
 
+    if repair_brief:
+        msg += (
+            "\n\n--- REPAIR DIRECTIVE ---\n"
+            f"{repair_brief}\n"
+            "Rewrite the scene from scratch so the prose obeys canon."
+        )
+
     # Append vector-mapped choice instructions (Phase 1-3 only)
     if epoch_phase < 4:
         choice_count = {1: 3, 2: 4, 3: 5}.get(epoch_phase, 3)
@@ -405,6 +437,7 @@ class Clotho(AgentBase):
         stratified_context: str = "",
         vignette_directive: str = "",
         scene_outcome: SceneOutcome | None = None,
+        repair_brief: str = "",
     ) -> ClothoResponse:
         """Generate literary prose from resolved state.
 
@@ -421,7 +454,10 @@ class Clotho(AgentBase):
             await asyncio.sleep(0.5)
             choices = _fallback_choices_for_state(state, epoch_phase)
             return ClothoResponse(
-                prose=_mock_prose(state),
+                prose=(
+                    _mock_repair_prose(state, scene_outcome)
+                    if repair_brief else _mock_prose(state)
+                ),
                 scene_tags=[state.last_outcome or "neutral"],
                 ui_choices=choices,
             )
@@ -437,6 +473,7 @@ class Clotho(AgentBase):
             epoch_phase=epoch_phase,
             vignette_directive=vignette_directive,
             scene_outcome=scene_outcome,
+            repair_brief=repair_brief,
         )
         logger.info(f"Clotho calling {model} (epoch {epoch_phase}, context={len(stratified_context)} chars)")
 
@@ -459,7 +496,10 @@ class Clotho(AgentBase):
             logger.error(f"Clotho LLM failed: {e}. Falling back to mock.")
             choices = _fallback_choices_for_state(state, epoch_phase)
             return ClothoResponse(
-                prose=_mock_prose(state),
+                prose=(
+                    _mock_repair_prose(state, scene_outcome)
+                    if repair_brief else _mock_prose(state)
+                ),
                 scene_tags=[state.last_outcome or "neutral"],
                 ui_choices=choices,
             )
@@ -472,6 +512,7 @@ class Clotho(AgentBase):
         stratified_context: str = "",
         vignette_directive: str = "",
         scene_outcome: SceneOutcome | None = None,
+        repair_brief: str = "",
     ) -> AsyncGenerator[str, None]:
         """Stream prose tokens for the SSE pipeline.
 
@@ -487,7 +528,10 @@ class Clotho(AgentBase):
         # --- Mock mode: simulate token streaming ---
         if model == "mock":
             await asyncio.sleep(0.3)
-            prose = _mock_prose(state)
+            prose = (
+                _mock_repair_prose(state, scene_outcome)
+                if repair_brief else _mock_prose(state)
+            )
             # Append mock choices separator for phases 1-3
             choices = _fallback_choices_for_state(state, epoch_phase)
             if epoch_phase < 4 and choices:
@@ -513,6 +557,7 @@ class Clotho(AgentBase):
             epoch_phase=epoch_phase,
             vignette_directive=vignette_directive,
             scene_outcome=scene_outcome,
+            repair_brief=repair_brief,
         )
         logger.info(f"Clotho streaming {model} (epoch {epoch_phase})")
 

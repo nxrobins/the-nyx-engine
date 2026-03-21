@@ -309,6 +309,8 @@ class MomusValidation(BaseModel):
     valid: bool = True
     hallucinations: list[str] = Field(default_factory=list)
     law_violations: list[str] = Field(default_factory=list)
+    repair_needed: bool = False
+    repair_brief: str = ""
     corrected_prose: str = ""
 
 

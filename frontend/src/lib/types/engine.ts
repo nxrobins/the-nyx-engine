@@ -54,7 +54,6 @@ export interface SessionData {
 	player_id: string;
 	player_name: string;
 	player_gender: string;
-	hamartia: string;
 	first_memory: string;
 	turn_count: number;
 	run_number: number;

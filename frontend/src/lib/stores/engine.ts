@@ -45,6 +45,7 @@ export const streamingProse = writable<string>('');
 /** Mechanic toast — flashed on screen after Lachesis math resolves */
 export const mechanicToast = writable<MechanicEvent | null>(null);
 export const deliberationTrace = writable<DeliberationTrace | null>(null);
+export const repairWitness = writable<string | null>(null);
 
 /** Whether the engine is mid-turn */
 export const isProcessing = writable<boolean>(false);
@@ -113,6 +114,7 @@ export async function initGame(params: {
 	proseHistory.set([result.prose]);
 	uiChoices.set(result.ui_choices || []);
 	deliberationTrace.set(result.state.recent_traces?.at(-1) ?? null);
+	repairWitness.set(null);
 	isInitialized.set(true);
 
 	return result;
@@ -135,6 +137,7 @@ export async function submitAction(action: string): Promise<void> {
 	streamingProse.set('');
 	mechanicToast.set(null);
 	deliberationTrace.set(null);
+	repairWitness.set(null);
 	uiChoices.set([]);
 	activeDream.set('');
 
@@ -233,6 +236,13 @@ function handleStreamEvent(data: Record<string, unknown>): void {
 			break;
 		}
 
+		case 'prose_repair': {
+			const text = data.text as string;
+			streamingProse.set(text);
+			repairWitness.set('Momus stripped contradiction from the weave before it could set.');
+			break;
+		}
+
 		case 'prose': {
 			const text = data.text as string;
 			streamingProse.update((current) => current + text);
@@ -320,6 +330,7 @@ export async function resetGame(): Promise<void> {
 	streamingProse.set('');
 	mechanicToast.set(null);
 	deliberationTrace.set(null);
+	repairWitness.set(null);
 	backgroundImage.set('');
 	isProcessing.set(false);
 	isTerminal.set(false);

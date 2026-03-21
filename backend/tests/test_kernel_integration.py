@@ -342,6 +342,44 @@ class TestKernelProcessTurn:
         await kernel.process_turn("attack")
         assert len(kernel.state.prose_history) > initial_len
 
+    @pytest.mark.asyncio
+    async def test_momus_repair_loop_retries_before_commit(self, kernel: NyxKernel, monkeypatch):
+        await kernel.initialize(
+            hamartia="Unformed",
+            player_id="test_player",
+            name="Hero",
+            gender="boy",
+            first_memory="A light in the distance I could not reach.",
+        )
+
+        canon = kernel.state.canon
+        assert canon is not None
+        npc_ids = list(canon.npcs.keys())
+        assert len(npc_ids) >= 2
+        present_id, absent_id = npc_ids[0], npc_ids[1]
+        canon.current_scene.present_npc_ids = [present_id]
+        present_name = canon.npcs[present_id].name
+        absent_name = canon.npcs[absent_id].name
+
+        calls: list[str] = []
+
+        async def fake_request(ctx, action, *, repair_brief=""):
+            calls.append(repair_brief)
+            if repair_brief:
+                return f'{present_name} said, "Stay close."', ["Wait"]
+            return f'{absent_name} said, "Stay close."', ["Wait"]
+
+        monkeypatch.setattr(kernel, "_request_clotho_pass", fake_request)
+
+        result = await kernel.process_turn("look around")
+
+        assert len(calls) == 2
+        assert calls[0] == ""
+        assert calls[1] != ""
+        assert absent_name not in result.prose
+        assert present_name in result.prose
+        assert kernel.state.prose_history[-1] == result.prose
+
 
 class TestKernelReset:
     """Reset clears all state."""

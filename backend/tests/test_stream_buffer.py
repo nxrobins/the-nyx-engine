@@ -228,3 +228,36 @@ class TestDeliberationEvent:
         payload = deliberation_events[0]["payload"]
         assert "winner_order" in payload
         assert "proposals" in payload
+
+
+class TestProseRepairEvent:
+    """Streaming should surface a repair event when Momus rewrites the prose."""
+
+    @pytest.mark.asyncio
+    async def test_stream_emits_prose_repair_when_retry_happens(self, kernel: NyxKernel, monkeypatch):
+        await _init(kernel)
+
+        canon = kernel.state.canon
+        assert canon is not None
+        npc_ids = list(canon.npcs.keys())
+        assert len(npc_ids) >= 2
+        present_id, absent_id = npc_ids[0], npc_ids[1]
+        canon.current_scene.present_npc_ids = [present_id]
+        present_name = canon.npcs[present_id].name
+        absent_name = canon.npcs[absent_id].name
+
+        async def fake_stream(*args, **kwargs):
+            yield f'{absent_name} said, "Stay close."'
+
+        async def fake_request(ctx, action, *, repair_brief=""):
+            assert repair_brief != ""
+            return f'{present_name} said, "Stay close."', ["Wait"]
+
+        monkeypatch.setattr(kernel.clotho, "astream", fake_stream)
+        monkeypatch.setattr(kernel, "_request_clotho_pass", fake_request)
+
+        events = await _collect_events(kernel, "look around")
+        repair_events = _filter_events(events, "prose_repair")
+        assert len(repair_events) == 1
+        assert present_name in repair_events[0]["text"]
+        assert absent_name not in repair_events[0]["text"]

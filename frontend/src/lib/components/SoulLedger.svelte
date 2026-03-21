@@ -1,45 +1,28 @@
 <!--
-  Left Pane (280px): Soul Ledger
-  Displays hamartia badge, four soul vectors, and active oaths.
+  Left Pane: Soul Ledger
+  Displays hamartia, vectors, pressure, oaths, and legacy residue.
 -->
 <script lang="ts">
 	import { gameState } from '$lib/stores/engine';
 	import type { LegacyEcho, Oath, PressureState, SoulVectors } from '$lib/types/engine';
 
-	let vectors = $derived<SoulVectors | null>(
-		$gameState?.soul_ledger.vectors ?? null
-	);
+	let vectors = $derived<SoulVectors | null>($gameState?.soul_ledger.vectors ?? null);
+	let hamartia = $derived<string>($gameState?.soul_ledger.hamartia ?? '');
+	let oaths = $derived<Oath[]>($gameState?.soul_ledger.active_oaths ?? []);
+	let pressures = $derived<PressureState | null>($gameState?.pressures ?? null);
+	let legacyEchoes = $derived<LegacyEcho[]>($gameState?.legacy_echoes ?? []);
 
-	let hamartia = $derived<string>(
-		$gameState?.soul_ledger.hamartia ?? ''
-	);
-
-	let oaths = $derived<Oath[]>(
-		$gameState?.soul_ledger.active_oaths ?? []
-	);
-
-	let pressures = $derived<PressureState | null>(
-		$gameState?.pressures ?? null
-	);
-
-	let legacyEchoes = $derived<LegacyEcho[]>(
-		$gameState?.legacy_echoes ?? []
-	);
-
-	/** Format a vector value as whole number */
 	function fmt(val: number): string {
 		return Math.round(val).toString();
 	}
 
-	/** Vector label pairs for rendering */
 	const vectorKeys: { key: keyof SoulVectors; label: string }[] = [
 		{ key: 'metis', label: 'CUNNING' },
 		{ key: 'bia', label: 'FORCE' },
 		{ key: 'kleos', label: 'RENOWN' },
-		{ key: 'aidos', label: 'SHADOW' },
+		{ key: 'aidos', label: 'SHADOW' }
 	];
 
-	/** Color based on vector value */
 	function vectorColor(val: number): string {
 		if (val >= 9) return 'text-[var(--nyx-oracle-gold)]';
 		if (val >= 7) return 'text-white';
@@ -56,10 +39,25 @@
 		{ key: 'faction_heat', label: 'FACTION' },
 		{ key: 'omen', label: 'OMEN' }
 	];
+
+	let dominantPressure = $derived.by(() => {
+		if (!pressures) return null;
+		const entries = pressureKeys
+			.map(({ key, label }) => ({ key, label, value: pressures[key] }))
+			.filter((entry) => typeof entry.value === 'number' && entry.value >= 0.4)
+			.sort((a, b) => Number(b.value) - Number(a.value));
+		return entries[0] ?? null;
+	});
+
+	function oathTone(status: string): string {
+		if (status === 'broken') return 'var(--nyx-nemesis)';
+		if (status === 'fulfilled') return 'var(--nyx-oracle-gold)';
+		if (status === 'transformed') return 'var(--nyx-text)';
+		return 'var(--nyx-text-dim)';
+	}
 </script>
 
 <aside class="h-full overflow-y-auto border-r border-[var(--nyx-border)] px-5 py-6 flex flex-col gap-8 bg-[var(--nyx-void)]">
-	<!-- Hamartia Badge -->
 	{#if hamartia}
 		<div class="text-center">
 			<p class="text-[10px] uppercase tracking-[0.25em] mb-2" style="color: var(--nyx-text-dim);">
@@ -81,7 +79,10 @@
 			</p>
 
 			{#each legacyEchoes as echo}
-				<div class="text-sm leading-relaxed pl-3 border-l-2 border-[var(--nyx-oracle-gold)]/50" style="font-family: var(--font-prose);">
+				<div
+					class="text-sm leading-relaxed pl-3 border-l-2 border-[var(--nyx-oracle-gold)]/50"
+					style="font-family: var(--font-prose);"
+				>
 					<p class="text-[var(--nyx-oracle-gold)]/90">{echo.inherited_mark}</p>
 					<p class="text-[var(--nyx-text-dim)] text-xs mt-1">{echo.mechanical_effect}</p>
 				</div>
@@ -89,7 +90,6 @@
 		</div>
 	{/if}
 
-	<!-- Soul Vectors -->
 	{#if vectors}
 		<div class="flex flex-col gap-4">
 			<p class="text-[10px] uppercase tracking-[0.25em]" style="color: var(--nyx-text-dim);">
@@ -106,7 +106,6 @@
 						{label}
 					</span>
 
-					<!-- Thin bar -->
 					<div class="flex-1 h-[2px] bg-[var(--nyx-border)] relative">
 						<div
 							class="absolute inset-y-0 left-0 transition-all duration-700 ease-out
@@ -115,7 +114,6 @@
 						></div>
 					</div>
 
-					<!-- Value -->
 					<span
 						class="text-xs tabular-nums w-8 text-right transition-colors duration-500 {vectorColor(val)}"
 						style="font-family: var(--font-mono);"
@@ -161,13 +159,22 @@
 
 			{#if pressures.stability_streak >= 2}
 				<p class="text-[10px] leading-relaxed" style="color: var(--nyx-text-dim);">
-					Stability streak {pressures.stability_streak} — the world is waiting to break its calm.
+					Stability streak {pressures.stability_streak} means the world is waiting to break its calm.
+				</p>
+			{/if}
+
+			{#if dominantPressure}
+				<p class="text-[10px] leading-relaxed" style="color: var(--nyx-text-dim);">
+					The loudest pressure is {dominantPressure.label.toLowerCase()} ({Number(dominantPressure.value).toFixed(1)}).
+				</p>
+			{:else}
+				<p class="text-[10px] leading-relaxed" style="color: var(--nyx-text-dim);">
+					No worldly force dominates the scene yet.
 				</p>
 			{/if}
 		</div>
 	{/if}
 
-	<!-- Active Oaths -->
 	{#if oaths.length > 0}
 		<div class="flex flex-col gap-3">
 			<p class="text-[10px] uppercase tracking-[0.25em]" style="color: var(--nyx-text-dim);">
@@ -186,8 +193,29 @@
 						"{oath.text}"
 					</p>
 					<p class="text-[10px] mt-1" style="color: var(--nyx-text-dim);">
-						Turn {oath.turn_sworn} — {oath.status.toUpperCase()}
+						Turn {oath.turn_sworn} -
+						<span style="color: {oathTone(oath.status)};">{oath.status.toUpperCase()}</span>
 					</p>
+					{#if oath.terms?.protected_target}
+						<p class="text-[10px] mt-1" style="color: var(--nyx-text-dim);">
+							Guarding: {oath.terms.protected_target}
+						</p>
+					{/if}
+					{#if oath.terms?.deadline}
+						<p class="text-[10px] mt-1" style="color: var(--nyx-text-dim);">
+							Deadline: {oath.terms.deadline}
+						</p>
+					{/if}
+					{#if oath.terms?.price}
+						<p class="text-[10px] mt-1" style="color: var(--nyx-text-dim);">
+							Price: {oath.terms.price}
+						</p>
+					{/if}
+					{#if oath.terms?.witness}
+						<p class="text-[10px] mt-1" style="color: var(--nyx-text-dim);">
+							Witness: {oath.terms.witness}
+						</p>
+					{/if}
 					{#if oath.fulfillment_note}
 						<p class="text-[10px] mt-1" style="color: var(--nyx-text-dim);">
 							{oath.fulfillment_note}
@@ -198,6 +226,5 @@
 		</div>
 	{/if}
 
-	<!-- Spacer to push content up naturally -->
 	<div class="flex-1"></div>
 </aside>

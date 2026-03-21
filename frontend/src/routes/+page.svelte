@@ -38,7 +38,7 @@
 				<span class="thread-hud-separator">✦</span>
 				AGE {$gameState.session.player_age}
 				<span class="thread-hud-separator">✦</span>
-				{$gameState.session.hamartia}
+				{$gameState.soul_ledger.hamartia}
 			</span>
 		</div>
 	{/if}

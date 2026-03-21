@@ -18,6 +18,66 @@
 		return $deliberationTrace ?? (traces.length > 0 ? traces[traces.length - 1] : null);
 	});
 
+	let marks = $derived.by(() => {
+		const next: { title: string; body: string; tone: string }[] = [];
+		const pressures = $gameState?.pressures;
+		const vectors = $gameState?.soul_ledger.vectors;
+		const currentScene = $gameState?.canon?.current_scene;
+		const winnerOrder = trace?.winner_order ?? [];
+		const activeBrokenOath = ($gameState?.soul_ledger.active_oaths ?? []).some(
+			(oath) => oath.status === 'broken'
+		);
+
+		if (winnerOrder[0] === 'lachesis' && currentScene?.immediate_problem) {
+			next.push({
+				title: 'Lachesis',
+				body: currentScene.immediate_problem,
+				tone: 'var(--nyx-text-dim)'
+			});
+		}
+
+		if ((pressures?.omen ?? 0) >= 0.8) {
+			next.push({
+				title: 'Omen',
+				body: `Fate presses close. Omen weight ${pressures?.omen.toFixed(1)} still hangs over the scene.`,
+				tone: 'var(--nyx-oracle-gold)'
+			});
+		}
+
+		if (winnerOrder.includes('nemesis') || $gameState?.last_outcome === 'nemesis') {
+			next.push({
+				title: 'Nemesis',
+				body: trace?.proposals.find((proposal) => proposal.agent === 'nemesis')?.intervention_copy
+					|| 'Judgment has marked the thread. The world will remember the offense.',
+				tone: 'var(--nyx-nemesis)'
+			});
+		}
+
+		if (winnerOrder.includes('eris') || $gameState?.last_outcome === 'eris') {
+			next.push({
+				title: 'Eris',
+				body: trace?.proposals.find((proposal) => proposal.agent === 'eris')?.intervention_copy
+					|| 'The weave has slipped. Disorder is now part of the scene.',
+				tone: 'var(--nyx-text)'
+			});
+		}
+
+		if (vectors) {
+			const floor = Math.min(vectors.metis, vectors.bia, vectors.kleos, vectors.aidos);
+			if (floor <= 2.5 || activeBrokenOath || (pressures?.wounds ?? 0) >= 2.5) {
+				next.push({
+					title: 'Atropos',
+					body: activeBrokenOath
+						? 'A broken oath has drawn the shears near.'
+						: 'The thread thins. Finality is watching for the next failure.',
+					tone: 'var(--nyx-text-dim)'
+				});
+			}
+		}
+
+		return next.slice(0, 4);
+	});
+
 	/** Track prophecy changes for flash animation */
 	let prophecyAnimClass = $state('prophecy-pulse');
 	let lastProphecy = '';
@@ -54,6 +114,31 @@
 			>
 				"{prophecy}"
 			</blockquote>
+		</div>
+	{/if}
+
+	{#if marks.length > 0}
+		<div class="flex flex-col gap-3">
+			<p class="text-[10px] uppercase tracking-[0.25em]" style="color: var(--nyx-text-dim);">
+				Marks Upon The Thread
+			</p>
+
+			{#each marks as mark}
+				<div class="border-l border-[var(--nyx-border)]/60 pl-3">
+					<p
+						class="text-[10px] uppercase tracking-[0.18em] mb-1"
+						style="font-family: var(--font-mono); color: {mark.tone};"
+					>
+						{mark.title}
+					</p>
+					<p
+						class="text-sm leading-relaxed"
+						style="font-family: var(--font-prose); color: var(--nyx-text-dim);"
+					>
+						{mark.body}
+					</p>
+				</div>
+			{/each}
 		</div>
 	{/if}
 

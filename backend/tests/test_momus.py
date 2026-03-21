@@ -24,12 +24,17 @@ import pytest
 
 from app.agents.momus import Momus, _detect_anachronisms
 from app.schemas.state import (
+    CanonLocation,
+    CanonNPC,
     MomusValidation,
     Oath,
+    PressureState,
+    SceneState,
     SessionData,
     SoulLedger,
     SoulVectors,
     ThreadState,
+    WorldCanon,
 )
 
 
@@ -133,6 +138,63 @@ def neutral_state() -> ThreadState:
         ),
         soul_ledger=SoulLedger(
             vectors=SoulVectors(metis=5.0, bia=5.0, kleos=5.0, aidos=5.0),
+        ),
+    )
+
+
+@pytest.fixture
+def canon_state() -> ThreadState:
+    """Canonical scene with one present NPC, one absent NPC, and elevated omen."""
+    return ThreadState(
+        session=SessionData(
+            current_environment="Thornwell (hill village). A hard winter presses on the roofs.",
+        ),
+        soul_ledger=SoulLedger(
+            vectors=SoulVectors(metis=5.0, bia=5.0, kleos=5.0, aidos=5.0),
+        ),
+        pressures=PressureState(omen=2.0),
+        canon=WorldCanon(
+            locations={
+                "thornwell": CanonLocation(
+                    location_id="thornwell",
+                    name="Thornwell",
+                    region="Ashlands",
+                    kind="hill village",
+                    current_condition="A hard winter presses on the roofs.",
+                ),
+                "ashfall": CanonLocation(
+                    location_id="ashfall",
+                    name="Ashfall",
+                    region="Ashlands",
+                    kind="mining town",
+                    current_condition="Ash drifts between the mine shafts.",
+                ),
+            },
+            npcs={
+                "sera": CanonNPC(
+                    npc_id="sera",
+                    name="Sera",
+                    role="mother",
+                    home_location_id="thornwell",
+                    current_location_id="thornwell",
+                    last_seen_turn=1,
+                ),
+                "aldric": CanonNPC(
+                    npc_id="aldric",
+                    name="Aldric",
+                    role="father",
+                    home_location_id="thornwell",
+                    current_location_id="ashfall",
+                    last_seen_turn=0,
+                ),
+            },
+            current_scene=SceneState(
+                scene_id="scene_1",
+                location_id="thornwell",
+                present_npc_ids=["sera"],
+                immediate_problem="The granary is half-empty.",
+                scene_objective="Keep the house calm.",
+            ),
         ),
     )
 
@@ -672,12 +734,40 @@ class TestCombinedViolations:
         assert result.law_violations == []
 
 
+class TestCanonRepairSignals:
+    """Momus should ask for repair when prose drifts from canon."""
+
+    @pytest.mark.asyncio
+    async def test_location_contradiction_requests_repair(self, momus, canon_state):
+        prose = "You arrive in Ashfall and watch the mine smoke rise."
+        result = await momus.validate_prose(prose, canon_state)
+        assert result.repair_needed is True
+        assert "Thornwell" in result.repair_brief
+        assert "Ashfall" in result.corrected_prose or "Thornwell" in result.corrected_prose
+
+    @pytest.mark.asyncio
+    async def test_absent_npc_participation_requests_repair(self, momus, canon_state):
+        prose = 'Aldric said, "Keep the lantern high."'
+        result = await momus.validate_prose(prose, canon_state)
+        assert result.repair_needed is True
+        assert any("Aldric" in item for item in result.hallucinations)
+        assert "present NPCs" in result.repair_brief or "remove Aldric" in result.repair_brief
+
+    @pytest.mark.asyncio
+    async def test_pressure_denial_requests_repair(self, momus, canon_state):
+        prose = "Fate is silent tonight. No omen troubles the dark."
+        result = await momus.validate_prose(prose, canon_state)
+        assert result.repair_needed is True
+        assert any("omen" in item.lower() for item in result.hallucinations)
+        assert "Pressure truth" in result.repair_brief
+
+
 # ===========================================================================
 # CORRECTED PROSE & SCHEMA
 # ===========================================================================
 
 class TestCorrectedProse:
-    """Until Phase 3, corrected_prose echoes the original input."""
+    """Corrected prose stays untouched when valid and becomes safer when not."""
 
     @pytest.mark.asyncio
     async def test_valid_prose_echoed(self, momus, desert_state):
@@ -686,10 +776,12 @@ class TestCorrectedProse:
         assert result.corrected_prose == prose
 
     @pytest.mark.asyncio
-    async def test_invalid_prose_still_echoed(self, momus, desert_state):
+    async def test_invalid_prose_gets_safer_fallback(self, momus, desert_state):
         prose = "The ocean waves crash around you."
         result = await momus.validate_prose(prose, desert_state)
-        assert result.corrected_prose == prose  # not corrected yet (Phase 3)
+        assert result.repair_needed is True
+        assert result.corrected_prose != ""
+        assert result.corrected_prose != prose
 
 
 class TestMomusValidationSchema:
@@ -700,6 +792,8 @@ class TestMomusValidationSchema:
         assert v.valid is True
         assert v.hallucinations == []
         assert v.law_violations == []
+        assert v.repair_needed is False
+        assert v.repair_brief == ""
         assert v.corrected_prose == ""
 
     def test_with_hallucinations(self):
