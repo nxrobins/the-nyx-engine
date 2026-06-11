@@ -103,6 +103,18 @@ export interface SceneClock {
 	max_segments: number;
 	stakes: string;
 	resolution_hint: string;
+	lethal: boolean;
+}
+
+export interface DoomState {
+	active: boolean;
+	cause: string;
+	description: string;
+	stage: number;
+	max_stage: number;
+	started_turn: number;
+	escapable: boolean;
+	escape_hint: string;
 }
 
 export interface SceneState {
@@ -181,11 +193,13 @@ export interface ThreadState {
 	the_loom: TheLoom;
 	pressures: PressureState;
 	canon: WorldCanon | null;
+	doom: DoomState;
 	rag_context: string[];
 	world_context: string;
 	last_action: string;
 	last_outcome: string;
 	current_dream: string; // Hypnos dream text (consumed by next Clotho call)
+	craft_notes: string[];
 	recent_traces: DeliberationTrace[];
 	legacy_echoes: LegacyEcho[];
 }

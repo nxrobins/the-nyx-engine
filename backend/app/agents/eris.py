@@ -18,7 +18,7 @@ import logging
 import random
 import re
 
-from app.agents.base import AgentBase
+from app.agents.base import AgentBase, mock_pause
 from app.core.config import settings
 from app.schemas.state import AgentProposal, ErisResponse, ThreadState
 from app.services import llm
@@ -207,7 +207,7 @@ class Eris(AgentBase):
         model = settings.eris_model
 
         if model == "mock":
-            await asyncio.sleep(0.15)
+            await mock_pause(0.15)
             return _attach_proposal(_mock_chaos())
 
         # LLM-generated creative chaos
