@@ -1,0 +1,66 @@
+{
+  "cartridge_version": 1,
+  "world_id": "thornwell",
+  "generated_by": "builtin-conversion",
+  "source_hash": "c3214665c4f693bb",
+  "archetypes": [
+    "light"
+  ],
+  "settlement": "Thornwell",
+  "settlement_type": "hill village",
+  "region": "the Ashlands",
+  "social_class": "chandler's family (candle-makers)",
+  "active_situation": "Your father left for the southern trade road six months ago and has not returned. Your mother works the tallow alone. The village elder says the road is closed.",
+  "world_facts": [
+    "Thornwell sits on a ridge above a dead river",
+    "The Ashlands got their name from the volcanic soil, not from fire",
+    "The village has maybe forty families",
+    "The elder is a woman named Bryd who walks with a stick",
+    "There is a stone wall on the eastern side that nobody remembers building"
+  ],
+  "family": [
+    {
+      "name": "Sera",
+      "role": "mother",
+      "trait": "quiet",
+      "trust": 1.5,
+      "fear": 0.0,
+      "obligation": 1.0,
+      "tags": [
+        "family",
+        "caretaker"
+      ]
+    },
+    {
+      "name": "Aldric",
+      "role": "father",
+      "trait": "absent",
+      "trust": 0.5,
+      "fear": 0.0,
+      "obligation": 0.5,
+      "tags": [
+        "family",
+        "missing"
+      ]
+    }
+  ],
+  "home_location": {
+    "id": "thornwell_candlehouse",
+    "name": "Sera's candlehouse",
+    "kind": "family workshop",
+    "condition": "Warm tallow smoke, rough tables, and shelves lined with cooling candles."
+  },
+  "faction": {
+    "id": "thornwell_elders",
+    "name": "Elders of Thornwell",
+    "stance": "watchful",
+    "notes": "They ration trade news and decide what reaches the village."
+  },
+  "clocks": [],
+  "scene_problem": "The household is straining under Aldric's absence and the elder's silence.",
+  "scene_objective": "Stay close, help Sera, and make sense of the unease in the house.",
+  "relationship_hints": [
+    "Sera protects the household by withholding what frightens the child.",
+    "Aldric is absent but still shapes the household through debt and rumor."
+  ]
+}

@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     bfl_style_prefix: str = "Monochrome sumi-e ink wash"
     bfl_style_suffix: str = "black ink on aged parchment, no text, no UI elements"
 
+    # World cartridges — empty = backend/worlds/ (module-relative, NC-3)
+    worlds_dir: str = ""
+
     # ChromaDB — empty = ephemeral in-memory
     chromadb_path: str = ""
 

@@ -1,0 +1,66 @@
+{
+  "cartridge_version": 1,
+  "world_id": "oldgate",
+  "generated_by": "builtin-conversion",
+  "source_hash": "afda88b745bde2e1",
+  "archetypes": [
+    "crowd"
+  ],
+  "settlement": "Oldgate",
+  "settlement_type": "walled market town",
+  "region": "the Midvale",
+  "social_class": "market hawker family (loud, visible, not respected)",
+  "active_situation": "A lord's retinue is passing through Oldgate. The market is packed. Your father is trying to sell to the soldiers. Your mother told you to stay close and not touch anything.",
+  "world_facts": [
+    "Oldgate is built around a gate in a wall that predates the town",
+    "The market runs three days a week and is the town's only economy",
+    "Market hawkers have no permanent stalls, just blankets on the ground",
+    "The lord whose soldiers are here is Lord Voss, feared and rarely seen",
+    "There is a well in the center of the market that children are told not to look into"
+  ],
+  "family": [
+    {
+      "name": "Halda",
+      "role": "mother",
+      "trait": "proud",
+      "trust": 1.0,
+      "fear": 0.0,
+      "obligation": 0.8,
+      "tags": [
+        "family",
+        "guarded"
+      ]
+    },
+    {
+      "name": "Ren",
+      "role": "father",
+      "trait": "boisterous",
+      "trust": 0.8,
+      "fear": 0.4,
+      "obligation": 0.7,
+      "tags": [
+        "family",
+        "hawker"
+      ]
+    }
+  ],
+  "home_location": {
+    "id": "oldgate_south_market",
+    "name": "South Market blankets",
+    "kind": "market pitch",
+    "condition": "Boots churn mud around blankets of cheap goods and cooking smoke hangs low over the stalls."
+  },
+  "faction": {
+    "id": "oldgate_voss_retinue",
+    "name": "Lord Voss's retinue",
+    "stance": "domineering",
+    "notes": "Armed soldiers distort the market whenever the retinue passes through."
+  },
+  "clocks": [],
+  "scene_problem": "The market is overcrowded and the retinue can ruin a hawker family with a glance.",
+  "scene_objective": "Stay close, stay useful, and survive the attention of soldiers and buyers.",
+  "relationship_hints": [
+    "Halda fears disgrace more than hunger.",
+    "Ren performs confidence because customers reward noise."
+  ]
+}

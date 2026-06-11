@@ -49,7 +49,8 @@ from app.agents.nemesis import Nemesis
 from app.core.config import settings
 from app.core.director import select_adult_beat
 from app.core.resolver import ConflictResolver, ResolvedOutcome
-from app.core.world_seeds import get_world_seed, format_world_context
+from app.core.world_registry import select_world_seed
+from app.core.world_seeds import format_world_context
 from app.schemas.state import (
     DeliberationTrace,
     LachesisResponse,
@@ -507,19 +508,29 @@ class NyxKernel:
                 break
 
         # -----------------------------------------------------------
-        # Seed the world from first memory archetype (Sprint 10)
+        # DB: ensure player + compute run_number FIRST — deterministic world
+        # selection is seeded by (player_id, run_number), so it must be known
+        # before the world is picked.
         # -----------------------------------------------------------
-        world_seed = get_world_seed(first_memory)
+        await ensure_player(player_id)
+        prior_threads = await get_dead_threads(player_id)
+        self.state.session.run_number = len(prior_threads) + 1
+
+        # -----------------------------------------------------------
+        # Seed the world from first memory archetype (Sprint 10 → cartridge registry)
+        # -----------------------------------------------------------
+        world_seed = select_world_seed(
+            first_memory,
+            player_id=player_id,
+            run_number=self.state.session.run_number,
+        )
         world_context = format_world_context(world_seed, name, gender)
         self.state.world_context = world_context
         self.state.canon = bootstrap_canon(world_seed, name, gender)
         _refresh_derived_environment(self.state)
         logger.info(f"World seed: {world_seed.settlement} ('{first_memory[:30]}...')")
 
-        # DB: ensure player + create thread
-        await ensure_player(player_id)
-        prior_threads = await get_dead_threads(player_id)
-        self.state.session.run_number = len(prior_threads) + 1
+        # DB: create thread
         self._thread_id = await create_thread(player_id, hamartia)
 
         ancestor = await get_last_ancestor(player_id)
