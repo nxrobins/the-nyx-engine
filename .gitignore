@@ -29,6 +29,10 @@ Thumbs.db
 *.png
 .playwright-mcp/
 nul
+.pytest_cache/
+
+# pip redirect artifacts (e.g. unquoted `pip install pkg >=6.0.0`)
+=*
 
 # Logs
 *.log
