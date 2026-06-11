@@ -20,7 +20,7 @@ import logging
 import random
 from typing import AsyncGenerator
 
-from app.agents.base import AgentBase
+from app.agents.base import AgentBase, mock_pause
 from app.core.config import settings
 from app.schemas.state import ClothoResponse, SceneOutcome, ThreadState
 from app.services import llm
@@ -286,6 +286,7 @@ def _build_payload(
     vignette_directive: str = "",
     scene_outcome: SceneOutcome | None = None,
     repair_brief: str = "",
+    fate_warning: str = "",
 ) -> str:
     """Build the structured JSON payload for Clotho's user message."""
     vectors = state.soul_ledger.vectors
@@ -325,6 +326,7 @@ def _build_payload(
         ),
         "nemesis_intervention": nemesis_desc or None,
         "eris_chaos": eris_desc or None,
+        "fate_warning": fate_warning or None,
         "resolved_scene_outcome": scene_outcome.model_dump() if scene_outcome else None,
         "soul_vectors": vectors.model_dump(),
         "pressures": state.pressures.model_dump(),
@@ -438,6 +440,7 @@ class Clotho(AgentBase):
         vignette_directive: str = "",
         scene_outcome: SceneOutcome | None = None,
         repair_brief: str = "",
+        fate_warning: str = "",
     ) -> ClothoResponse:
         """Generate literary prose from resolved state.
 
@@ -446,12 +449,14 @@ class Clotho(AgentBase):
                 is PREPENDED to the system prompt. Contains [Literary Laws] +
                 [Chronicle] + [Soul Mirror] + [Last 2 Turns]. Built by the
                 kernel's Stratified Context Builder.
+            fate_warning: Non-terminal Atropos warning — mortality should
+                shadow the scene without arriving.
         """
         model = settings.clotho_model
 
         # --- Mock mode ---
         if model == "mock":
-            await asyncio.sleep(0.5)
+            await mock_pause(0.5)
             choices = _fallback_choices_for_state(state, epoch_phase)
             return ClothoResponse(
                 prose=(
@@ -474,6 +479,7 @@ class Clotho(AgentBase):
             vignette_directive=vignette_directive,
             scene_outcome=scene_outcome,
             repair_brief=repair_brief,
+            fate_warning=fate_warning,
         )
         logger.info(f"Clotho calling {model} (epoch {epoch_phase}, context={len(stratified_context)} chars)")
 
@@ -513,6 +519,7 @@ class Clotho(AgentBase):
         vignette_directive: str = "",
         scene_outcome: SceneOutcome | None = None,
         repair_brief: str = "",
+        fate_warning: str = "",
     ) -> AsyncGenerator[str, None]:
         """Stream prose tokens for the SSE pipeline.
 
@@ -527,7 +534,7 @@ class Clotho(AgentBase):
 
         # --- Mock mode: simulate token streaming ---
         if model == "mock":
-            await asyncio.sleep(0.3)
+            await mock_pause(0.3)
             prose = (
                 _mock_repair_prose(state, scene_outcome)
                 if repair_brief else _mock_prose(state)
@@ -544,7 +551,7 @@ class Clotho(AgentBase):
                 if i > 0:
                     chunk = " " + chunk
                 yield chunk
-                await asyncio.sleep(random.uniform(0.04, 0.08))
+                await mock_pause(random.uniform(0.04, 0.08))
             return
 
         # --- Real LLM mode: stream via LiteLLM ---
@@ -558,6 +565,7 @@ class Clotho(AgentBase):
             vignette_directive=vignette_directive,
             scene_outcome=scene_outcome,
             repair_brief=repair_brief,
+            fate_warning=fate_warning,
         )
         logger.info(f"Clotho streaming {model} (epoch {epoch_phase})")
 
@@ -579,4 +587,4 @@ class Clotho(AgentBase):
                 if i > 0:
                     chunk = " " + chunk
                 yield chunk
-                await asyncio.sleep(random.uniform(0.04, 0.08))
+                await mock_pause(random.uniform(0.04, 0.08))

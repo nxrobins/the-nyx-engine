@@ -25,7 +25,7 @@ import json
 import logging
 import re
 
-from app.agents.base import AgentBase
+from app.agents.base import AgentBase, mock_pause
 from app.core.config import settings
 from app.schemas.state import AgentProposal, LachesisResponse, ThreadState
 from app.services import llm
@@ -94,6 +94,7 @@ def _mock_evaluate(state: ThreadState, action: str) -> LachesisResponse:
         updated.rag_context.append(
             f"Turn {updated.session.turn_count}: Player engaged in combat."
         )
+        updated.rag_context = updated.rag_context[-24:]
         return LachesisResponse(
             valid_action=True,
             updated_state=updated,
@@ -320,12 +321,14 @@ def _parse_response(raw: str, state: ThreadState, action: str) -> LachesisRespon
     if env_update:
         updated.session.current_environment = env_update
 
-    # RAG entry
+    # RAG entry — trimmed defensively: this list is replaced by RAG query
+    # results on success, but must not grow unbounded if RAG keeps failing.
     rag_summary = data.get("rag_summary", "")
     if not rag_summary:
         rag_summary = f"Player attempted: {action[:80]}. Outcome: {outcome_type}."
         logger.info("Lachesis: LLM omitted rag_summary, using fallback.")
     updated.rag_context.append(f"Turn {updated.session.turn_count}: {rag_summary}")
+    updated.rag_context = updated.rag_context[-24:]
 
     # Oath detection — pass through from LLM (kernel handles deterministic fallback)
     oath_detected = data.get("oath_detected")
@@ -361,7 +364,7 @@ class Lachesis(AgentBase):
 
         # --- Mock mode ---
         if model == "mock":
-            await asyncio.sleep(0.3)
+            await mock_pause(0.3)
             return _attach_proposal(_mock_evaluate(state, action), state)
 
         # --- Real LLM mode ---

@@ -47,6 +47,7 @@ from app.agents.lachesis import Lachesis
 from app.agents.momus import Momus
 from app.agents.nemesis import Nemesis
 from app.core.config import settings
+from app.core.director import select_adult_beat
 from app.core.resolver import ConflictResolver, ResolvedOutcome
 from app.core.world_seeds import get_world_seed, format_world_context
 from app.schemas.state import (
@@ -70,6 +71,13 @@ from app.services.canon import (
     bootstrap_canon,
     derive_environment_string,
     render_scene_snapshot,
+    tick_scene_clocks,
+)
+from app.services.doom import (
+    advance_doom,
+    begin_doom,
+    doom_directive,
+    maybe_begin_pressure_dooms,
 )
 from app.services.hamartia_engine import determine_hamartia, get_hamartia_profile
 from app.services.legacy import build_legacy_echo
@@ -328,6 +336,22 @@ def _build_stratified_context(state: ThreadState) -> str:
             f"{state.soul_ledger.hamartia_profile.style_directive}"
         )
 
+    # ── THE DOOM: staged death closes in (all phases) ─────────────
+    doom_text = doom_directive(state)
+    if doom_text:
+        sections.append(
+            "═══ THE DOOM CLOSES IN ═══\n"
+            f"{doom_text}"
+        )
+
+    # ── MOMUS'S NOTES: craft corrections from last turn ───────────
+    if state.craft_notes:
+        notes_block = "\n".join(f"  • {n}" for n in state.craft_notes)
+        sections.append(
+            "═══ MOMUS'S NOTES (craft corrections — obey this scene) ═══\n"
+            f"{notes_block}"
+        )
+
     # ── DREAM BLEED: Hypnos residue (ephemeral, consumed once) ────
     if state.current_dream:
         sections.append(
@@ -403,6 +427,8 @@ class TurnContext:
     scene_outcome: SceneOutcome | None = None
     deliberation_trace: DeliberationTrace | None = None
     pressure_summary: str = ""
+    # Non-terminal Atropos warning ("the Fates grow restless") — fed to Clotho
+    atropos_warning: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -444,6 +470,11 @@ class NyxKernel:
     ) -> TurnResult:
         """Turn 0→1: Set identity, seed vectors from first memory, force Clotho birth scene."""
         logger.info(f"Initializing session — player='{player_id}', name='{name}', memory='{first_memory[:40]}'")
+
+        # A new thread starts clean regardless of what this kernel held
+        # before — initialize() must not inherit a prior life's state.
+        self.state = ThreadState()
+        self._thread_id = None
 
         # Validate hamartia ("Unformed" is allowed — Lachesis overwrites at Turn 10)
         if hamartia != "Unformed" and hamartia not in settings.hamartia_options:
@@ -583,18 +614,33 @@ class NyxKernel:
 
         Returns a TurnContext with everything Clotho needs, or a terminal
         context if the player has died.
+
+        NOTE: ``self.state`` is not mutated this turn beyond session
+        metadata (rolled back on rejection); all material changes happen
+        on Lachesis's working copy and commit in ``_finalize_turn``. That
+        invariant is what lets us use ``self.state`` directly as the
+        pressure baseline instead of paying a full deepcopy per turn.
         """
-        previous_state = copy.deepcopy(self.state)
-        self.state.session.turn_count += 1
-        turn = self.state.session.turn_count
+        session = self.state.session
+        # Snapshot epoch metadata so a rejected action can roll back cleanly.
+        prior_meta = (
+            session.epoch_phase, session.ui_mode,
+            session.player_age, session.beat_position,
+        )
+        session.turn_count += 1
+        turn = session.turn_count
         logger.info(f"Turn {turn}: '{action}'")
 
         # Epoch state machine → Director metadata (Sprint 8)
         phase, age, ui_mode, beat_position, vignette_directive = _get_turn_metadata(turn)
-        self.state.session.epoch_phase = phase
-        self.state.session.ui_mode = ui_mode
-        self.state.session.player_age = age
-        self.state.session.beat_position = beat_position
+        if phase == 4:
+            # Adulthood has no authored script — the Adult Director composes
+            # a beat from live state (doom, clocks, oaths, pressures, flaw).
+            beat_position, vignette_directive = select_adult_beat(self.state, turn)
+        session.epoch_phase = phase
+        session.ui_mode = ui_mode
+        session.player_age = age
+        session.beat_position = beat_position
         logger.info(f"Epoch: phase={phase}, age={age}, beat={beat_position}")
 
         # Step 1: Lachesis evaluates state + action validity
@@ -602,7 +648,12 @@ class NyxKernel:
 
         if not lachesis_result.valid_action:
             logger.info(f"Lachesis BLOCKED: {lachesis_result.reason}")
-            self.state.session.turn_count -= 1  # Don't count invalid turns
+            # Roll back the turn entirely: count AND epoch metadata,
+            # so a rejected action at an epoch boundary doesn't leave
+            # the public state advertising the wrong age/UI mode.
+            session.turn_count -= 1
+            (session.epoch_phase, session.ui_mode,
+             session.player_age, session.beat_position) = prior_meta
             invalid_trace = DeliberationTrace(
                 turn_number=max(turn - 1, 1),
                 proposals=[lachesis_result.proposal] if lachesis_result.proposal else [],
@@ -669,6 +720,14 @@ class NyxKernel:
                 working_state.soul_ledger.hamartia
             )
 
+        # Step 2c: Doom progression — an existing doom advances (or lifts,
+        # if escapable and its cause was answered) before this turn's
+        # events can seal a new one. Escape reads last turn's pressures:
+        # "did you answer the cause by the start of this turn?"
+        doom_note = advance_doom(working_state)
+        if doom_note:
+            logger.info(f"Doom: {doom_note}")
+
         # Step 3: Process oaths (detect -> parse -> verify)
         oath_broken_id: str | None = None
         broken_ids, fulfilled_ids, transformed_ids = verify_oaths(working_state, action)
@@ -679,6 +738,26 @@ class NyxKernel:
         broken_ids = [oath_id for oath_id in broken_ids if not (oath_id in seen_ids or seen_ids.add(oath_id))]
         if broken_ids:
             oath_broken_id = broken_ids[0]
+            # A broken oath no longer kills on the spot — it seals an
+            # inescapable doom. Death arrives two turns later, staged.
+            broken_oath = next(
+                (o for o in working_state.soul_ledger.active_oaths
+                 if o.oath_id == oath_broken_id),
+                None,
+            )
+            begin_doom(
+                working_state,
+                cause="broken_oath",
+                description=(
+                    f"An oath was broken: '{broken_oath.text}'. "
+                    "Nemesis has claimed the debt; the thread is already cut, "
+                    "it just hasn't finished falling."
+                    if broken_oath else
+                    "A sworn oath was broken. Nemesis has claimed the debt."
+                ),
+                max_stage=3,
+                escapable=False,
+            )
 
         for oath in working_state.soul_ledger.active_oaths:
             if oath.oath_id in broken_ids:
@@ -766,14 +845,16 @@ class NyxKernel:
             outcome.state.the_loom.current_prophecy = outcome.prophecy_updated
             logger.info(f"Prophecy updated: '{outcome.prophecy_updated}'")
 
+        # self.state is the untouched pre-turn baseline (see method note),
+        # so it serves directly — no per-turn deepcopy.
         pressure_evolution = evolve_pressures(
-            previous_state,
+            self.state,
             action,
             outcome,
             proposal_pressure=outcome.pressure_delta,
         )
         outcome.state.pressures = apply_pressure_delta(
-            previous_state.pressures,
+            self.state.pressures,
             pressure_evolution.delta,
             stable_turn=pressure_evolution.stable_turn,
         )
@@ -781,6 +862,39 @@ class NyxKernel:
             outcome.scene_outcome.pressure_changes = pressure_evolution.delta
             outcome.scene_outcome.pressure_summary = pressure_evolution.summary
         outcome.state.last_action = action
+
+        # Step 8b: Runaway pressures can seal an escapable doom
+        # (mortal wounds, a manhunt) now that this turn's pressure landed.
+        pressure_doom_note = maybe_begin_pressure_dooms(outcome.state)
+        if pressure_doom_note and outcome.scene_outcome is not None:
+            outcome.scene_outcome.material_changes.append(pressure_doom_note)
+
+        # Step 8c: Scene clocks tick — the world's problems mature whether
+        # or not the player attends them. Fired clocks become true.
+        tick = tick_scene_clocks(
+            outcome.state,
+            intervention_struck=(outcome.nemesis_struck or outcome.eris_struck),
+            resolution_beat=(beat_position == "RESOLUTION"),
+        )
+        if tick.pressure_spike:
+            outcome.state.pressures = apply_pressure_delta(
+                outcome.state.pressures, tick.pressure_spike
+            )
+        for fired_clock in tick.fired:
+            logger.info(f"CLOCK FIRED: {fired_clock.label} — {fired_clock.stakes}")
+            if fired_clock.lethal:
+                begin_doom(
+                    outcome.state,
+                    cause="clock",
+                    description=fired_clock.stakes,
+                    max_stage=3,
+                    escapable=False,
+                )
+        if tick.notes and outcome.scene_outcome is not None:
+            outcome.scene_outcome.material_changes.extend(tick.notes)
+            outcome.scene_outcome.must_not_contradict.append(
+                "A clock has run out: its stakes are now true and cannot be walked back."
+            )
 
         _refresh_derived_environment(outcome.state)
 
@@ -820,6 +934,10 @@ class NyxKernel:
             scene_outcome=outcome.scene_outcome,
             deliberation_trace=outcome.deliberation_trace,
             pressure_summary=pressure_evolution.summary,
+            atropos_warning=(
+                "" if atropos_result.terminal_state
+                else atropos_result.death_reason
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -844,6 +962,7 @@ class NyxKernel:
             vignette_directive=ctx.vignette_directive,
             scene_outcome=ctx.scene_outcome,
             repair_brief=repair_brief,
+            fate_warning=ctx.atropos_warning,
         )
         prose, choices = _parse_clotho_output(clotho_result.prose, ctx.phase)
         return self._append_interventions(prose, ctx), choices
@@ -855,12 +974,29 @@ class NyxKernel:
         prose: str,
         choices: list[str],
     ) -> tuple[str, list[str], MomusValidation, bool]:
-        """Validate prose and retry Clotho once if Momus demands repair."""
+        """Validate prose and retry Clotho once if Momus demands repair.
+
+        Severity gate: a single minor hallucination commits Momus's
+        deterministically corrected prose directly — a full Clotho retry
+        (the most expensive call in the pipeline, doubled) is reserved
+        for drift bad enough to warrant it.
+        """
         validation = await self.momus.validate_prose(prose, ctx.outcome.state)
         if not validation.repair_needed:
             return prose, choices, validation, False
 
         logger.warning(f"Momus hallucinations: {validation.hallucinations}")
+
+        minor_drift = (
+            len(validation.hallucinations) < settings.momus_retry_min_issues
+            and bool(validation.corrected_prose.strip())
+        )
+        if minor_drift:
+            logger.info(
+                "Momus: minor drift — committing corrected prose without a Clotho retry."
+            )
+            return validation.corrected_prose, choices, validation, True
+
         retry_prose, retry_choices = await self._request_clotho_pass(
             ctx, action, repair_brief=validation.repair_brief
         )
@@ -914,6 +1050,9 @@ class NyxKernel:
             prose = validation.corrected_prose or prose
         if validation.law_violations:
             logger.warning(f"Momus law violations: {validation.law_violations}")
+        # Law violations become next turn's craft notes — Momus's criticism
+        # feeds Clotho's next scene instead of dying in the log.
+        outcome.state.craft_notes = list(validation.law_violations[:3])
 
         # Milestone check (any vector == 10)
         is_milestone, milestone_vec = SoulVectorEngine.is_milestone(
@@ -962,22 +1101,26 @@ class NyxKernel:
         if len(outcome.state.prose_history) > _cap:
             outcome.state.prose_history = outcome.state.prose_history[-_cap:]
 
-        # RAG indexing
-        try:
-            await self.rag.add_turn(
+        # RAG indexing + retrieval run concurrently (both are to_thread
+        # wrapped ChromaDB calls); the query intentionally retrieves PAST
+        # turns as context, so it does not need to see this turn's add.
+        add_result, query_result = await asyncio.gather(
+            self.rag.add_turn(
                 turn_number=ctx.turn,
                 action=ctx.action,
                 outcome=outcome.state.last_outcome or "neutral",
                 prose_summary=prose[:200],
                 environment=outcome.state.session.current_environment,
-            )
-        except Exception as e:
-            logger.warning(f"RAG indexing failed: {e}")
-
-        try:
-            outcome.state.rag_context = await self.rag.query(ctx.action, n_results=5)
-        except Exception as e:
-            logger.warning(f"RAG query failed: {e}")
+            ),
+            self.rag.query(ctx.action, n_results=5),
+            return_exceptions=True,
+        )
+        if isinstance(add_result, BaseException):
+            logger.warning(f"RAG indexing failed: {add_result}")
+        if isinstance(query_result, BaseException):
+            logger.warning(f"RAG query failed: {query_result}")
+        else:
+            outcome.state.rag_context = query_result
 
         # Commit state
         self.state = outcome.state
@@ -1042,6 +1185,38 @@ class NyxKernel:
         )
 
     # ------------------------------------------------------------------
+    # Shared: Dream prefetch (epoch boundaries)
+    # ------------------------------------------------------------------
+
+    def _maybe_start_dream_task(self, ctx: TurnContext) -> asyncio.Task | None:
+        """Start Hypnos weaving concurrently with prose generation.
+
+        Dreams fire on childhood RESOLUTION beats. Starting the task here
+        (instead of awaiting after finalize) hides the entire Haiku call
+        behind Clotho's much longer generation.
+        """
+        if ctx.terminal or ctx.beat_position != "RESOLUTION" or ctx.phase > 3:
+            return None
+        return asyncio.create_task(self.hypnos.weave_dream(ctx.outcome.state))
+
+    @staticmethod
+    async def _settle_dream_task(dream_task: asyncio.Task | None) -> str:
+        """Await a prefetched dream, tolerating failure."""
+        if dream_task is None:
+            return ""
+        try:
+            return await dream_task
+        except Exception as e:
+            logger.warning(f"Hypnos dream prefetch failed: {e}")
+            return ""
+
+    @staticmethod
+    def _cancel_dream_task(dream_task: asyncio.Task | None) -> None:
+        """Cancel an unconsumed dream task (client disconnect path)."""
+        if dream_task is not None and not dream_task.done():
+            dream_task.cancel()
+
+    # ------------------------------------------------------------------
     # Shared: Intervention prose appending
     # ------------------------------------------------------------------
 
@@ -1074,17 +1249,24 @@ class NyxKernel:
         if ctx.terminal:
             return await self._handle_death(ctx)
 
-        # Clotho generates prose
-        prose, choices = await self._request_clotho_pass(ctx, action)
-        prose, choices, validation, _ = await self._repair_prose_if_needed(
-            ctx, action, prose, choices
-        )
+        # Dream prefetch: Hypnos weaves while Clotho speaks
+        dream_task = self._maybe_start_dream_task(ctx)
+
+        try:
+            # Clotho generates prose
+            prose, choices = await self._request_clotho_pass(ctx, action)
+            prose, choices, validation, _ = await self._repair_prose_if_needed(
+                ctx, action, prose, choices
+            )
+        except BaseException:
+            self._cancel_dream_task(dream_task)
+            raise
 
         result = await self._finalize_turn(ctx, prose, choices, validation=validation)
 
         # Dream trigger: fire on Resolution beats (turns 3, 6, 9)
-        if ctx.beat_position == "RESOLUTION" and ctx.phase <= 3:
-            dream = await self.hypnos.weave_dream(self.state)
+        dream = await self._settle_dream_task(dream_task)
+        if dream:
             self.state.current_dream = dream
             logger.info(f"Hypnos dream woven at turn {ctx.turn}")
 
@@ -1107,6 +1289,7 @@ class NyxKernel:
         db_saved = False
         full_prose_buffer = ""
         ctx: TurnContext | None = None
+        dream_task: asyncio.Task | None = None
 
         try:
             ctx = await self._resolve_turn(action)
@@ -1167,6 +1350,9 @@ class NyxKernel:
                 db_saved = True  # _handle_death persists to DB
                 return
 
+            # Dream prefetch: Hypnos weaves while Clotho streams
+            dream_task = self._maybe_start_dream_task(ctx)
+
             # ── PHASE 2: THE PROSE (Clotho streaming) ────────────
             separator = "---CHOICES---"
             separator_buffer = ""
@@ -1180,6 +1366,7 @@ class NyxKernel:
                 stratified_context=ctx.stratified_context,
                 vignette_directive=ctx.vignette_directive,
                 scene_outcome=ctx.scene_outcome,
+                fate_warning=ctx.atropos_warning,
             ):
                 full_prose_buffer += token
 
@@ -1236,9 +1423,9 @@ class NyxKernel:
                 "turn_number": result.turn_number,
             }) + "\n\n"
 
-            # ── PHASE 4: DREAM (epoch boundary only) ──────────────
-            if ctx.beat_position == "RESOLUTION" and ctx.phase <= 3:
-                dream = await self.hypnos.weave_dream(self.state)
+            # ── PHASE 4: DREAM (epoch boundary only, prefetched) ──
+            dream = await self._settle_dream_task(dream_task)
+            if dream:
                 self.state.current_dream = dream
                 yield "data: " + json.dumps({
                     "type": "dream",
@@ -1251,6 +1438,8 @@ class NyxKernel:
             raise
 
         finally:
+            # Never leak an unconsumed dream task on disconnect/error
+            self._cancel_dream_task(dream_task)
             # Guarantee DB persistence even on disconnect
             if not db_saved and self._thread_id and ctx is not None:
                 try:
