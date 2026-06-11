@@ -3,11 +3,24 @@
 from __future__ import annotations
 
 import abc
+import asyncio
 from typing import Any
 
 from pydantic import BaseModel
 
+from app.core.config import settings
 from app.schemas.state import ThreadState
+
+
+async def mock_pause(seconds: float) -> None:
+    """Simulated mock-mode latency, scaled by settings.
+
+    Production mock mode keeps the pacing feel; tests set
+    mock_latency_scale=0 so the suite runs at full speed.
+    """
+    scaled = seconds * settings.mock_latency_scale
+    if scaled > 0:
+        await asyncio.sleep(scaled)
 
 
 class AgentBase(abc.ABC):

@@ -50,6 +50,23 @@ class Settings(BaseSettings):
     chronicle_prose_retention: int = 2
     hypnos_fragment_delay: float = 0.6
 
+    # Doom staging — death arrives in installments, not as a syntax error.
+    # Escape thresholds are calibrated against pressure decay rates so an
+    # escapable doom is survivable by play, not only by luck: wounds fall
+    # 0.8/recovery turn (9.0 → 7.4 in two turns), faction heat falls
+    # 0.4/lying-low turn (9.0 → 7.8 in three).
+    wounds_doom_threshold: float = 9.0   # wounds pressure that starts bleeding out
+    wounds_doom_escape: float = 7.5      # recovery below this lifts the doom
+    faction_doom_threshold: float = 9.0  # faction heat that starts the manhunt
+    faction_doom_escape: float = 8.0     # heat below this lifts the doom
+
+    # Momus repair: hallucination count that justifies a full Clotho retry.
+    # Below it, the deterministically corrected prose commits directly.
+    momus_retry_min_issues: int = 2
+
+    # Mock-mode latency simulation multiplier (tests set 0 to run instantly)
+    mock_latency_scale: float = 1.0
+
     # CORS — origins allowed to call the API
     cors_origins: list[str] = [
         "http://localhost:5173",

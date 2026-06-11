@@ -28,7 +28,7 @@ import asyncio
 import logging
 import random
 
-from app.agents.base import AgentBase
+from app.agents.base import AgentBase, mock_pause
 from app.core.config import settings
 from app.schemas.state import ChroniclerResponse, ThreadState
 from app.services import llm
@@ -152,7 +152,7 @@ class Chronicler(AgentBase):
 
         # --- Mock mode ---
         if model == "mock":
-            await asyncio.sleep(0.2)
+            await mock_pause(0.2)
             return random.choice(_MOCK_CHRONICLES)
 
         # --- Real LLM mode ---

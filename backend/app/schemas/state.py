@@ -137,6 +137,7 @@ class SceneClock(BaseModel):
     max_segments: int = 4
     stakes: str = ""
     resolution_hint: str = ""
+    lethal: bool = False   # a fired lethal clock starts a doom sequence
 
 
 class SceneState(BaseModel):
@@ -200,6 +201,28 @@ class SceneOutcome(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Doom — staged death sentences
+# ---------------------------------------------------------------------------
+
+class DoomState(BaseModel):
+    """A staged death sentence. Once active it advances every turn.
+
+    Inescapable dooms (broken oaths) cannot be lifted — the player gets
+    the gap between transgression and ruin, not a reprieve. Escapable
+    dooms (wounds, faction heat) lift when their cause is answered.
+    Atropos severs the thread when stage reaches max_stage.
+    """
+    active: bool = False
+    cause: str = ""           # "broken_oath" | "wounds" | "faction_heat" | "clock"
+    description: str = ""     # what the doom is, in prose-usable terms
+    stage: int = 0
+    max_stage: int = 3
+    started_turn: int = 0
+    escapable: bool = False
+    escape_hint: str = ""     # what would lift it (surfaced to prose/choices)
+
+
+# ---------------------------------------------------------------------------
 # Pressure + Legacy
 # ---------------------------------------------------------------------------
 
@@ -235,11 +258,13 @@ class ThreadState(BaseModel):
     the_loom: TheLoom = Field(default_factory=TheLoom)
     pressures: PressureState = Field(default_factory=PressureState)
     canon: WorldCanon | None = None
+    doom: DoomState = Field(default_factory=DoomState)
     rag_context: list[str] = Field(default_factory=list)  # fallback context
     world_context: str = ""    # formatted world seed, fed to Clotho every turn
     last_action: str = ""
     last_outcome: str = ""
     current_dream: str = ""    # Hypnos dream text (consumed by next Clotho call)
+    craft_notes: list[str] = Field(default_factory=list)  # Momus law violations fed to next Clotho call
     # Chronicler: rolling prose buffer + dual-track compressed chronicle
     prose_history: list[str] = Field(default_factory=list)       # last N raw prose turns
     chronicle: list[str] = Field(default_factory=list)           # mythic sentence per 5-turn window
