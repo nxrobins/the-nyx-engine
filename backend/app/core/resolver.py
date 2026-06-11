@@ -30,6 +30,7 @@ from app.schemas.state import (
     SceneOutcome,
     ThreadState,
 )
+from app.services.canon import apply_intervention_dispositions
 from app.services.soul_math import SoulVectorEngine
 
 
@@ -260,6 +261,31 @@ def _finalize_outcome(
     elif outcome.eris_struck and outcome.eris_description:
         _apply_intervention_to_scene(outcome.state, outcome.eris_description)
 
+    # Interventions leave marks on people, not just prose: present NPCs
+    # shift trust/fear and factions harden. The note becomes a material
+    # change Clotho must narrate.
+    disposition_note = ""
+    if outcome.oath_broken:
+        disposition_note = apply_intervention_dispositions(
+            outcome.state, kind="oath_broken"
+        )
+    elif outcome.nemesis_struck:
+        disposition_note = apply_intervention_dispositions(
+            outcome.state, kind="nemesis"
+        )
+    elif outcome.eris_struck:
+        severity = next(
+            (
+                float(p.scene_patch.get("chaos_severity", 1.0))
+                for p in proposals
+                if p.agent == "eris" and "chaos_severity" in p.scene_patch
+            ),
+            1.0,
+        )
+        disposition_note = apply_intervention_dispositions(
+            outcome.state, kind="eris", severity=severity
+        )
+
     trace = DeliberationTrace(
         turn_number=outcome.state.session.turn_count,
         proposals=proposals,
@@ -271,6 +297,8 @@ def _finalize_outcome(
     outcome.state.recent_traces = outcome.state.recent_traces[-8:]
     outcome.deliberation_trace = trace
     outcome.scene_outcome = _build_scene_outcome(outcome.state, proposals, outcome)
+    if disposition_note:
+        outcome.scene_outcome.material_changes.append(disposition_note)
     return outcome
 
 
