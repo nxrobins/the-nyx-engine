@@ -1,15 +1,16 @@
-"""Nemesis - The Prophecy Engine & Rebalancer v2.0.
+"""Nemesis - The Prophecy Engine & Rebalancer v3.0 (Abuse-Driven).
 
-Two modes of operation:
+Three modes of operation:
 1. **Prophecy update** (routine): When soul imbalance >= threshold,
    craft/update a cryptic one-sentence prophecy based on dominant vector
-   and hamartia.
-2. **Punishment** (oath violation or extreme imbalance >= 8):
-   Harsh intervention with vector penalties.
-3. **Lethal punishment** (broken oath): Signal Atropos for death.
-
-Replaces the v1 hubris-based punishment engine with a prophecy-centric
-system that watches the Soul Ledger for dangerous imbalance.
+   and hamartia. Imbalance is who you are; the prophecy names where it ends.
+2. **Punishment**: Triggered by ABUSE signals — exploit patterns, open
+   hypocrisy against sworn oaths, runaway suspicion or faction heat —
+   or by extreme imbalance COMPOUNDED with a moderate abuse signal.
+   Imbalance alone never triggers punishment: a committed character is
+   not an exploit, and the optimal strategy must not be bland neutrality.
+3. **Lethal punishment** (broken oath): Seals the doom. Atropos collects
+   when it matures (see services/doom.py) — no longer an instant sever.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ import logging
 import random
 import re
 
-from app.agents.base import AgentBase
+from app.agents.base import AgentBase, mock_pause
 from app.core.config import settings
 from app.schemas.state import AgentProposal, NemesisResponse, ThreadState
 from app.services import llm
@@ -292,16 +293,24 @@ class Nemesis(AgentBase):
             result = await self._generate(state, action, oath_broken, force_type="lethal_punishment")
             return _attach_proposal(result, hypocrisy_score=max(hypocrisy, 1.0))
 
-        # --- Patterned abuse, public shame, or extreme imbalance → punishment ---
-        if (
-            effective_imbalance >= threshold + 1.5
-            or exploit >= 2.0
+        # --- Punishment: abuse signals, or imbalance COMPOUNDED with abuse.
+        # Imbalance alone is character, not exploitation — it earns prophecy
+        # (below), never the lash. Punishing commitment would make bland
+        # neutrality the optimal strategy, which fights the fiction.
+        abuse = (
+            exploit >= 2.0
             or suspicion >= 2.75
             or faction_heat >= 2.5
             or hypocrisy >= 1.0
-        ):
+        )
+        compounded = (
+            effective_imbalance >= threshold + 1.5
+            and (exploit >= 1.0 or hypocrisy >= 0.5 or suspicion >= 1.5)
+        )
+        if abuse or compounded:
             logger.info(
                 "Nemesis: PUNISHMENT — "
+                f"abuse={abuse}, compounded={compounded}, "
                 f"effective_imbalance={effective_imbalance:.1f}, exploit={exploit:.1f}, "
                 f"suspicion={suspicion:.1f}, hypocrisy={hypocrisy:.1f}"
             )
@@ -346,7 +355,7 @@ class Nemesis(AgentBase):
         model = settings.nemesis_model
 
         if model == "mock":
-            await asyncio.sleep(0.2)
+            await mock_pause(0.2)
             if force_type == "lethal_punishment":
                 return _mock_lethal()
             elif force_type == "punishment":
