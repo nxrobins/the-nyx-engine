@@ -86,10 +86,25 @@ class Hypnos(AgentBase):
 
         Returns 2-3 sentences of surreal, age-appropriate dream imagery.
         Uses dominant soul vector to color the dream's emotional tone.
+
+        Morpheus P2: dreams read the Promise Ledger — the place where
+        reality is allowed to bend is exactly where the story's debts
+        surface as symbols. Mythologically exact: Morpheus shapes the
+        dreams his father Hypnos delivers.
         """
+        from app.services.promise_engine import active_promises
+
         model = settings.hypnos_model
+        promises = active_promises(state)
 
         if model == "mock":
+            if promises:
+                # Deterministic ledger-dream so the P2 loop tests hermetically.
+                return (
+                    f"You dream of it again: {promises[0].description}. "
+                    "In the dream it has grown larger than the room, and it "
+                    "knows your name."
+                )
             return random.choice(_MOCK_DREAMS)
 
         dominant = SoulVectorEngine.dominant_vector(state.soul_ledger.vectors)
@@ -102,6 +117,12 @@ class Hypnos(AgentBase):
             f"Environment: {state.session.current_environment}\n"
             f"Last action: {state.last_action}"
         )
+        if promises:
+            debt_lines = "\n".join(f"  - {p.description}" for p in promises[:3])
+            user_msg += (
+                "\nThe story carries unpaid promises — let ONE surface in the "
+                "dream as a symbol, never named directly:\n" + debt_lines
+            )
 
         try:
             raw = await llm.generate(
