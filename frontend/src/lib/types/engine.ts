@@ -187,6 +187,17 @@ export interface LegacyEcho {
 	mechanical_effect: string;
 }
 
+/** Morpheus P2: a narrative obligation in the Promise Ledger */
+export interface Promise {
+	promise_id: string;
+	description: string;
+	event_turn: number;
+	significance: string;
+	due_turn: number;
+	status: string; // planted | promoted | paid | abandoned
+	paid_turn: number;
+}
+
 export interface ThreadState {
 	session: SessionData;
 	soul_ledger: SoulLedger;
@@ -200,6 +211,7 @@ export interface ThreadState {
 	last_outcome: string;
 	current_dream: string; // Hypnos dream text (consumed by next Clotho call)
 	craft_notes: string[];
+	ledger: Promise[]; // Morpheus P2: the Promise Ledger
 	recent_traces: DeliberationTrace[];
 	legacy_echoes: LegacyEcho[];
 }

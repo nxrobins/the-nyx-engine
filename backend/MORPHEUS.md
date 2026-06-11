@@ -66,12 +66,26 @@ loads it through `core/world_registry.py` and incarnates it via the existing
 - Loader/selector: `app/core/world_registry.py` (`select_world_seed`)
 - Producer: `autonovel/gen_nyx_cartridge.py`
 
-### P2 — The Re-Outliner + Promise Ledger (NEXT)
+### P2 — The Re-Outliner + Promise Ledger (SHIPPED)
 Between epochs, behind the Hypnos dream-curtain, re-outlines the next epoch from
-the *lived* one: a typed Beat Sheet (the Director's `_TURN_BEATS` format) plus a
-Promise Ledger of plants/payoffs that turns player accidents into foreshadowing.
-The procedural Adult Director is the floor; the authored beat sheet is the ceiling
-— same kernel slot, same fallback. Dreams become the ledger's delivery channel.
+the *lived* one: a typed Beat Sheet plus a Promise Ledger of plants/payoffs that
+turns player accidents into foreshadowing. The procedural floor (authored
+childhood beats / the Adult Director) remains; the authored beat sheet is the
+ceiling — same kernel slot, silent per-beat fallback. Dreams read the ledger.
+
+- Contracts: `app/schemas/morpheus.py` (Promise, BeatSheet w/ validity stamps +
+  per-beat machine-checkable preconditions, MorpheusSnapshot)
+- Bookkeeping: `app/services/promise_engine.py` (audit/apply/pay/render; the
+  constitutional check — plants must cite lived turns — lives here)
+- The gate: `app/services/beat_gate.py` (harvest-time Sprint-10 lint;
+  consume-time `preconditions_hold` against live canon)
+- The agent: `app/agents/morpheus.py` (mock = deterministic floor-enrichment;
+  real = one structured call + one informed retry; None → the floor plays)
+- Lifecycle: kernel fires at every RESOLUTION with a frozen snapshot, harvests
+  at the top of the next turn (stamps → gate → ledger updates), consumes
+  per-beat with validate-at-the-moment-of-use, cancels on reset/death.
+- Teeth: abandoned promises raise omen; Nemesis reads active promises for
+  ironic targeting; Clotho gets THE LOOM REMEMBERS in stratified context.
 
 ### P3 — The Scribe (LATER)
 Write-behind biography: drafts each lived epoch as a chapter in a life-voice
