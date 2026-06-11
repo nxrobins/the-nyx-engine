@@ -42,9 +42,10 @@ At a threshold turn, the dominant vector determines the player's **hamartia** (t
 
 ### Key Math
 
-- **Dynamic Hubris Index**: `H_t = H_{t-1} + (W_p * deltaP) - S_c`
-- **Nemesis Threshold**: `H_threshold = B_base - (V_win * alpha)`
-- **Narrative Stability Integral**: `S = integral(F_Moirai - delta_Eris) dt`
+- **Soul Imbalance**: `I = max(vectors) − min(vectors)`. Imbalance ≥ threshold sharpens Nemesis's prophecy — who you are determines how it ends. Punishment requires *abuse* signals (exploit patterns, oath hypocrisy, runaway suspicion or faction heat); a committed character is not an exploit.
+- **Pressure Evolution**: seven deterministic pressures (suspicion, scarcity, wounds, debt, faction heat, omen, exploit) evolve from action patterns each turn. Stability breeds chaos: every quiet turn raises Eris's strike probability.
+- **Doom Staging**: death arrives in installments. A sealed doom advances one stage per turn; Atropos cuts at the final stage. Broken oaths are inescapable; mortal wounds and manhunts can still be answered before they mature.
+- **Scene Clocks**: unresolved situations tick toward firing when the Fates strike, at chapter crises, and when the player coasts. A fired clock's stakes become true — permanently.
 
 ## Tech Stack
 
@@ -84,7 +85,8 @@ All agents support a `mock` mode for development — no API keys required to run
 
 ```bash
 cd backend
-pip install -e ".[dev]"
+python -m venv .venv && .venv/Scripts/activate  # or source .venv/bin/activate
+pip install -r requirements.txt
 cp .env.example .env  # add API keys, or leave empty for mock mode
 uvicorn app.main:app --reload --port 8000
 ```
@@ -115,7 +117,9 @@ cd backend
 pytest
 ```
 
-322 tests across 15 test files covering all agents, the kernel resolve pipeline, conflict resolution, math services, oath detection, hamartia assignment, memory compression, and the epoch state machine.
+523 tests across 24 test files covering all agents, the kernel resolve pipeline, conflict resolution, math services, oath detection, hamartia assignment, doom staging, scene clocks, the adult director, memory compression, and the epoch state machine.
+
+The suite is hermetic: every agent is forced into mock mode with zero simulated latency, so tests run offline, deterministically, and in well under a minute — regardless of what models and keys are configured in `.env`.
 
 ## Project Structure
 
@@ -148,8 +152,8 @@ frontend/
 2. **Incarnation** — Diegetic character creation (name, gender). No menus. The Fates ask directly.
 3. **Childhood** (Phases 1-3) — Button-driven choices accumulate soul vectors. The engine watches.
 4. **The Fork** (Phase 4) — Hamartia assigned from dominant vector. Free-text input unlocks.
-5. **The Thread** — Full narrative gameplay. Agents compete. Hubris accumulates. Nemesis watches.
-6. **Death** — Permanent. Atropos writes the epitaph. The thread joins the Tapestry.
+5. **The Thread** — Full narrative gameplay. The Adult Director stages each scene from live state: dooms, clocks, oaths, pressures, the flaw. Agents compete. Nemesis watches.
+6. **Death** — Permanent, and staged. A doom seals, escalates turn by turn, then Atropos cuts. The thread joins the Tapestry.
 
 ## Design Philosophy
 

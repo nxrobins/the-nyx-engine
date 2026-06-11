@@ -1,13 +1,16 @@
-"""Atropos - The Terminator v2.0.
+"""Atropos - The Terminator v3.0 (Staged Doom).
 
-Three death triggers (no HP death):
-1. Nemesis signals `lethal_punishment` (broken oath)
-2. LLM check: given state + action, is this a narrative dead-end?
+Death triggers:
+1. Doom terminal: an active doom (broken oath, mortal wounds, manhunt,
+   lethal clock) has reached its final stage. Dooms are begun by the
+   kernel and advance one stage per turn — death arrives in installments,
+   never as an instant sever.
+2. Dead soul: all vectors collapsed to <= 1.0
 3. Keyword detection: "surrender to death", "embrace the void", etc.
-4. Dead soul: all vectors collapsed to <= 1.0
+4. LLM check: given state + action, is this a narrative dead-end?
 
-Phase 1: Deterministic checks (keywords + dead soul).
-Phase 2: LLM-evaluated narrative dead-ends via Mercury.
+A broken oath no longer kills on the turn it breaks; it seals a doom
+(see services/doom.py). Atropos only cuts when the doom matures.
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ from app.agents.base import AgentBase
 from app.core.config import settings
 from app.schemas.state import AgentProposal, AtroposResponse, ThreadState
 from app.services import llm
+from app.services.doom import doom_death_reason, is_doom_terminal
 from app.services.soul_math import SoulVectorEngine
 
 logger = logging.getLogger("nyx.atropos")
@@ -70,17 +74,20 @@ class Atropos(AgentBase):
         Args:
             state: Current thread state.
             action: Player's action this turn.
-            nemesis_lethal: True if Nemesis flagged lethal_punishment (oath broken).
+            nemesis_lethal: True if Nemesis flagged lethal_punishment this
+                turn (oath broken). No longer an instant death — the kernel
+                seals a doom; Atropos cuts when that doom matures. The flag
+                is kept for the proposal trace.
         """
-        # --- Trigger 1: Nemesis lethal punishment (broken oath) ---
-        if nemesis_lethal:
-            logger.info("Atropos: Thread severed — Oath broken, Nemesis demands death.")
+        # --- Trigger 1: Doom terminal (staged death has matured) ---
+        if is_doom_terminal(state):
+            logger.info(
+                f"Atropos: Thread severed — doom '{state.doom.cause}' "
+                f"reached stage {state.doom.stage}/{state.doom.max_stage}."
+            )
             return _attach_proposal(AtroposResponse(
                 terminal_state=True,
-                death_reason=(
-                    "You broke a sacred oath. The thread of your fate snaps — "
-                    "Nemesis claims what was promised."
-                ),
+                death_reason=doom_death_reason(state),
             ), action=action, nemesis_lethal=nemesis_lethal)
 
         # --- Trigger 2: Dead soul (all vectors <= 1.0) ---

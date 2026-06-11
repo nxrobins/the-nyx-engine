@@ -80,7 +80,11 @@ class TestLegacyEchoes:
     """A dead run should leave a mechanical and narrative mark on the next life."""
 
     @pytest.mark.asyncio
-    async def test_restart_loads_legacy_echo(self, configured_store, mock_models):
+    async def test_restart_loads_legacy_echo(self, configured_store, mock_models, monkeypatch):
+        # Pin chaos off: an Eris miracle on the death turn would be flaky.
+        import app.agents.eris as eris_module
+        monkeypatch.setattr(eris_module.random, "random", lambda: 0.999)
+
         first = NyxKernel()
         await first.initialize(
             hamartia="Unformed",
@@ -90,9 +94,19 @@ class TestLegacyEchoes:
             first_memory="A light in the distance I could not reach.",
         )
         await first.process_turn("I swear to protect Sera on my honor.")
-        death = await first.process_turn("I attack Sera with my knife.")
+
+        # Breaking the oath seals a 3-stage doom — death arrives staged,
+        # not on the turn of the breaking.
+        broken = await first.process_turn("I attack Sera with my knife.")
+        assert broken.terminal is False
+        assert first.state.doom.active
+        assert first.state.doom.cause == "broken_oath"
+
+        await first.process_turn("look around")
+        death = await first.process_turn("wait")
 
         assert death.terminal is True
+        assert "oath" in death.death_reason.lower()
 
         second = NyxKernel()
         rebirth = await second.initialize(

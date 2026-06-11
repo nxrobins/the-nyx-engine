@@ -13,7 +13,6 @@ before committing a turn.
 
 from __future__ import annotations
 
-import asyncio
 import re
 
 from app.agents.base import AgentBase
@@ -204,23 +203,17 @@ _ENTITY_STOPWORDS = {
     "You",
     "Your",
 }
-_SCENE_ACTION_MARKERS = (
+# Strong markers: unambiguous physical participation in the current scene.
+# These alone justify flagging an absent-but-alive NPC.
+_STRONG_PRESENCE_MARKERS = (
     " says",
     " said",
-    " stands",
-    " stood",
-    " watches",
-    " watched",
-    " looks",
-    " looked",
     " grabs",
     " grabbed",
     " touches",
     " touched",
     " steps",
     " stepped",
-    " waits",
-    " waited",
     " calls",
     " called",
     " enters",
@@ -229,17 +222,42 @@ _SCENE_ACTION_MARKERS = (
     " knelt",
     " offers",
     " offered",
+    " reaches",
+    " reached",
+    " hands",
+    " handed",
+    " is here",
+    " was here",
+    "\"",
+)
+
+# Weak markers: could describe someone seen at a distance, through a
+# window, or in passing. Enough to flag a DEAD NPC (the dead don't watch),
+# never enough alone to flag a merely-absent one.
+_WEAK_PRESENCE_MARKERS = (
+    " stands",
+    " stood",
+    " watches",
+    " watched",
+    " looks",
+    " looked",
+    " waits",
+    " waited",
     " smiles",
     " smiled",
     " frowns",
     " frowned",
-    " reaches",
-    " reached",
     " turns",
     " turned",
-    " is here",
-    " was here",
-    "\"",
+)
+
+# Sentences that are recollection, not scene action. A memory of the dead
+# is grief, not a hallucination — Momus must not redact it.
+_MEMORY_GUARD_PATTERN: re.Pattern[str] = re.compile(
+    r"\b(?:remember(?:s|ed)?|memor(?:y|ies)|once|used to|years ago|"
+    r"had been|that day|back then|long ago|dream(?:s|ed|t)?|"
+    r"would (?:always|often|never)|before (?:he|she|they) died)\b",
+    re.IGNORECASE,
 )
 _ACTIVE_OATH_PATTERN: re.Pattern[str] = re.compile(
     r"\b(?:your oath|your vow|your promise|what you have sworn|sworn duty)\b",
@@ -292,13 +310,15 @@ class Momus(AgentBase):
     name = "momus"
 
     async def evaluate(self, state: ThreadState, action: str) -> MomusValidation:
-        await asyncio.sleep(0.05)
         return MomusValidation(valid=True)
 
     async def validate_prose(self, prose: str, state: ThreadState) -> MomusValidation:
-        """Check prose for factual drift and literary law violations."""
-        await asyncio.sleep(0.1)
+        """Check prose for factual drift and literary law violations.
 
+        Fully deterministic — regex and canon lookups, no LLM, no
+        artificial latency. Runs twice per turn in the worst case
+        (validate + post-repair revalidate), so it must be fast.
+        """
         hallucinations: list[str] = []
         law_violations: list[str] = []
         repair_notes: list[str] = []
@@ -452,10 +472,20 @@ def _split_sentences(prose: str) -> list[str]:
     return [part.strip() for part in re.split(r"(?<=[.!?])\s+", prose) if part.strip()]
 
 
-def _mentions_scene_participation(sentence: str) -> bool:
-    """Return True when a sentence treats an entity as physically present now."""
+def _participation_strength(sentence: str) -> str:
+    """Classify how strongly a sentence asserts present-tense participation.
+
+    Returns "strong", "weak", or "none". Recollection sentences are
+    always "none" — memories of the dead are not canon violations.
+    """
+    if _MEMORY_GUARD_PATTERN.search(sentence):
+        return "none"
     lowered = f" {sentence.lower()} "
-    return any(marker in lowered for marker in _SCENE_ACTION_MARKERS)
+    if any(marker in lowered for marker in _STRONG_PRESENCE_MARKERS):
+        return "strong"
+    if any(marker in lowered for marker in _WEAK_PRESENCE_MARKERS):
+        return "weak"
+    return "none"
 
 
 def _check_canon_drift(
@@ -500,14 +530,19 @@ def _check_canon_drift(
         ]
         if not entity_sentences:
             continue
-        participates = any(_mentions_scene_participation(sentence) for sentence in entity_sentences)
-        if npc.status == "dead" and participates:
+
+        strengths = {_participation_strength(s) for s in entity_sentences}
+        # Dead NPCs may not act at all — the dead don't watch from doorways.
+        # But recollections (memory-guarded sentences) never count.
+        if npc.status == "dead" and ("strong" in strengths or "weak" in strengths):
             hallucinations.append(
                 f"Prose treats {npc.name} as present, but canon marks them dead."
             )
             repair_notes.append(f"Do not place {npc.name} in the scene; they are dead in canon.")
             unsafe_fragments.append(npc.name)
-        elif npc.npc_id not in present_ids and participates:
+        # Absent-but-alive NPCs are flagged only on STRONG evidence:
+        # a glimpse at a distance or a mention in passing is legitimate.
+        elif npc.npc_id not in present_ids and "strong" in strengths:
             hallucinations.append(
                 f"Prose puts {npc.name} in the current scene, but they are not present."
             )

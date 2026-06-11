@@ -102,6 +102,8 @@ system_prompt: |
   - `narrative_directive`: Instructions you MUST honor.
   - `nemesis_intervention`: Punishment for soul imbalance.
   - `eris_chaos`: A wild disruption to the scene.
+  - `fate_warning`: Atropos stirs but does not cut. Mortality should
+    shadow the scene — cold, fatigue, a near-miss — without arriving.
   - `soul_vectors`: Four soul dimensions (metis/bia/kleos/aidos).
   - `dominant_vector`: The loudest trait. Let it color the prose.
   - `environment`: The scene's location. Ground details here.

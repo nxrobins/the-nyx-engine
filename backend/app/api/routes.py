@@ -3,8 +3,9 @@
 POST /init    - Initialize session with hamartia choice (Turn 0)
 POST /action  - Submit a player action, get full turn result
 POST /turn    - SSE stream: 3-Phase pipeline (mechanic → prose → state)
-GET  /stream  - SSE with Hypnos mask + BFL heartbeat (legacy)
 GET  /state   - Current thread state (debug)
+GET  /hamartia-options - List available tragic flaws
+GET  /threads/{player_id} - Past lives for the title screen
 POST /reset   - Reset the game session
 
 v3.0: Session isolation via SessionManager (keyed by UUID).

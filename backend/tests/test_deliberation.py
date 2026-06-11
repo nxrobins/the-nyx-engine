@@ -71,6 +71,9 @@ class TestResolvedSceneOutcome:
         kernel.state.soul_ledger.vectors = SoulVectors(
             metis=1.0, bia=9.0, kleos=1.0, aidos=1.0
         )
+        # v3.0 contract: imbalance alone earns prophecy, not punishment.
+        # A moderate exploit signal compounds it into a strike.
+        kernel.state.pressures.exploit_score = 1.5
 
         ctx = await kernel._resolve_turn("attack the beast")
         assert ctx.outcome.nemesis_struck is True

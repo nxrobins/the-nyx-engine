@@ -343,7 +343,55 @@ class TestKernelProcessTurn:
         assert len(kernel.state.prose_history) > initial_len
 
     @pytest.mark.asyncio
-    async def test_momus_repair_loop_retries_before_commit(self, kernel: NyxKernel, monkeypatch):
+    async def test_momus_minor_drift_commits_correction_without_retry(
+        self, kernel: NyxKernel, monkeypatch
+    ):
+        """One minor hallucination commits corrected prose — no Clotho retry.
+
+        The severity gate reserves the expensive full retry for drift of
+        momus_retry_min_issues or more.
+        """
+        await kernel.initialize(
+            hamartia="Unformed",
+            player_id="test_player",
+            name="Hero",
+            gender="boy",
+            first_memory="A light in the distance I could not reach.",
+        )
+
+        canon = kernel.state.canon
+        assert canon is not None
+        npc_ids = list(canon.npcs.keys())
+        assert len(npc_ids) >= 2
+        present_id, absent_id = npc_ids[0], npc_ids[1]
+        canon.current_scene.present_npc_ids = [present_id]
+        present_name = canon.npcs[present_id].name
+        absent_name = canon.npcs[absent_id].name
+
+        calls: list[str] = []
+
+        async def fake_request(ctx, action, *, repair_brief=""):
+            calls.append(repair_brief)
+            return (
+                f'{present_name} watches the fire. '
+                f'{absent_name} said, "Stay close."'
+            ), ["Wait"]
+
+        monkeypatch.setattr(kernel, "_request_clotho_pass", fake_request)
+
+        result = await kernel.process_turn("look around")
+
+        # Single hallucination → corrected prose committed, no second call
+        assert calls == [""]
+        assert absent_name not in result.prose
+        assert present_name in result.prose
+        assert kernel.state.prose_history[-1] == result.prose
+
+    @pytest.mark.asyncio
+    async def test_momus_heavy_drift_retries_before_commit(
+        self, kernel: NyxKernel, monkeypatch
+    ):
+        """Two or more hallucinations still trigger the full Clotho retry."""
         await kernel.initialize(
             hamartia="Unformed",
             player_id="test_player",
@@ -367,7 +415,11 @@ class TestKernelProcessTurn:
             calls.append(repair_brief)
             if repair_brief:
                 return f'{present_name} said, "Stay close."', ["Wait"]
-            return f'{absent_name} said, "Stay close."', ["Wait"]
+            # Two hallucinations: absent NPC acts + oath language w/o oath
+            return (
+                f'{absent_name} said, "Stay close." '
+                f"Your oath binds you still."
+            ), ["Wait"]
 
         monkeypatch.setattr(kernel, "_request_clotho_pass", fake_request)
 

@@ -235,6 +235,7 @@ class TestProseRepairEvent:
 
     @pytest.mark.asyncio
     async def test_stream_emits_prose_repair_when_retry_happens(self, kernel: NyxKernel, monkeypatch):
+        """Heavy drift (>= momus_retry_min_issues) triggers the full retry."""
         await _init(kernel)
 
         canon = kernel.state.canon
@@ -247,7 +248,12 @@ class TestProseRepairEvent:
         absent_name = canon.npcs[absent_id].name
 
         async def fake_stream(*args, **kwargs):
-            yield f'{absent_name} said, "Stay close."'
+            # Two hallucinations: absent NPC speaking + oath language
+            # with no oath in state — enough to clear the severity gate.
+            yield (
+                f'{absent_name} said, "Stay close." '
+                f"Your oath binds you still."
+            )
 
         async def fake_request(ctx, action, *, repair_brief=""):
             assert repair_brief != ""
@@ -260,4 +266,37 @@ class TestProseRepairEvent:
         repair_events = _filter_events(events, "prose_repair")
         assert len(repair_events) == 1
         assert present_name in repair_events[0]["text"]
-        assert absent_name not in repair_events[0]["text"]
+        assert f"{absent_name} said" not in repair_events[0]["text"]
+
+    @pytest.mark.asyncio
+    async def test_stream_emits_prose_repair_on_minor_drift_without_retry(
+        self, kernel: NyxKernel, monkeypatch
+    ):
+        """One minor hallucination commits corrected prose — repair event
+        fires, but no second Clotho call is made."""
+        await _init(kernel)
+
+        canon = kernel.state.canon
+        assert canon is not None
+        npc_ids = list(canon.npcs.keys())
+        present_id, absent_id = npc_ids[0], npc_ids[1]
+        canon.current_scene.present_npc_ids = [present_id]
+        absent_name = canon.npcs[absent_id].name
+
+        async def fake_stream(*args, **kwargs):
+            yield f'{absent_name} said, "Stay close."'
+
+        retry_calls: list[str] = []
+
+        async def fake_request(ctx, action, *, repair_brief=""):
+            retry_calls.append(repair_brief)
+            return "unused", ["Wait"]
+
+        monkeypatch.setattr(kernel.clotho, "astream", fake_stream)
+        monkeypatch.setattr(kernel, "_request_clotho_pass", fake_request)
+
+        events = await _collect_events(kernel, "look around")
+        repair_events = _filter_events(events, "prose_repair")
+        assert len(repair_events) == 1
+        assert f"{absent_name} said" not in repair_events[0]["text"]
+        assert retry_calls == []

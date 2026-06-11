@@ -8,6 +8,7 @@ turn loop without turning Nyx into a full simulation sandbox.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 
 from app.core.world_seeds import WorldSeed
 from app.schemas.state import (
@@ -256,3 +257,149 @@ def advance_scene(
         ),
     )
     state.session.current_environment = derive_environment_string(state)
+
+
+# ---------------------------------------------------------------------------
+# Scene Clocks — the world's problems mature whether or not you attend them
+# ---------------------------------------------------------------------------
+
+@dataclass(slots=True)
+class ClockTickResult:
+    """Outcome of one turn of clock evolution."""
+    fired: list[SceneClock] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+    pressure_spike: dict[str, float] = field(default_factory=dict)
+
+
+def advance_clock(state: ThreadState, clock_id: str, amount: int = 1) -> SceneClock | None:
+    """Advance a clock by ``amount`` segments. Returns the clock if it fired."""
+    canon = state.canon
+    if not canon or amount <= 0:
+        return None
+    clock = canon.clocks.get(clock_id)
+    if clock is None or clock.progress >= clock.max_segments:
+        return None
+    clock.progress = min(clock.progress + amount, clock.max_segments)
+    if clock.progress >= clock.max_segments:
+        return clock
+    return None
+
+
+def _fire_clock(state: ThreadState, clock: SceneClock) -> str:
+    """Make a filled clock's stakes true in the scene. Returns the note."""
+    scene = state.canon.current_scene if state.canon else None
+    note = f"The clock '{clock.label}' has run out: {clock.stakes}"
+    if scene is not None:
+        if clock.clock_id in scene.active_clock_ids:
+            scene.active_clock_ids.remove(clock.clock_id)
+        scene.carryover_consequence = (
+            f"{scene.carryover_consequence}; {note}".strip("; ")
+            if scene.carryover_consequence else note
+        )
+    return note
+
+
+def tick_scene_clocks(
+    state: ThreadState,
+    *,
+    intervention_struck: bool,
+    resolution_beat: bool,
+) -> ClockTickResult:
+    """Deterministic per-turn clock policy.
+
+    Advancement per active clock (capped at +2 per turn):
+      +1 when Nemesis or Eris struck — the Fates accelerate the world's problems
+      +1 on RESOLUTION beats — a chapter crisis forces every situation forward
+      +1 when the player has coasted (stability_streak >= 3) — ignoring the
+         world does not pause it
+
+    A fired clock writes its stakes into the scene as carryover consequence
+    and spikes omen/scarcity pressure. Lethal clocks are returned in
+    ``fired`` so the kernel can begin a doom.
+    """
+    result = ClockTickResult()
+    canon = state.canon
+    if not canon or not canon.current_scene:
+        return result
+
+    amount = 0
+    if intervention_struck:
+        amount += 1
+    if resolution_beat:
+        amount += 1
+    if state.pressures.stability_streak >= 3:
+        amount += 1
+    amount = min(amount, 2)
+    if amount == 0:
+        return result
+
+    for clock_id in list(canon.current_scene.active_clock_ids):
+        fired = advance_clock(state, clock_id, amount)
+        if fired is not None:
+            result.fired.append(fired)
+            result.notes.append(_fire_clock(state, fired))
+
+    if result.fired:
+        result.pressure_spike = {"omen": 0.6, "scarcity": 0.3}
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Intervention consequences — the Fates leave marks on people, not just prose
+# ---------------------------------------------------------------------------
+
+def _clamp_disposition(value: float) -> float:
+    return max(-5.0, min(5.0, value))
+
+
+def apply_intervention_dispositions(
+    state: ThreadState,
+    *,
+    kind: str,
+    severity: float = 1.0,
+) -> str:
+    """Shift present NPCs' dispositions when a Fate strikes.
+
+    kind: "nemesis" | "eris" | "oath_broken"
+    Returns a material-change note naming the witnesses, or "" when no
+    living NPC is present to react.
+    """
+    canon = state.canon
+    if not canon or not canon.current_scene:
+        return ""
+
+    shifts: dict[str, float]
+    faction_hostility = 0.0
+    if kind == "oath_broken":
+        shifts = {"trust": -1.0, "fear": 0.5}
+        faction_hostility = 0.4
+        verdict = "saw the oath break"
+    elif kind == "nemesis":
+        shifts = {"trust": -0.3 * severity, "fear": 0.5 * severity}
+        faction_hostility = 0.2
+        verdict = "recoil from the judgment"
+    elif kind == "eris":
+        shifts = {"fear": 0.3 * severity}
+        verdict = "flinch at the chaos"
+    else:
+        return ""
+
+    witnesses: list[str] = []
+    for npc_id in canon.current_scene.present_npc_ids:
+        npc = canon.npcs.get(npc_id)
+        if npc is None or npc.status != "alive":
+            continue
+        npc.trust = _clamp_disposition(npc.trust + shifts.get("trust", 0.0))
+        npc.fear = _clamp_disposition(npc.fear + shifts.get("fear", 0.0))
+        witnesses.append(npc.name)
+
+    if faction_hostility > 0.0:
+        for faction in canon.factions.values():
+            faction.hostility = _clamp_disposition(
+                faction.hostility + faction_hostility
+            )
+
+    if not witnesses:
+        return ""
+    return f"Witnesses {verdict}: {', '.join(witnesses)} will remember this."

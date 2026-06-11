@@ -180,8 +180,12 @@ def evolve_pressures(
     if payment:
         delta["debt"] -= 0.8
         delta["scarcity"] -= 0.3
+        delta["faction_heat"] -= 0.3
     if cautious:
         delta["suspicion"] -= 0.2
+        # Lying low is the answer to a manhunt — this is the escape route
+        # for the faction-heat doom, calibrated against its threshold.
+        delta["faction_heat"] -= 0.4
 
     if last_normalized and normalized == last_normalized:
         delta["exploit_score"] += 1.0
@@ -223,6 +227,13 @@ def evolve_pressures(
         and not outcome.terminal
         and sum(abs(value) for value in delta.values()) < 1.5
     )
+
+    # The world forgets, slowly: quiet turns bleed off attention pressures.
+    # Applied after the stability verdict so decay can't flip the judgment
+    # it depends on.
+    if stable_turn:
+        delta["suspicion"] -= 0.1
+        delta["faction_heat"] -= 0.1
 
     delta = {
         key: round(value, 2)
