@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     eris_model: str = "openai/mercury-2"
     hypnos_model: str = "anthropic/claude-haiku-4-5-20251001"
     chronicler_model: str = "anthropic/claude-haiku-4-5-20251001"
+    morpheus_model: str = "anthropic/claude-sonnet-4-20250514"
 
     # BFL (Black Forest Labs) — Image generation
     bfl_api_key: str = ""

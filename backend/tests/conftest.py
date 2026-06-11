@@ -41,6 +41,7 @@ def _hermetic_settings(monkeypatch):
     for field in (
         "clotho_model", "lachesis_model", "nemesis_model",
         "eris_model", "hypnos_model", "chronicler_model",
+        "morpheus_model",
     ):
         monkeypatch.setattr(settings, field, "mock")
     monkeypatch.setattr(settings, "bfl_api_key", "")
