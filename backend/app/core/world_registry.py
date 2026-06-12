@@ -138,19 +138,20 @@ class WorldRegistry:
     # Selection
     # ------------------------------------------------------------------
 
-    def select(self, first_memory: str, *, player_id: str, run_number: int) -> WorldSeed:
-        """Pick a world for this incarnation.
+    def select(self, first_memory: str, *, player_id: str, run_number: int) -> tuple[str, WorldSeed]:
+        """Pick a world for this incarnation. Returns (world_id, seed).
 
         Archetype match → deterministic sha256 pick over the UNION of matching
         cartridges and the matching builtin (NC-7/NC-8). No archetype match →
         the builtin shadow fallback via get_world_seed (defined behaviour).
+        The world_id is the Assayer's primary key — every verdict cites it.
         """
         if not self._loaded:
             self.reload()
 
         archetype = _match_archetype(first_memory)
         if archetype is None:
-            return get_world_seed(first_memory)  # shadow catch-all
+            return "builtin-shadow", get_world_seed(first_memory)  # shadow catch-all
 
         candidates: list[_Candidate] = list(self._by_archetype.get(archetype, []))
         # NC-7: the builtin is ALWAYS in the pool, even when cartridges exist.
@@ -168,7 +169,7 @@ class WorldRegistry:
             ).hexdigest(),
         )
         logger.info(f"World selected: {chosen.world_id} (archetype={archetype}, run={run_number})")
-        return chosen.seed
+        return chosen.world_id, chosen.seed
 
 
 def _match_archetype(first_memory: str) -> str | None:
@@ -184,11 +185,20 @@ def _match_archetype(first_memory: str) -> str | None:
 _registry = WorldRegistry()
 
 
+def select_world(
+    first_memory: str, *, player_id: str, run_number: int
+) -> tuple[str, WorldSeed]:
+    """Kernel entry point — select (world_id, WorldSeed) for this incarnation."""
+    return _registry.select(first_memory, player_id=player_id, run_number=run_number)
+
+
 def select_world_seed(
     first_memory: str, *, player_id: str, run_number: int
 ) -> WorldSeed:
-    """Kernel entry point — select a WorldSeed for this incarnation."""
-    return _registry.select(first_memory, player_id=player_id, run_number=run_number)
+    """Compatibility wrapper — the seed alone, world_id discarded."""
+    return select_world(
+        first_memory, player_id=player_id, run_number=run_number
+    )[1]
 
 
 def reload_registry() -> None:

@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     # Bound lives — empty = backend/books/ (module-relative, NC-3)
     books_dir: str = ""
 
+    # Weighed lives — empty = backend/assays/ (module-relative, NC-3)
+    assays_dir: str = ""
+
     # ChromaDB — empty = ephemeral in-memory
     chromadb_path: str = ""
 

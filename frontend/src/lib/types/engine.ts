@@ -213,6 +213,7 @@ export interface ThreadState {
 	craft_notes: string[];
 	ledger: Promise[]; // Morpheus P2: the Promise Ledger
 	life_voice: string; // Scribe P3: the voice this life's book is written in
+	world_id: string; // Assayer P4: which world this life was born into
 	recent_traces: DeliberationTrace[];
 	legacy_echoes: LegacyEcho[];
 }
