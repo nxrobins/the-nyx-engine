@@ -113,11 +113,26 @@ manifest, and publishes atomically to `books/` — the Tapestry is a library.
 - Future flourish (P4-adjacent): the ancestor's book existing diegetically
   in the next incarnation's world.
 
-### P4 — The Assayer (LATER)
-Post-life evaluation retargeted from "good prose" to "good *life*" (clock
-utilization, choice entropy, soul-arc shape). Worlds gain genealogy and fitness;
-the Worldsmith evolves the next generation against the player as the invariant —
-the state-space evolution loop, with the human as the gate.
+### P4 — The Assayer (SHIPPED — the ladder is complete)
+Post-life evaluation retargeted from "good prose" to "good *life*". At death,
+deterministically (no LLM judges a life): a **PlayVerdict** — world_id, span,
+death + doom cause, soul at severing, clock utilization, promise economy, oath
+economy — published atomically to `assays/`. Fitness aggregates per world with
+a deliberately boring composite (vitality 0-10: span, clocks fired, debts paid,
+mortality engaged). The Worldsmith consumes verdicts at authoring time
+(`gen_nyx_cartridge.py --verdicts <dir> [--evolve-from <world_id>]`): finished
+lives become evolution directives ("clocks rarely fire — tighten deadlines";
+"debts go unpaid — seed callbacks"), and lineage rides `generated_by`
+(`:evolved-from:<id>`). The state-space loop, with the player as the gate.
+
+- Contract: `app/schemas/assay.py`; engine: `app/services/assayer.py`
+- Lifecycle: `_handle_death` weighs after binding — a verdict failure costs
+  the verdict, never the death. `ThreadState.world_id` (the verdict's key)
+  set at birth via `world_registry.select_world`.
+- Surface: `GET /assays` (fitness + recent verdicts)
+- The ouroboros flourish: the ancestor's bound book exists DIEGETICALLY in
+  the next incarnation's world ("A book circulates... many repeat its lines
+  wrongly"), matched by thread_stamp, never by name.
 
 ---
 
