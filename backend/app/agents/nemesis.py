@@ -120,6 +120,13 @@ def _build_payload(state: ThreadState, action: str, oath_broken: str | None) -> 
         "pressure_summary": pressure_summary(state),
         "active_oaths": oaths_summary,
         "oath_broken": oath_broken,
+        # Morpheus P2: unpaid narrative promises — irony fuel. Judgment that
+        # lands on what the player actually did beats generic karma.
+        "active_promises": [
+            {"description": p.description, "due_turn": p.due_turn}
+            for p in state.ledger
+            if p.status in ("planted", "promoted")
+        ][:5],
         "current_prophecy": state.the_loom.current_prophecy,
         "scene_snapshot": scene_snapshot or None,
         "rag_context": state.rag_context[-8:],

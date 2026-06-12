@@ -11,6 +11,8 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from app.schemas.morpheus import Promise
+
 
 # ---------------------------------------------------------------------------
 # Soul Ledger Sub-models
@@ -265,6 +267,10 @@ class ThreadState(BaseModel):
     last_outcome: str = ""
     current_dream: str = ""    # Hypnos dream text (consumed by next Clotho call)
     craft_notes: list[str] = Field(default_factory=list)  # Momus law violations fed to next Clotho call
+    # Morpheus P2: the Promise Ledger — typed narrative obligations
+    # (plants with payoff windows). Audited each turn; rendered into
+    # Clotho's context; read by Hypnos for dreams and Nemesis for irony.
+    ledger: list["Promise"] = Field(default_factory=list)
     # Chronicler: rolling prose buffer + dual-track compressed chronicle
     prose_history: list[str] = Field(default_factory=list)       # last N raw prose turns
     chronicle: list[str] = Field(default_factory=list)           # mythic sentence per 5-turn window

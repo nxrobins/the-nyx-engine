@@ -45,12 +45,14 @@ from app.agents.eris import Eris
 from app.agents.hypnos import Hypnos
 from app.agents.lachesis import Lachesis
 from app.agents.momus import Momus
+from app.agents.morpheus import Morpheus
 from app.agents.nemesis import Nemesis
 from app.core.config import settings
 from app.core.director import select_adult_beat
 from app.core.resolver import ConflictResolver, ResolvedOutcome
 from app.core.world_registry import select_world_seed
 from app.core.world_seeds import format_world_context
+from app.schemas.morpheus import BeatSheet, FloorBeat, MorpheusSnapshot
 from app.schemas.state import (
     DeliberationTrace,
     LachesisResponse,
@@ -84,7 +86,16 @@ from app.services.hamartia_engine import determine_hamartia, get_hamartia_profil
 from app.services.legacy import build_legacy_echo
 from app.services.oath_engine import detect_oath, verify_oaths
 from app.services.oath_parser import parse_oath_text
+from app.services.beat_gate import gate_beat, preconditions_hold
 from app.services.pressure import apply_pressure_delta, evolve_pressures, pressure_summary
+from app.services.promise_engine import (
+    ABANDONMENT_OMEN,
+    active_promises,
+    apply_ledger_updates,
+    audit_ledger,
+    mark_paid,
+    render_ledger,
+)
 from app.services.rag import NyxRAGStore
 from app.services.soul_math import SoulVectorEngine
 
@@ -308,6 +319,17 @@ def _build_stratified_context(state: ThreadState) -> str:
             f"{factual_block}"
         )
 
+    # ── MID-3: The Promise Ledger (Morpheus P2) ───────────────────
+    ledger_block = render_ledger(state, state.session.turn_count)
+    if ledger_block:
+        sections.append(
+            "═══ THE LOOM REMEMBERS (debts of the story) ═══\n"
+            "These are promises the narrative has made. Weave quiet callbacks "
+            "to planted ones; when a beat directive pays one, its consequence "
+            "must land visibly in the scene.\n"
+            f"{ledger_block}"
+        )
+
     # ── ACTIVE: Last 2 turns of raw prose (short-term memory) ─────
     recent = state.prose_history[-2:] if state.prose_history else []
     if recent:
@@ -449,6 +471,7 @@ class NyxKernel:
         self.hypnos = Hypnos()
         self.momus = Momus()
         self.chronicler = Chronicler()
+        self.morpheus = Morpheus()
 
         # Systems
         self.resolver = ConflictResolver()
@@ -456,6 +479,11 @@ class NyxKernel:
 
         # Session state (in-memory)
         self.state = ThreadState()
+
+        # Morpheus P2: the pending re-outline task and the harvested sheet.
+        # Both are advisory — every consumption point has its floor.
+        self._morpheus_task: asyncio.Task | None = None
+        self._beat_sheet: BeatSheet | None = None
 
         # DB persistence (set on initialize, cleared on reset)
         self._thread_id: int | None = None
@@ -475,6 +503,8 @@ class NyxKernel:
         # A new thread starts clean regardless of what this kernel held
         # before — initialize() must not inherit a prior life's state.
         self.state = ThreadState()
+        self._cancel_morpheus()
+        self._beat_sheet = None
         self._thread_id = None
 
         # Validate hamartia ("Unformed" is allowed — Lachesis overwrites at Turn 10)
@@ -632,6 +662,11 @@ class NyxKernel:
         invariant is what lets us use ``self.state`` directly as the
         pressure baseline instead of paying a full deepcopy per turn.
         """
+        # Morpheus P2: harvest a finished re-outline before the turn moves —
+        # the one sanctioned pre-turn mutation (ledger updates) happens here,
+        # before any baseline reads.
+        self._harvest_morpheus()
+
         session = self.state.session
         # Snapshot epoch metadata so a rejected action can roll back cleanly.
         prior_meta = (
@@ -648,6 +683,15 @@ class NyxKernel:
             # Adulthood has no authored script — the Adult Director composes
             # a beat from live state (doom, clocks, oaths, pressures, flaw).
             beat_position, vignette_directive = select_adult_beat(self.state, turn)
+
+        # Morpheus P2: the authored beat is the ceiling over the procedural
+        # floor — same slot, validated at this exact moment, silent fallback.
+        pays_promise_ids: list[str] = []
+        authored, pays_promise_ids = self._authored_directive(turn, beat_position)
+        if authored:
+            vignette_directive = authored
+            logger.info(f"Authored beat plays at turn {turn} [{beat_position}]")
+
         session.epoch_phase = phase
         session.ui_mode = ui_mode
         session.player_age = age
@@ -738,6 +782,14 @@ class NyxKernel:
         doom_note = advance_doom(working_state)
         if doom_note:
             logger.info(f"Doom: {doom_note}")
+
+        # Step 2d: The Promise Ledger keeps its books. An authored beat that
+        # plays pays its promises; promises past their window are abandoned
+        # (fate notices unpaid debts — omen tooth applied in step 8).
+        if pays_promise_ids:
+            for note in mark_paid(working_state, pays_promise_ids, turn):
+                logger.info(f"Ledger: {note}")
+        abandonment_notes = audit_ledger(working_state, turn)
 
         # Step 3: Process oaths (detect -> parse -> verify)
         oath_broken_id: str | None = None
@@ -873,6 +925,16 @@ class NyxKernel:
             outcome.scene_outcome.pressure_changes = pressure_evolution.delta
             outcome.scene_outcome.pressure_summary = pressure_evolution.summary
         outcome.state.last_action = action
+
+        # Step 8a2: The omen tooth — a promise the story failed to pay is a
+        # debt fate collects interest on. Abandonments noted for Clotho too.
+        if abandonment_notes:
+            outcome.state.pressures = apply_pressure_delta(
+                outcome.state.pressures,
+                {"omen": round(ABANDONMENT_OMEN * len(abandonment_notes), 2)},
+            )
+            if outcome.scene_outcome is not None:
+                outcome.scene_outcome.material_changes.extend(abandonment_notes[:2])
 
         # Step 8b: Runaway pressures can seal an escapable doom
         # (mortal wounds, a manhunt) now that this turn's pressure landed.
@@ -1173,6 +1235,8 @@ class NyxKernel:
 
     async def _handle_death(self, ctx: TurnContext) -> TurnResult:
         """Terminal path: epitaph generation + DB persist + death result."""
+        self._cancel_morpheus()  # the Author has no future to write here
+        self._beat_sheet = None
         self.state = ctx.outcome.state
         _refresh_derived_environment(self.state)
         await self._generate_epitaph(ctx.outcome.state, ctx.turn, ctx.death_reason)
@@ -1228,6 +1292,154 @@ class NyxKernel:
             dream_task.cancel()
 
     # ------------------------------------------------------------------
+    # Morpheus P2: fire / harvest / consume (the Re-Outliner lifecycle)
+    # ------------------------------------------------------------------
+
+    def _build_morpheus_snapshot(self) -> MorpheusSnapshot:
+        """Freeze the lived epoch for the Re-Outliner.
+
+        Built from committed state AFTER finalize at a RESOLUTION turn —
+        Morpheus reads the photograph, never the room. Floor beats for
+        the next three turns ride along as the procedural base to elevate.
+        """
+        state = self.state
+        boundary = state.session.turn_count
+        floors: list[FloorBeat] = []
+        for turn in range(boundary + 1, boundary + 4):
+            phase, _age, _ui, position, directive = _get_turn_metadata(turn)
+            if phase == 4:
+                position, directive = select_adult_beat(state, turn)
+            floors.append(FloorBeat(turn=turn, position=position, directive=directive))
+
+        vectors = state.soul_ledger.vectors
+        clock_lines: list[str] = []
+        npc_names: list[str] = []
+        if state.canon:
+            npc_names = [
+                npc.name for npc in state.canon.npcs.values() if npc.status == "alive"
+            ]
+            clock_lines = [
+                f"{c.clock_id}|{c.label}|{c.progress}/{c.max_segments}"
+                for c in state.canon.clocks.values()
+            ]
+
+        return MorpheusSnapshot(
+            thread_stamp=f"{state.session.player_id}:{state.session.run_number}",
+            boundary_turn=boundary,
+            epoch_start_turn=boundary + 1,
+            prose_window=list(state.prose_history[-4:]),
+            factual_chronicle=list(state.factual_chronicle),
+            chronicle=list(state.chronicle),
+            last_action=state.last_action,
+            soul_summary=(
+                f"{SoulVectorEngine.vector_summary(vectors)} — "
+                f"hamartia {state.soul_ledger.hamartia or 'Unformed'}"
+            ),
+            pressure_summary=pressure_summary(state),
+            npc_names_alive=npc_names,
+            clock_lines=clock_lines,
+            active_promises=[p.model_copy(deep=True) for p in active_promises(state)],
+            floor_beats=floors,
+        )
+
+    def _maybe_start_morpheus(self, ctx: TurnContext) -> None:
+        """Fire the Re-Outliner behind the dream-curtain at epoch boundaries."""
+        if ctx.terminal or ctx.beat_position != "RESOLUTION":
+            return
+        self._cancel_morpheus()  # newest boundary wins
+        snapshot = self._build_morpheus_snapshot()
+        self._morpheus_task = asyncio.create_task(self.morpheus.reoutline(snapshot))
+        logger.info(f"Morpheus fired for epoch starting turn {snapshot.epoch_start_turn}")
+
+    def _harvest_morpheus(self) -> None:
+        """Collect a finished re-outline, gate it, apply its ledger updates.
+
+        Called at the top of each turn, BEFORE the turn counter moves and
+        before any baseline reads — the one sanctioned pre-turn mutation
+        (the ledger), documented against _resolve_turn's invariant.
+        A failed/invalid/stale sheet costs nothing: the floor plays.
+        """
+        task = self._morpheus_task
+        if task is None or not task.done():
+            return
+        self._morpheus_task = None
+
+        try:
+            sheet = task.result()
+        except Exception as exc:
+            logger.warning(f"Morpheus task failed: {exc!r} — the floor plays.")
+            return
+        if sheet is None:
+            return
+
+        # Validity stamps (validate-on-consume, layer 1).
+        expected_stamp = f"{self.state.session.player_id}:{self.state.session.run_number}"
+        next_turn = self.state.session.turn_count + 1
+        if sheet.thread_stamp != expected_stamp:
+            logger.warning(f"Morpheus sheet stamp mismatch ({sheet.thread_stamp}) — dropped.")
+            return
+        if not (sheet.epoch_start_turn <= next_turn <= sheet.epoch_start_turn + 2):
+            logger.warning(
+                f"Morpheus sheet window stale (serves {sheet.epoch_start_turn}.."
+                f"{sheet.epoch_start_turn + 2}, next turn {next_turn}) — dropped."
+            )
+            return
+
+        # The beat gate: Momus mocks the Author too. Drop failing beats.
+        kept = []
+        for beat in sheet.beats:
+            violations = gate_beat(beat, self.state)
+            if violations:
+                logger.warning(
+                    f"Morpheus beat [{beat.position}] failed the gate: {violations}"
+                )
+            else:
+                kept.append(beat)
+        if not kept:
+            logger.warning("Morpheus: no beats survived the gate — the floor plays.")
+            return
+
+        # Ledger updates apply through the engine, constitutionally validated.
+        notes = apply_ledger_updates(
+            self.state, sheet.ledger_updates, based_on_turn=sheet.based_on_turn
+        )
+        for note in notes:
+            logger.info(f"Ledger: {note}")
+
+        self._beat_sheet = sheet.model_copy(update={"beats": kept})
+        logger.info(
+            f"Morpheus sheet harvested: {len(kept)} beat(s) for turns "
+            f"{sheet.epoch_start_turn}..{sheet.epoch_start_turn + 2}"
+        )
+
+    def _authored_directive(self, turn: int, position: str) -> tuple[str, list[str]]:
+        """The ceiling over the floor: an authored beat, if one is valid NOW.
+
+        Returns (directive, pays_promise_ids) or ("", []). Preconditions are
+        re-checked against live canon at this exact moment — a plan is a
+        suggestion; canon is the truth. Staleness costs one beat.
+        """
+        sheet = self._beat_sheet
+        if sheet is None:
+            return "", []
+        if not (sheet.epoch_start_turn <= turn <= sheet.epoch_start_turn + 2):
+            return "", []
+        beat = sheet.beat_for(position)
+        if beat is None:
+            return "", []
+        if not preconditions_hold(beat, self.state):
+            logger.info(
+                f"Authored beat [{position}] preconditions failed at consumption — floor plays."
+            )
+            return "", []
+        return beat.directive, list(beat.pays_promise_ids)
+
+    def _cancel_morpheus(self) -> None:
+        if self._morpheus_task is not None and not self._morpheus_task.done():
+            self._morpheus_task.cancel()
+        self._morpheus_task = None
+
+    # ------------------------------------------------------------------
     # Shared: Intervention prose appending
     # ------------------------------------------------------------------
 
@@ -1274,6 +1486,9 @@ class NyxKernel:
             raise
 
         result = await self._finalize_turn(ctx, prose, choices, validation=validation)
+
+        # Morpheus works behind the curtain Hypnos is about to draw.
+        self._maybe_start_morpheus(ctx)
 
         # Dream trigger: fire on Resolution beats (turns 3, 6, 9)
         dream = await self._settle_dream_task(dream_task)
@@ -1423,6 +1638,9 @@ class NyxKernel:
             )
             db_saved = True
 
+            # Morpheus works behind the curtain Hypnos is about to draw.
+            self._maybe_start_morpheus(ctx)
+
             yield "data: " + json.dumps({
                 "type": "state",
                 "payload": result.state.model_dump(),
@@ -1524,5 +1742,7 @@ class NyxKernel:
             logger.warning(f"RAG cleanup failed: {e}")
         self.rag = NyxRAGStore()
         self.state = ThreadState()
+        self._cancel_morpheus()
+        self._beat_sheet = None
         self._thread_id = None
         logger.info("Kernel reset — new thread begins.")
