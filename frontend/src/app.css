@@ -914,3 +914,145 @@ hr.nyx-divider {
 /* ── Prose click-to-advance affordance ───────────────── */
 
 .prose-advance { cursor: pointer; }
+
+/* ════════════════════════════════════════════════════════════════
+   THE INK — state-as-weather ambient layer
+
+   One fixed stacking context at z-1; children layer by DOM order
+   only. INK-E4: captures no input (pointer-events: none, every
+   descendant), and the combined wash opacity over the reading
+   column stays ≤ --ink-max (drift 0.30 + tint 0.08, both
+   center-masked; pool and bleed are edge-only by their gradients).
+   Keyframes are transform-only, ambient durations ≥ 15s.
+   ════════════════════════════════════════════════════════════════ */
+
+.ink-weather {
+	position: fixed;
+	inset: 0;
+	z-index: 1;
+	pointer-events: none;
+	--ink-max: 0.5;
+}
+
+.ink-weather * { pointer-events: none; }
+
+/* Layer 1 — the pool: edge vignette, deepens with wounds / heat */
+.ink-pool {
+	position: absolute;
+	inset: 0;
+	background: radial-gradient(
+		ellipse 72% 62% at 50% 48%,
+		transparent 52%,
+		rgba(0, 0, 0, 0.82) 100%
+	);
+	opacity: calc(0.3 + var(--ink-edge, 0) * 0.55);
+	transition: opacity 2400ms ease;
+}
+
+/* Layer 2 — the drift: pale wisps that roil with omen */
+.ink-drift {
+	position: absolute;
+	inset: -20%;
+	opacity: calc(var(--ink-turbulence, 0) * 0.3); /* INK-E4 budget */
+	-webkit-mask-image: radial-gradient(ellipse 55% 50% at 50% 48%, transparent 38%, black 80%);
+	mask-image: radial-gradient(ellipse 55% 50% at 50% 48%, transparent 38%, black 80%);
+	transition: opacity 3000ms ease;
+}
+
+.ink-drift::before,
+.ink-drift::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	background:
+		radial-gradient(closest-side at 24% 32%, rgba(168, 168, 182, 0.5), transparent 70%),
+		radial-gradient(closest-side at 74% 64%, rgba(150, 150, 165, 0.4), transparent 66%);
+	filter: blur(48px);
+	animation: ink-drift-a 38s ease-in-out infinite;
+	will-change: transform;
+}
+
+.ink-drift::after {
+	background:
+		radial-gradient(closest-side at 66% 22%, rgba(160, 160, 172, 0.45), transparent 68%),
+		radial-gradient(closest-side at 30% 76%, rgba(140, 140, 158, 0.35), transparent 70%);
+	animation: ink-drift-b 47s ease-in-out infinite;
+}
+
+@keyframes ink-drift-a {
+	0%, 100% { transform: translate3d(-3%, -2%, 0) scale(1); }
+	50% { transform: translate3d(3%, 2.5%, 0) scale(1.07); }
+}
+
+@keyframes ink-drift-b {
+	0%, 100% { transform: translate3d(2.5%, 3%, 0) scale(1.05); }
+	50% { transform: translate3d(-3%, -2%, 0) scale(1); }
+}
+
+/* Layer 3 — the bleed: doom presses in from the frame (oxblood-black) */
+.ink-doom-bleed {
+	position: absolute;
+	inset: 0;
+	background:
+		linear-gradient(to bottom, rgba(28, 2, 2, 0.9) 0%, transparent 30%),
+		linear-gradient(to top, rgba(20, 1, 1, 0.85) 0%, transparent 20%),
+		linear-gradient(to right, rgba(24, 2, 2, 0.7) 0%, transparent 14%),
+		linear-gradient(to left, rgba(24, 2, 2, 0.7) 0%, transparent 14%);
+	opacity: var(--ink-doom, 0);
+	transition: opacity 2800ms ease;
+	animation: ink-doom-heave 18s ease-in-out infinite;
+	will-change: transform;
+}
+
+@keyframes ink-doom-heave {
+	0%, 100% { transform: translate3d(0, -0.6%, 0) scale(1.01); }
+	50% { transform: translate3d(0, 0.6%, 0) scale(1); }
+}
+
+/* Layer 4 — the wash: epoch tint, center-masked (alpha lives in the rgba) */
+.ink-epoch-tint {
+	position: absolute;
+	inset: 0;
+	background: var(--ink-tint, transparent);
+	-webkit-mask-image: radial-gradient(ellipse 60% 55% at 50% 48%, transparent 32%, black 85%);
+	mask-image: radial-gradient(ellipse 60% 55% at 50% 48%, transparent 32%, black 85%);
+	transition: background 4000ms ease;
+}
+
+/* Layer 5 — the strike: one-shot ripple when a Fate intervenes */
+.ink-strike {
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	width: 70vmax;
+	height: 70vmax;
+	margin: -35vmax 0 0 -35vmax;
+	border-radius: 50%;
+	border: 2px solid rgba(220, 38, 38, 0.5); /* --nyx-nemesis */
+	transform: scale(0.08);
+	opacity: 0;
+	animation: ink-strike-ripple 1400ms ease-out 1 forwards;
+}
+
+.ink-strike.eris {
+	border-color: rgba(147, 51, 234, 0.5); /* --nyx-eris */
+}
+
+@keyframes ink-strike-ripple {
+	0% { transform: scale(0.08); opacity: 0; }
+	12% { opacity: 0.5; }
+	100% { transform: scale(1); opacity: 0; }
+}
+
+/* Reduced motion: stillness for ambient AND one-shot; the static
+   vignette / tint remain (pseudo-elements named explicitly — `*`
+   alone does not reach them). */
+@media (prefers-reduced-motion: reduce) {
+	.ink-weather,
+	.ink-weather *,
+	.ink-weather *::before,
+	.ink-weather *::after {
+		animation: none !important;
+		transition: none !important;
+	}
+}

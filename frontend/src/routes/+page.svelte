@@ -9,6 +9,7 @@
 	import SoulLedger from '$lib/components/SoulLedger.svelte';
 	import TheThread from '$lib/components/TheThread.svelte';
 	import TheOracle from '$lib/components/TheOracle.svelte';
+	import InkWeather from '$lib/components/InkWeather.svelte';
 	import { vestibuleState } from '$lib/stores/vestibule';
 	import { gameState, mechanicToast } from '$lib/stores/engine';
 
@@ -105,6 +106,10 @@
 	<div class="pane-overlay pane-overlay-right" class:open={rightOpen}>
 		<TheOracle />
 	</div>
+
+	<!-- The Ink: ambient weather (fixed sibling of the grid — never inside
+	     it; the fade-in stacking context would trap a fixed child) -->
+	<InkWeather />
 
 	<!-- Center pane (full width) -->
 	<div class="game-grid fade-in">
