@@ -87,6 +87,7 @@ class TestDeathBindsTheBook:
         result = await kernel.process_turn("embrace the void")  # turn 7: death
         assert result.terminal
         assert result.book_id == "orin-scribe-test-r1"
+        assert result.epitaph  # the Death Rite needs the carved line
 
         shelf = list_books()
         assert len(shelf) == 1

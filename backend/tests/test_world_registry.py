@@ -93,14 +93,14 @@ class TestEmptyDirFallback:
     def test_empty_dir_uses_builtins(self, worlds):
         directory, reg = worlds
         reg.reload()
-        seed = reg.select("a light", player_id="p", run_number=1)
+        seed = reg.select("a light", player_id="p", run_number=1)[1]
         assert seed == WORLD_SEEDS["light"]
 
     def test_missing_dir_uses_builtins(self, monkeypatch):
         monkeypatch.setattr(world_registry.settings, "worlds_dir", "/nonexistent/path/xyz")
         reg = WorldRegistry()
         reg.reload()
-        assert reg.select("a stone", player_id="p", run_number=1) == WORLD_SEEDS["stone"]
+        assert reg.select("a stone", player_id="p", run_number=1)[1] == WORLD_SEEDS["stone"]
 
 
 class TestAdversarialFixture:
@@ -113,7 +113,7 @@ class TestAdversarialFixture:
         # 12 NPCs, unicode, two archetypes — pin run so the new world wins is
         # not required; assert it is *reachable* by checking the candidate pool.
         seeds = {
-            reg.select("a light", player_id=f"p{n}", run_number=n).settlement
+            reg.select("a light", player_id=f"p{n}", run_number=n)[1].settlement
             for n in range(20)
         }
         assert "Bléakmoor" in seeds          # the adversarial world is selectable
@@ -125,7 +125,7 @@ class TestAdversarialFixture:
         reg.reload()
         # Force-select Bleakmoor by scanning runs until it wins, then verify cast.
         for n in range(50):
-            seed = reg.select("a shadow", player_id="x", run_number=n)
+            seed = reg.select("a shadow", player_id="x", run_number=n)[1]
             if seed.settlement == "Bléakmoor":
                 assert len(seed.family) == 12
                 assert seed.family[-1].name == "Gran Ó"
@@ -138,8 +138,8 @@ class TestDeterminism:
         directory, reg = worlds
         _write(directory, "bleakmoor.nyx-world.json", _adversarial_payload())
         reg.reload()
-        a = reg.select("a light", player_id="abc", run_number=7)
-        b = reg.select("a light", player_id="abc", run_number=7)
+        a = reg.select("a light", player_id="abc", run_number=7)[1]
+        b = reg.select("a light", player_id="abc", run_number=7)[1]
         assert a == b
 
     def test_different_run_may_differ(self, worlds):
@@ -147,7 +147,7 @@ class TestDeterminism:
         _write(directory, "bleakmoor.nyx-world.json", _adversarial_payload())
         reg.reload()
         settlements = {
-            reg.select("a light", player_id="abc", run_number=n).settlement
+            reg.select("a light", player_id="abc", run_number=n)[1].settlement
             for n in range(30)
         }
         # Both the builtin and the adversarial light-world should appear.
@@ -163,7 +163,7 @@ class TestResilience:
         _write(directory, "bleakmoor.nyx-world.json", _adversarial_payload())
         reg.reload()
         # Good cartridge still loaded; game still selects something valid.
-        seed = reg.select("a light", player_id="p", run_number=1)
+        seed = reg.select("a light", player_id="p", run_number=1)[1]
         assert seed is not None
 
     def test_schema_violation_skipped(self, worlds):
@@ -173,7 +173,7 @@ class TestResilience:
         _write(directory, "bad.nyx-world.json", bad)
         reg.reload()
         # Bad world absent; builtin still reachable.
-        seed = reg.select("a light", player_id="p", run_number=1)
+        seed = reg.select("a light", player_id="p", run_number=1)[1]
         assert seed == WORLD_SEEDS["light"]
 
     def test_oversized_file_skipped(self, worlds):

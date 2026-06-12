@@ -9,6 +9,7 @@
 	import SoulLedger from '$lib/components/SoulLedger.svelte';
 	import TheThread from '$lib/components/TheThread.svelte';
 	import TheOracle from '$lib/components/TheOracle.svelte';
+	import InkWeather from '$lib/components/InkWeather.svelte';
 	import { vestibuleState } from '$lib/stores/vestibule';
 	import { gameState, mechanicToast } from '$lib/stores/engine';
 
@@ -20,7 +21,28 @@
 		rightOpen = false;
 	}
 
-	/** Beat position indicator for dev overlay (optional future use) */
+	/** The Witness: doom dread on the HUD */
+	let doom = $derived($gameState?.doom ?? null);
+	let doomPips = $derived(
+		doom?.active
+			? '●'.repeat(Math.min(doom.stage, doom.max_stage)) +
+				'○'.repeat(Math.max(doom.max_stage - doom.stage, 0))
+			: ''
+	);
+
+	/** The Witness: pane-edge pulses when their contents change unseen */
+	let leftPulse = $state(false);
+	let rightPulse = $state(false);
+	$effect(() => {
+		if ($mechanicToast && !leftOpen) {
+			leftPulse = true;
+			setTimeout(() => (leftPulse = false), 2200);
+			if (($mechanicToast.nemesis_struck || $mechanicToast.eris_struck) && !rightOpen) {
+				rightPulse = true;
+				setTimeout(() => (rightPulse = false), 2200);
+			}
+		}
+	});
 </script>
 
 {#if $vestibuleState === 'title'}
@@ -32,13 +54,17 @@
 
 	<!-- Diegetic Thread-Line HUD -->
 	{#if $gameState}
-		<div class="thread-hud">
+		<div class="thread-hud" class:doomed={doom?.active}>
 			<span class="thread-hud-text">
 				{$gameState.session.player_name}
 				<span class="thread-hud-separator">✦</span>
 				AGE {$gameState.session.player_age}
 				<span class="thread-hud-separator">✦</span>
 				{$gameState.soul_ledger.hamartia}
+				{#if doom?.active}
+					<span class="thread-hud-separator">✦</span>
+					<span class="doom-pips" title={doom.description}>✂ {doomPips}</span>
+				{/if}
 			</span>
 		</div>
 	{/if}
@@ -47,6 +73,7 @@
 	<button
 		type="button"
 		class="pane-edge pane-edge-left"
+		class:edge-pulse={leftPulse}
 		aria-label="Open soul ledger"
 		onclick={() => leftOpen = true}
 	>
@@ -55,6 +82,7 @@
 	<button
 		type="button"
 		class="pane-edge pane-edge-right"
+		class:edge-pulse={rightPulse}
 		aria-label="Open oracle"
 		onclick={() => rightOpen = true}
 	>
@@ -78,6 +106,10 @@
 	<div class="pane-overlay pane-overlay-right" class:open={rightOpen}>
 		<TheOracle />
 	</div>
+
+	<!-- The Ink: ambient weather (fixed sibling of the grid — never inside
+	     it; the fade-in stacking context would trap a fixed child) -->
+	<InkWeather />
 
 	<!-- Center pane (full width) -->
 	<div class="game-grid fade-in">

@@ -5,13 +5,17 @@
 -->
 <script lang="ts">
 	import { vestibuleState, pastThreads, fetchPastThreads } from '$lib/stores/vestibule';
+	import { libraryBooks, fetchLibrary } from '$lib/stores/library';
+	import Library from './Library.svelte';
 	import type { PastThread } from '$lib/types/vestibule';
 
 	let hoveredThread = $state<PastThread | null>(null);
+	let libraryOpen = $state(false);
 
-	// Fetch past threads on mount
+	// Fetch past threads + the shelf on mount
 	$effect(() => {
 		fetchPastThreads();
+		fetchLibrary();
 	});
 
 	// Generate ash particle properties (deterministic per index)
@@ -34,7 +38,13 @@
 	}
 
 	function handleClick() {
+		if (libraryOpen) return; // the Library owns the screen while open
 		vestibuleState.set('incarnation');
+	}
+
+	function openLibrary(e: MouseEvent) {
+		e.stopPropagation();
+		libraryOpen = true;
 	}
 </script>
 
@@ -76,6 +86,18 @@
 		<h1 class="loom-title">THE LOOM</h1>
 		<p class="loom-subtitle hypnos-breathe">Click to awaken.</p>
 	</div>
+
+	<!-- The Library entry (only when the shelf holds at least one life) -->
+	{#if $libraryBooks.length > 0 && !libraryOpen}
+		<button class="library-entry" onclick={openLibrary}>
+			The Library of Severed Threads · {$libraryBooks.length}
+		</button>
+	{/if}
+
+	<!-- The Library overlay -->
+	{#if libraryOpen}
+		<Library onClose={() => (libraryOpen = false)} />
+	{/if}
 
 	<!-- Epitaph overlay (when hovering a past thread) -->
 	{#if hoveredThread}
@@ -160,5 +182,26 @@
 
 	.hypnos-breathe {
 		animation: hypnos-breathe 3s ease-in-out infinite;
+	}
+
+	.library-entry {
+		position: absolute;
+		bottom: 2.5rem;
+		left: 50%;
+		transform: translateX(-50%);
+		z-index: 20;
+		background: transparent;
+		border: none;
+		cursor: pointer;
+		font-family: var(--font-mono);
+		font-size: 0.7rem;
+		letter-spacing: 0.22em;
+		text-transform: uppercase;
+		color: var(--nyx-text-dim);
+		transition: color 300ms ease;
+	}
+
+	.library-entry:hover {
+		color: var(--nyx-oracle-gold);
 	}
 </style>

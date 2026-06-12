@@ -51,7 +51,7 @@ from app.agents.scribe import Scribe
 from app.core.config import settings
 from app.core.director import select_adult_beat
 from app.core.resolver import ConflictResolver, ResolvedOutcome
-from app.core.world_registry import select_world_seed
+from app.core.world_registry import select_world
 from app.core.world_seeds import format_world_context
 from app.schemas.book import Chapter, ScribeSnapshot
 from app.schemas.morpheus import BeatSheet, FloorBeat, MorpheusSnapshot
@@ -92,8 +92,9 @@ from app.services.hamartia_engine import (
 from app.services.legacy import build_legacy_echo
 from app.services.oath_engine import detect_oath, verify_oaths
 from app.services.oath_parser import parse_oath_text
+from app.services.assayer import compute_verdict, write_verdict
 from app.services.beat_gate import gate_beat, preconditions_hold
-from app.services.bookbinder import bind_book, write_book
+from app.services.bookbinder import bind_book, list_books, write_book
 from app.services.pressure import apply_pressure_delta, evolve_pressures, pressure_summary
 from app.services.promise_engine import (
     ABANDONMENT_OMEN,
@@ -566,11 +567,12 @@ class NyxKernel:
         # -----------------------------------------------------------
         # Seed the world from first memory archetype (Sprint 10 → cartridge registry)
         # -----------------------------------------------------------
-        world_seed = select_world_seed(
+        world_id, world_seed = select_world(
             first_memory,
             player_id=player_id,
             run_number=self.state.session.run_number,
         )
+        self.state.world_id = world_id
         world_context = format_world_context(world_seed, name, gender)
         self.state.world_context = world_context
         self.state.canon = bootstrap_canon(world_seed, name, gender)
@@ -585,6 +587,17 @@ class NyxKernel:
         if legacy_echo is not None:
             self.state.legacy_echoes = [legacy_echo]
             self.state.pressures = apply_pressure_delta(self.state.pressures, legacy_delta)
+
+        # Assayer P4 flourish: the ancestor's bound book exists DIEGETICALLY.
+        # Played life → authored literature → world canon for the next life.
+        ancestor_book = self._find_ancestor_book(player_id, self.state.session.run_number)
+        if ancestor_book is not None:
+            self.state.world_context += (
+                f"\n  - A book circulates in this world: '{ancestor_book.title}'. "
+                f"Few have read it; many repeat its lines wrongly. Its last page "
+                f"is said to read: \"{ancestor_book.epitaph}\""
+            )
+            logger.info(f"Ancestor book woven into the world: {ancestor_book.book_id}")
 
         # Generate initial prophecy via Nemesis
         nemesis_result = await self.nemesis.generate_initial_prophecy(self.state)
@@ -1267,6 +1280,16 @@ class NyxKernel:
         # the death — book_id is "" and the thread still joins the Tapestry.
         book_id = await self._bind_book_at_death(epitaph, ctx.death_reason)
 
+        # Assayer P4: the life becomes a measurement. Same constitution:
+        # a verdict failure costs the verdict, never the death.
+        try:
+            verdict = compute_verdict(
+                self.state, death_reason=ctx.death_reason, book_id=book_id
+            )
+            write_verdict(verdict)
+        except Exception as exc:
+            logger.error(f"Assay failed: {exc!r} — the death stands, unweighed.")
+
         # DB persist
         await create_turn(
             thread_id=self._thread_id,
@@ -1284,6 +1307,7 @@ class NyxKernel:
             death_reason=ctx.death_reason,
             turn_number=ctx.turn,
             book_id=book_id,
+            epitaph=epitaph,
         )
 
     # ------------------------------------------------------------------
@@ -1619,6 +1643,24 @@ class NyxKernel:
             self._scribe_task.cancel()
         self._scribe_task = None
 
+    @staticmethod
+    def _find_ancestor_book(player_id: str, run_number: int):
+        """The previous incarnation's bound life, if the shelf holds it.
+
+        Matched by thread_stamp — never by name, which changes each life.
+        Failure returns None; the flourish is optional by constitution.
+        """
+        if run_number < 2:
+            return None
+        try:
+            wanted = f"{player_id}:{run_number - 1}"
+            for manifest in list_books():
+                if manifest.thread_stamp == wanted:
+                    return manifest
+        except Exception as exc:
+            logger.warning(f"Ancestor-book lookup failed: {exc!r}")
+        return None
+
     # ------------------------------------------------------------------
     # Shared: Intervention prose appending
     # ------------------------------------------------------------------
@@ -1755,6 +1797,7 @@ class NyxKernel:
                     "terminal": True,
                     "death_reason": ctx.death_reason,
                     "book_id": death_result.book_id,
+                    "epitaph": death_result.epitaph,
                 }) + "\n\n"
                 db_saved = True  # _handle_death persists to DB
                 return

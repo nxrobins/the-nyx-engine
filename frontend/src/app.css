@@ -550,3 +550,547 @@ hr.nyx-divider {
 	text-align: center;
 	animation: hypnos-breathe 3s ease-in-out infinite;
 }
+
+/* ══════════════════════════════════════════════════════ */
+/* THE WITNESS — death rite, the book, the library, dread */
+/* ══════════════════════════════════════════════════════ */
+
+/* ── The Death Rite ──────────────────────────────────── */
+
+.death-rite-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 60;
+	background: rgba(5, 5, 5, 0.96);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.death-rite-stage {
+	all: unset;
+	cursor: pointer;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	height: 100%;
+}
+
+.death-rite-content {
+	max-width: 36rem;
+	padding: 0 2rem;
+	text-align: center;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 1.5rem;
+}
+
+.death-rite-kicker {
+	font-family: var(--font-mono);
+	font-size: 0.7rem;
+	letter-spacing: 0.3em;
+	color: var(--nyx-nemesis);
+	margin: 0;
+}
+
+.death-rite-body {
+	font-family: var(--font-prose);
+	font-size: 1.125rem;
+	line-height: 1.9;
+	color: var(--nyx-text);
+	margin: 0;
+}
+
+.death-rite-body-dim {
+	color: var(--nyx-text-dim);
+	font-style: italic;
+	font-size: 1rem;
+}
+
+.epitaph-card {
+	font-family: var(--font-prose);
+	font-style: italic;
+	font-size: 1.35rem;
+	line-height: 1.9;
+	color: var(--nyx-oracle-gold);
+	border: 1px solid rgba(184, 134, 11, 0.35);
+	padding: 2rem 2.5rem;
+	margin: 0;
+	filter: drop-shadow(0 0 12px rgba(184, 134, 11, 0.12));
+}
+
+.death-rite-flaw {
+	font-family: var(--font-prose);
+	font-style: italic;
+	color: var(--nyx-oracle-gold);
+	margin: 0;
+}
+
+.death-rite-vectors {
+	display: flex;
+	flex-direction: column;
+	gap: 0.4rem;
+	min-width: 14rem;
+}
+
+.death-rite-vector-row {
+	display: flex;
+	justify-content: space-between;
+	font-family: var(--font-mono);
+	font-size: 0.75rem;
+	letter-spacing: 0.15em;
+	color: var(--nyx-text-dim);
+}
+
+.death-rite-vector-value {
+	color: var(--nyx-text);
+}
+
+.death-rite-voice {
+	font-family: var(--font-prose);
+	font-style: italic;
+	font-size: 0.85rem;
+	color: var(--nyx-text-dim);
+	margin: 0;
+	max-width: 28rem;
+}
+
+.death-rite-continue {
+	margin-top: 3rem;
+	color: var(--nyx-text-dim);
+	animation: hypnos-breathe 3s ease-in-out infinite;
+	font-size: 1.5rem;
+}
+
+.death-rite-actions {
+	display: flex;
+	flex-direction: column;
+	gap: 1rem;
+	margin-top: 1rem;
+}
+
+.death-rite-btn {
+	all: unset;
+	cursor: pointer;
+	font-family: var(--font-prose);
+	font-size: 0.9rem;
+	letter-spacing: 0.12em;
+	color: var(--nyx-text-dim);
+	transition: color 300ms ease;
+}
+
+.death-rite-btn:hover { color: var(--nyx-text); }
+.death-rite-btn:disabled { opacity: 0.3; cursor: default; }
+
+.death-rite-btn-gold { color: var(--nyx-oracle-gold); opacity: 0.85; }
+.death-rite-btn-gold:hover { color: var(--nyx-oracle-gold); opacity: 1; }
+
+/* ── The Book Reader ─────────────────────────────────── */
+
+.book-reader-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 70;
+	background: rgba(5, 5, 5, 0.98);
+	display: flex;
+	justify-content: center;
+}
+
+.book-reader-scroll {
+	width: 100%;
+	overflow-y: auto;
+	display: flex;
+	justify-content: center;
+}
+
+.book-reader-page {
+	max-width: 42rem;
+	width: 100%;
+	padding: 5rem 2.5rem 6rem;
+}
+
+.book-reader-empty {
+	font-family: var(--font-prose);
+	font-style: italic;
+	color: var(--nyx-text-dim);
+	text-align: center;
+	margin-top: 8rem;
+}
+
+.book-body {
+	font-family: var(--font-prose);
+	color: var(--nyx-text);
+	line-height: 2;
+}
+
+.book-body .book-title {
+	font-size: 2rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	text-align: center;
+	margin: 0 0 2.5rem;
+	color: var(--nyx-text);
+}
+
+.book-body .book-chapter {
+	font-size: 1.15rem;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	margin: 3rem 0 1.5rem;
+	color: var(--nyx-oracle-gold);
+	opacity: 0.85;
+}
+
+.book-body .book-epitaph {
+	font-style: italic;
+	color: var(--nyx-oracle-gold);
+	border-left: 2px solid rgba(184, 134, 11, 0.4);
+	padding-left: 1.25rem;
+	margin: 2rem 0;
+}
+
+.book-body p { margin: 0 0 1.4rem; }
+.book-body em { color: var(--nyx-text-dim); }
+
+.book-reader-close-row {
+	display: flex;
+	justify-content: center;
+	margin-top: 4rem;
+}
+
+.book-reader-close {
+	all: unset;
+	cursor: pointer;
+	font-family: var(--font-prose);
+	font-size: 0.9rem;
+	letter-spacing: 0.12em;
+	color: var(--nyx-text-dim);
+	transition: color 300ms ease;
+}
+
+.book-reader-close:hover { color: var(--nyx-text); }
+
+/* ── The Library ─────────────────────────────────────── */
+
+.library-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 30;
+	background: rgba(5, 5, 5, 0.92);
+	display: flex;
+	justify-content: center;
+	cursor: default;
+}
+
+.library-frame {
+	max-width: 40rem;
+	width: 100%;
+	padding: 4rem 2rem;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 1rem;
+}
+
+.library-title {
+	font-family: var(--font-mono);
+	font-size: 0.8rem;
+	letter-spacing: 0.3em;
+	color: var(--nyx-text);
+	margin: 0;
+}
+
+.library-subtitle {
+	font-family: var(--font-prose);
+	font-style: italic;
+	font-size: 0.85rem;
+	color: var(--nyx-text-dim);
+	margin: 0 0 2rem;
+}
+
+.library-shelf {
+	width: 100%;
+	display: flex;
+	flex-direction: column;
+	gap: 1rem;
+}
+
+.library-empty {
+	font-family: var(--font-prose);
+	font-style: italic;
+	color: var(--nyx-text-dim);
+	text-align: center;
+	margin-top: 3rem;
+}
+
+.library-spine {
+	all: unset;
+	cursor: pointer;
+	display: flex;
+	flex-direction: column;
+	gap: 0.4rem;
+	padding: 1.1rem 1.4rem;
+	border: 1px solid var(--nyx-border);
+	border-left: 2px solid rgba(184, 134, 11, 0.45);
+	transition: border-color 300ms ease, background 300ms ease;
+}
+
+.library-spine:hover {
+	border-color: rgba(184, 134, 11, 0.5);
+	background: rgba(184, 134, 11, 0.04);
+}
+
+.library-spine-title {
+	font-family: var(--font-prose);
+	font-size: 1.05rem;
+	color: var(--nyx-text);
+	letter-spacing: 0.04em;
+}
+
+.library-spine-meta {
+	font-family: var(--font-mono);
+	font-size: 0.65rem;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	color: var(--nyx-text-dim);
+}
+
+.library-spine-epitaph {
+	font-family: var(--font-prose);
+	font-style: italic;
+	font-size: 0.85rem;
+	color: var(--nyx-oracle-gold);
+	opacity: 0.7;
+}
+
+.library-close {
+	all: unset;
+	cursor: pointer;
+	margin-top: 2.5rem;
+	font-family: var(--font-prose);
+	font-size: 0.9rem;
+	letter-spacing: 0.12em;
+	color: var(--nyx-text-dim);
+	transition: color 300ms ease;
+}
+
+.library-close:hover { color: var(--nyx-text); }
+
+/* ── Doom dread (HUD) ────────────────────────────────── */
+
+.thread-hud.doomed .thread-hud-text {
+	color: var(--nyx-nemesis);
+}
+
+.doom-pips {
+	font-family: var(--font-mono);
+	letter-spacing: 0.25em;
+	color: var(--nyx-nemesis);
+	animation: doom-throb 2.4s ease-in-out infinite;
+}
+
+@keyframes doom-throb {
+	0%, 100% { opacity: 0.55; }
+	50% { opacity: 1; }
+}
+
+/* ── Pane edge pulse (unseen change) ─────────────────── */
+
+.pane-edge.edge-pulse .edge-glyph {
+	color: var(--nyx-oracle-gold);
+	animation: edge-pulse-anim 0.9s ease-in-out 2;
+}
+
+@keyframes edge-pulse-anim {
+	0%, 100% { opacity: 0.6; transform: scale(1); }
+	50% { opacity: 1; transform: scale(1.35); }
+}
+
+/* ── Prose click-to-advance affordance ───────────────── */
+
+.prose-advance { cursor: pointer; }
+
+/* ════════════════════════════════════════════════════════════════
+   THE INK — state-as-weather ambient layer
+
+   One fixed stacking context at z-1; children layer by DOM order
+   only. INK-E4: captures no input (pointer-events: none, every
+   descendant), and the combined wash opacity over the reading
+   column stays ≤ --ink-max (drift 0.30 + tint 0.08, both
+   center-masked; pool and bleed are edge-only by their gradients).
+   Keyframes are transform-only, ambient durations ≥ 15s.
+   ════════════════════════════════════════════════════════════════ */
+
+.ink-weather {
+	position: fixed;
+	inset: 0;
+	z-index: 1;
+	pointer-events: none;
+	--ink-max: 0.5;
+}
+
+.ink-weather * { pointer-events: none; }
+
+/* Layer 1 — the pool: edge vignette, deepens with wounds / heat */
+.ink-pool {
+	position: absolute;
+	inset: 0;
+	background: radial-gradient(
+		ellipse 72% 62% at 50% 48%,
+		transparent 52%,
+		rgba(0, 0, 0, 0.82) 100%
+	);
+	opacity: calc(0.3 + var(--ink-edge, 0) * 0.55);
+	transition: opacity 2400ms ease;
+}
+
+/* Layer 2 — the drift: pale wisps that roil with omen */
+.ink-drift {
+	position: absolute;
+	inset: -20%;
+	opacity: calc(var(--ink-turbulence, 0) * 0.3); /* INK-E4 budget */
+	-webkit-mask-image: radial-gradient(ellipse 55% 50% at 50% 48%, transparent 38%, black 80%);
+	mask-image: radial-gradient(ellipse 55% 50% at 50% 48%, transparent 38%, black 80%);
+	transition: opacity 3000ms ease;
+}
+
+.ink-drift::before,
+.ink-drift::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	background:
+		radial-gradient(closest-side at 24% 32%, rgba(168, 168, 182, 0.5), transparent 70%),
+		radial-gradient(closest-side at 74% 64%, rgba(150, 150, 165, 0.4), transparent 66%);
+	filter: blur(48px);
+	animation: ink-drift-a 38s ease-in-out infinite;
+	will-change: transform;
+}
+
+.ink-drift::after {
+	background:
+		radial-gradient(closest-side at 66% 22%, rgba(160, 160, 172, 0.45), transparent 68%),
+		radial-gradient(closest-side at 30% 76%, rgba(140, 140, 158, 0.35), transparent 70%);
+	animation: ink-drift-b 47s ease-in-out infinite;
+}
+
+@keyframes ink-drift-a {
+	0%, 100% { transform: translate3d(-3%, -2%, 0) scale(1); }
+	50% { transform: translate3d(3%, 2.5%, 0) scale(1.07); }
+}
+
+@keyframes ink-drift-b {
+	0%, 100% { transform: translate3d(2.5%, 3%, 0) scale(1.05); }
+	50% { transform: translate3d(-3%, -2%, 0) scale(1); }
+}
+
+/* Layer 3 — the bleed: doom presses in from the frame (oxblood-black) */
+.ink-doom-bleed {
+	position: absolute;
+	inset: 0;
+	background:
+		linear-gradient(to bottom, rgba(28, 2, 2, 0.9) 0%, transparent 30%),
+		linear-gradient(to top, rgba(20, 1, 1, 0.85) 0%, transparent 20%),
+		linear-gradient(to right, rgba(24, 2, 2, 0.7) 0%, transparent 14%),
+		linear-gradient(to left, rgba(24, 2, 2, 0.7) 0%, transparent 14%);
+	opacity: var(--ink-doom, 0);
+	transition: opacity 2800ms ease;
+	animation: ink-doom-heave 18s ease-in-out infinite;
+	will-change: transform;
+}
+
+@keyframes ink-doom-heave {
+	0%, 100% { transform: translate3d(0, -0.6%, 0) scale(1.01); }
+	50% { transform: translate3d(0, 0.6%, 0) scale(1); }
+}
+
+/* Layer 4 — the wash: epoch tint, center-masked (alpha lives in the rgba) */
+.ink-epoch-tint {
+	position: absolute;
+	inset: 0;
+	background: var(--ink-tint, transparent);
+	-webkit-mask-image: radial-gradient(ellipse 60% 55% at 50% 48%, transparent 32%, black 85%);
+	mask-image: radial-gradient(ellipse 60% 55% at 50% 48%, transparent 32%, black 85%);
+	transition: background 4000ms ease;
+}
+
+/* Layer 5 — the strike: one-shot ripple when a Fate intervenes */
+.ink-strike {
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	width: 70vmax;
+	height: 70vmax;
+	margin: -35vmax 0 0 -35vmax;
+	border-radius: 50%;
+	border: 2px solid rgba(220, 38, 38, 0.5); /* --nyx-nemesis */
+	transform: scale(0.08);
+	opacity: 0;
+	animation: ink-strike-ripple 1400ms ease-out 1 forwards;
+}
+
+.ink-strike.eris {
+	border-color: rgba(147, 51, 234, 0.5); /* --nyx-eris */
+}
+
+@keyframes ink-strike-ripple {
+	0% { transform: scale(0.08); opacity: 0; }
+	12% { opacity: 0.5; }
+	100% { transform: scale(1); opacity: 0; }
+}
+
+/* Reduced motion: stillness for ambient AND one-shot; the static
+   vignette / tint remain (pseudo-elements named explicitly — `*`
+   alone does not reach them). */
+@media (prefers-reduced-motion: reduce) {
+	.ink-weather,
+	.ink-weather *,
+	.ink-weather *::before,
+	.ink-weather *::after {
+		animation: none !important;
+		transition: none !important;
+	}
+}
+
+/* ── Marginalia: present-NPC portraits (The Ink, Layer 1) ──────── */
+/* Decorative ink-framed thumbs at the left margin: over the plate
+   (z-0), under the prose (z-10), never interactive. Hidden below
+   1100px; clear of the pane-edge trigger. */
+
+.marginalia {
+	position: absolute;
+	left: 2.75rem;
+	top: 50%;
+	transform: translateY(-50%);
+	z-index: 5;
+	display: none;
+	flex-direction: column;
+	gap: 1.1rem;
+	pointer-events: none;
+}
+
+@media (min-width: 1100px) {
+	.marginalia { display: flex; }
+}
+
+.marginalia-frame {
+	width: 72px;
+	height: 96px;
+	overflow: hidden;
+	border: 1px solid var(--nyx-border);
+	box-shadow: 0 0 24px rgba(0, 0, 0, 0.7);
+	opacity: 0.45;
+	filter: grayscale(0.35) contrast(0.95);
+}
+
+.marginalia-frame img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	display: block;
+}

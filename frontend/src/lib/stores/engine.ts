@@ -11,7 +11,7 @@
  * - Buffer-split on \n\n boundaries for safe JSON.parse
  */
 
-import { writable } from 'svelte/store';
+import { get, writable } from 'svelte/store';
 import type {
 	ThreadState,
 	TurnResult,
@@ -20,6 +20,7 @@ import type {
 	DeliberationTrace
 } from '$lib/types/engine';
 import { vestibuleState } from '$lib/stores/vestibule';
+import { clearPlates, loadPlates, plateManifest, scenePlateUrl } from '$lib/stores/plates';
 
 // ── Session ID ──────────────────────────────────────────────────
 
@@ -56,8 +57,34 @@ export const isTerminal = writable<boolean>(false);
 /** Death reason if terminal */
 export const deathReason = writable<string>('');
 
+/** The Witness: the carved epitaph, delivered with the death event */
+export const epitaph = writable<string>('');
+
+/** The Witness: the bound life's book id ('' = this life went unbound) */
+export const bookId = writable<string>('');
+
 /** BFL milestone image URL (displayed as background in TheThread) */
 export const backgroundImage = writable<string>('');
+
+/** The Ink: where the player stood when the milestone image arrived.
+    The milestone holds while they remain in the scene it crowned, then
+    yields back to the world's plate on scene change (or a dream) — but
+    only when a plate exists to resume to (plateless worlds keep the
+    persist-until-death behavior). Null when unknowable: the milestone
+    holds (INK-E1 — a null scene is never a scene change). */
+let _milestoneLocationId: string | null = null;
+
+/** Clear the milestone if the scene moved on and a plate can resume. */
+function yieldMilestoneIfSceneChanged(state: ThreadState | null): void {
+	if (!get(backgroundImage)) return;
+	const loc = state?.canon?.current_scene?.location_id ?? null;
+	const moved =
+		_milestoneLocationId !== null && loc !== null && loc !== _milestoneLocationId;
+	if (moved && scenePlateUrl(state, get(plateManifest))) {
+		backgroundImage.set('');
+		_milestoneLocationId = null;
+	}
+}
 
 /** Whether Turn 0 init has completed (gates the three-pane view) */
 export const isInitialized = writable<boolean>(false);
@@ -116,6 +143,10 @@ export async function initGame(params: {
 	deliberationTrace.set(result.state.recent_traces?.at(-1) ?? null);
 	repairWitness.set(null);
 	isInitialized.set(true);
+
+	// The Ink: fetch this world's plates — fire-and-forget, self-catching
+	// (INK-E5: never awaited in the init path, never throws into it).
+	void loadPlates(result.state?.world_id);
 
 	return result;
 }
@@ -270,9 +301,14 @@ function handleStreamEvent(data: Record<string, unknown>): void {
 			deliberationTrace.set(payload.recent_traces?.at(-1) ?? null);
 			uiChoices.set(choices);
 
+			// The Ink: the milestone yields when the scene it crowned ends.
+			yieldMilestoneIfSceneChanged(payload);
+
 			if (terminal) {
 				isTerminal.set(true);
 				deathReason.set(death);
+				epitaph.set((data.epitaph as string) || '');
+				bookId.set((data.book_id as string) || '');
 			}
 
 			// Player regains control on state event
@@ -284,6 +320,11 @@ function handleStreamEvent(data: Record<string, unknown>): void {
 			const url = data.url as string;
 			if (url) {
 				backgroundImage.set(url);
+				// The Ink: remember where the player stood when the milestone
+				// arrived (the image fires post-stream, after the state event,
+				// so gameState already holds this turn's scene).
+				_milestoneLocationId =
+					get(gameState)?.canon?.current_scene?.location_id ?? null;
 			}
 			break;
 		}
@@ -292,6 +333,12 @@ function handleStreamEvent(data: Record<string, unknown>): void {
 			const dreamText = data.text as string;
 			if (dreamText) {
 				activeDream.set(dreamText);
+				// The Ink: a dream interlude is a scene boundary — the
+				// milestone yields when a plate exists to resume to.
+				if (get(backgroundImage) && scenePlateUrl(get(gameState), get(plateManifest))) {
+					backgroundImage.set('');
+					_milestoneLocationId = null;
+				}
 			}
 			break;
 		}
@@ -332,9 +379,13 @@ export async function resetGame(): Promise<void> {
 	deliberationTrace.set(null);
 	repairWitness.set(null);
 	backgroundImage.set('');
+	_milestoneLocationId = null;
+	clearPlates();
 	isProcessing.set(false);
 	isTerminal.set(false);
 	deathReason.set('');
+	epitaph.set('');
+	bookId.set('');
 	uiChoices.set([]);
 	activeDream.set('');
 	isInitialized.set(false);

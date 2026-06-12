@@ -6,6 +6,9 @@ POST /turn    - SSE stream: 3-Phase pipeline (mechanic → prose → state)
 GET  /state   - Current thread state (debug)
 GET  /hamartia-options - List available tragic flaws
 GET  /threads/{player_id} - Past lives for the title screen
+GET  /library, /library/{book_id} - The bound lives (Scribe P3)
+GET  /assays  - Per-world fitness from finished lives (Assayer P4)
+GET  /plates/{world_id}[/{filename}] - Curated world art (The Ink)
 POST /reset   - Reset the game session
 
 v3.0: Session isolation via SessionManager (keyed by UUID).
@@ -20,7 +23,7 @@ import time
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from app.core.config import settings
 from app.core.kernel import NyxKernel
@@ -266,6 +269,58 @@ async def get_book(book_id: str):
     if markdown is None:
         raise HTTPException(status_code=404, detail="No such book in the Tapestry.")
     return {"book_id": book_id, "markdown": markdown}
+
+
+# ------------------------------------------------------------------
+# GET /plates — The Atelier's curated canon images (The Ink, Layer 1)
+# ------------------------------------------------------------------
+
+@router.get("/plates/{world_id}")
+async def get_plate_manifest(world_id: str):
+    """A world's plate manifest. Always 200; empty when no art exists.
+
+    no-store: the manifest re-scans the art dir every request, so a
+    curation change is visible immediately (the no-cached-listing law).
+    """
+    from app.services.plates import plate_manifest
+
+    return JSONResponse(
+        plate_manifest(world_id),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.get("/plates/{world_id}/{filename}")
+async def get_plate(world_id: str, filename: str):
+    """One plate, re-gated at serve time (INK-E3): filename law, size law,
+    realpath containment. 404 outside the law; 413 over the 512 KB cap."""
+    from app.services.plates import resolve_plate
+
+    path, media, status = resolve_plate(world_id, filename)
+    if status == 413:
+        raise HTTPException(status_code=413, detail="Plate exceeds the 512 KB law.")
+    if path is None:
+        raise HTTPException(status_code=404, detail="No such plate.")
+    return FileResponse(
+        path,
+        media_type=media,
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+# ------------------------------------------------------------------
+# GET /assays — The Assayer's report (Morpheus P4)
+# ------------------------------------------------------------------
+
+@router.get("/assays")
+async def get_assays(world_id: str = ""):
+    """Per-world fitness from finished lives, plus the raw verdicts."""
+    from app.services.assayer import list_verdicts, world_fitness
+
+    return {
+        "fitness": world_fitness(world_id or None),
+        "verdicts": [v.model_dump() for v in list_verdicts()][-100:],
+    }
 
 
 # ------------------------------------------------------------------

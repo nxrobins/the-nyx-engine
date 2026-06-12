@@ -21,7 +21,10 @@
 		repairWitness,
 	} from '$lib/stores/engine';
 	import { renderProse } from '$lib/utils/markdown';
+	import { plateManifest, scenePlateUrl } from '$lib/stores/plates';
 	import Console from './Console.svelte';
+	import DeathRite from './DeathRite.svelte';
+	import Marginalia from './Marginalia.svelte';
 
 	/** Current paragraph index within the latest turn's prose */
 	let visibleIndex = $state(0);
@@ -64,16 +67,24 @@
 			visibleIndex++;
 		}
 	}
+
+	/** The Ink: milestone image wins while present; otherwise the scene's
+	    plate; '' (today's bare ground) when the world has no art (INK-E6). */
+	let bgUrl = $derived($backgroundImage || scenePlateUrl($gameState, $plateManifest));
 </script>
 
 <main class="relative flex flex-col h-full overflow-hidden">
-	<!-- BFL Background Image -->
-	{#if $backgroundImage}
+	<!-- The ground: milestone image or the world's scene plate (INK-E6 —
+	     the guard is bgUrl, never $backgroundImage alone) -->
+	{#if bgUrl}
 		<div
 			class="bfl-background visible"
-			style="background-image: url('{$backgroundImage}');"
+			style="background-image: url('{bgUrl}');"
 		></div>
 	{/if}
+
+	<!-- Marginalia: present-NPC portraits (decorative, ≥1100px) -->
+	<Marginalia />
 
 	<!-- Scroll Area -->
 	<div class="flex-1 overflow-y-auto relative z-10">
@@ -108,13 +119,18 @@
 				</div>
 			{/if}
 
-			<!-- Paginated paragraph display (after prose arrives) -->
+			<!-- Paginated paragraph display (after prose arrives).
+			     QoL: the prose itself advances on click — the ▼ remains as
+			     the affordance, the whole breath is the target. -->
 			{#if paragraphs.length > 0 && !$isProcessing}
 				{#key visibleIndex}
 					<div
 						class="prose-nyx mb-6 max-w-2xl mx-auto"
+						class:prose-advance={visibleIndex < paragraphs.length - 1}
 						in:fade={{ duration: 600, delay: 200 }}
 						out:fade={{ duration: 400 }}
+						onclick={advanceText}
+						role="presentation"
 					>
 						{@html renderProse(paragraphs[visibleIndex] ?? '')}
 					</div>
@@ -193,8 +209,7 @@
 			<!-- Controls container (auto height for choice buttons) -->
 			<div class="mt-8 flex flex-col gap-4 items-center justify-center">
 				{#if $isTerminal}
-					<!-- Terminal state always shows, bypasses pagination -->
-					<Console />
+					<!-- The Death Rite overlay owns this moment -->
 				{:else if paragraphs.length > 0 && visibleIndex < paragraphs.length - 1 && !$isProcessing}
 					<!-- More paragraphs to read — show advance button -->
 					<button
@@ -235,6 +250,11 @@
 		</div>
 	</div>
 
+	<!-- The Death Rite (terminal overlay — severance, epitaph, the book) -->
+	{#if $isTerminal}
+		<DeathRite />
+	{/if}
+
 	<!-- Dream Overlay (Hypnos epoch-boundary interlude) -->
 	{#if $activeDream}
 		<div
@@ -245,6 +265,14 @@
 				<p class="hypnos-text text-lg leading-relaxed mb-8">
 					{$activeDream}
 				</p>
+				{#if ($gameState?.ledger ?? []).some((p) => p.status === 'planted' || p.status === 'promoted')}
+					<p
+						class="mb-6 text-xs italic"
+						style="font-family: var(--font-prose); color: var(--nyx-text-dim); opacity: 0.7;"
+					>
+						The dream knows the story's debts.
+					</p>
+				{/if}
 				<button
 					onclick={dismissDream}
 					class="text-[var(--nyx-text-dim)] hover:text-[var(--nyx-text)] transition-colors"

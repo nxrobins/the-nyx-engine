@@ -50,6 +50,8 @@ def _hermetic_settings(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "mock_latency_scale", 0.0)
     # Bound books land in an isolated per-test dir, never the repo.
     monkeypatch.setattr(settings, "books_dir", str(tmp_path / "books"))
+    # Verdicts likewise.
+    monkeypatch.setattr(settings, "assays_dir", str(tmp_path / "assays"))
 
 
 # ---------------------------------------------------------------------------

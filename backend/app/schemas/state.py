@@ -274,6 +274,9 @@ class ThreadState(BaseModel):
     # Scribe P3: the voice this life's book is written in — discovered
     # at the Fork from hamartia + soul trajectory, fixed thereafter.
     life_voice: str = ""
+    # Assayer P4: which world this life was born into (cartridge world_id
+    # or "builtin-{archetype}"). The verdict's primary key.
+    world_id: str = ""
     # Chronicler: rolling prose buffer + dual-track compressed chronicle
     prose_history: list[str] = Field(default_factory=list)       # last N raw prose turns
     chronicle: list[str] = Field(default_factory=list)           # mythic sentence per 5-turn window
@@ -396,3 +399,4 @@ class TurnResult(BaseModel):
     image_url: str = ""    # populated if BFL generated a milestone image
     ui_choices: list[str] = Field(default_factory=list)
     book_id: str = ""      # Scribe P3: set on death when the life was bound
+    epitaph: str = ""      # The Witness: the carved line, shown in the Death Rite

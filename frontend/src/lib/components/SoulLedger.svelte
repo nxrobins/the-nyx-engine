@@ -4,13 +4,21 @@
 -->
 <script lang="ts">
 	import { gameState } from '$lib/stores/engine';
-	import type { LegacyEcho, Oath, PressureState, SoulVectors } from '$lib/types/engine';
+	import type { LegacyEcho, Oath, PressureState, Promise as NyxPromise, SoulVectors } from '$lib/types/engine';
 
 	let vectors = $derived<SoulVectors | null>($gameState?.soul_ledger.vectors ?? null);
 	let hamartia = $derived<string>($gameState?.soul_ledger.hamartia ?? '');
 	let oaths = $derived<Oath[]>($gameState?.soul_ledger.active_oaths ?? []);
 	let pressures = $derived<PressureState | null>($gameState?.pressures ?? null);
 	let legacyEchoes = $derived<LegacyEcho[]>($gameState?.legacy_echoes ?? []);
+
+	/** The Witness: active narrative debts (Morpheus P2), due-soonest first */
+	let promises = $derived<NyxPromise[]>(
+		(($gameState?.ledger ?? []) as NyxPromise[])
+			.filter((p) => p.status === 'planted' || p.status === 'promoted')
+			.sort((a, b) => a.due_turn - b.due_turn)
+	);
+	let currentTurn = $derived<number>($gameState?.session.turn_count ?? 0);
 
 	function fmt(val: number): string {
 		return Math.round(val).toString();
@@ -172,6 +180,41 @@
 					No worldly force dominates the scene yet.
 				</p>
 			{/if}
+		</div>
+	{/if}
+
+	{#if promises.length > 0}
+		<div class="flex flex-col gap-3">
+			<p class="text-[10px] uppercase tracking-[0.25em]" style="color: var(--nyx-text-dim);">
+				The Loom Remembers
+			</p>
+
+			{#each promises as promise}
+				<div
+					class="text-sm leading-relaxed pl-3 border-l-2
+						{promise.status === 'promoted'
+							? 'border-[var(--nyx-oracle-gold)]/70'
+							: 'border-[var(--nyx-border)]'}"
+					style="font-family: var(--font-prose);"
+				>
+					<p class="text-[var(--nyx-text)]">{promise.description}</p>
+					<p class="text-[10px] mt-1" style="color: var(--nyx-text-dim);">
+						{#if currentTurn >= promise.due_turn}
+							<span style="color: var(--nyx-oracle-gold);">THE DEBT FALLS DUE</span>
+						{:else}
+							owed by turn {promise.due_turn}
+						{/if}
+						{#if promise.status === 'promoted'}
+							· <span style="color: var(--nyx-oracle-gold);">PROMOTED</span>
+						{/if}
+					</p>
+					{#if promise.significance}
+						<p class="text-[10px] mt-1" style="color: var(--nyx-text-dim);">
+							{promise.significance}
+						</p>
+					{/if}
+				</div>
+			{/each}
 		</div>
 	{/if}
 
