@@ -28,6 +28,18 @@
 			(oath) => oath.status === 'broken'
 		);
 
+		// The Witness: an active doom outranks every other mark.
+		const doom = $gameState?.doom;
+		if (doom?.active) {
+			next.push({
+				title: `THE DOOM · ${doom.stage}/${doom.max_stage}`,
+				body: doom.escapable && doom.escape_hint
+					? `${doom.description} It can still be escaped: ${doom.escape_hint}`
+					: `${doom.description} Nothing lifts it.`,
+				tone: 'var(--nyx-nemesis)'
+			});
+		}
+
 		if (winnerOrder[0] === 'lachesis' && currentScene?.immediate_problem) {
 			next.push({
 				title: 'Lachesis',
