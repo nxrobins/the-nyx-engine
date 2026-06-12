@@ -56,6 +56,12 @@ export const isTerminal = writable<boolean>(false);
 /** Death reason if terminal */
 export const deathReason = writable<string>('');
 
+/** The Witness: the carved epitaph, delivered with the death event */
+export const epitaph = writable<string>('');
+
+/** The Witness: the bound life's book id ('' = this life went unbound) */
+export const bookId = writable<string>('');
+
 /** BFL milestone image URL (displayed as background in TheThread) */
 export const backgroundImage = writable<string>('');
 
@@ -273,6 +279,8 @@ function handleStreamEvent(data: Record<string, unknown>): void {
 			if (terminal) {
 				isTerminal.set(true);
 				deathReason.set(death);
+				epitaph.set((data.epitaph as string) || '');
+				bookId.set((data.book_id as string) || '');
 			}
 
 			// Player regains control on state event
@@ -335,6 +343,8 @@ export async function resetGame(): Promise<void> {
 	isProcessing.set(false);
 	isTerminal.set(false);
 	deathReason.set('');
+	epitaph.set('');
+	bookId.set('');
 	uiChoices.set([]);
 	activeDream.set('');
 	isInitialized.set(false);

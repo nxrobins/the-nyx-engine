@@ -550,3 +550,367 @@ hr.nyx-divider {
 	text-align: center;
 	animation: hypnos-breathe 3s ease-in-out infinite;
 }
+
+/* ══════════════════════════════════════════════════════ */
+/* THE WITNESS — death rite, the book, the library, dread */
+/* ══════════════════════════════════════════════════════ */
+
+/* ── The Death Rite ──────────────────────────────────── */
+
+.death-rite-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 60;
+	background: rgba(5, 5, 5, 0.96);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.death-rite-stage {
+	all: unset;
+	cursor: pointer;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	height: 100%;
+}
+
+.death-rite-content {
+	max-width: 36rem;
+	padding: 0 2rem;
+	text-align: center;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 1.5rem;
+}
+
+.death-rite-kicker {
+	font-family: var(--font-mono);
+	font-size: 0.7rem;
+	letter-spacing: 0.3em;
+	color: var(--nyx-nemesis);
+	margin: 0;
+}
+
+.death-rite-body {
+	font-family: var(--font-prose);
+	font-size: 1.125rem;
+	line-height: 1.9;
+	color: var(--nyx-text);
+	margin: 0;
+}
+
+.death-rite-body-dim {
+	color: var(--nyx-text-dim);
+	font-style: italic;
+	font-size: 1rem;
+}
+
+.epitaph-card {
+	font-family: var(--font-prose);
+	font-style: italic;
+	font-size: 1.35rem;
+	line-height: 1.9;
+	color: var(--nyx-oracle-gold);
+	border: 1px solid rgba(184, 134, 11, 0.35);
+	padding: 2rem 2.5rem;
+	margin: 0;
+	filter: drop-shadow(0 0 12px rgba(184, 134, 11, 0.12));
+}
+
+.death-rite-flaw {
+	font-family: var(--font-prose);
+	font-style: italic;
+	color: var(--nyx-oracle-gold);
+	margin: 0;
+}
+
+.death-rite-vectors {
+	display: flex;
+	flex-direction: column;
+	gap: 0.4rem;
+	min-width: 14rem;
+}
+
+.death-rite-vector-row {
+	display: flex;
+	justify-content: space-between;
+	font-family: var(--font-mono);
+	font-size: 0.75rem;
+	letter-spacing: 0.15em;
+	color: var(--nyx-text-dim);
+}
+
+.death-rite-vector-value {
+	color: var(--nyx-text);
+}
+
+.death-rite-voice {
+	font-family: var(--font-prose);
+	font-style: italic;
+	font-size: 0.85rem;
+	color: var(--nyx-text-dim);
+	margin: 0;
+	max-width: 28rem;
+}
+
+.death-rite-continue {
+	margin-top: 3rem;
+	color: var(--nyx-text-dim);
+	animation: hypnos-breathe 3s ease-in-out infinite;
+	font-size: 1.5rem;
+}
+
+.death-rite-actions {
+	display: flex;
+	flex-direction: column;
+	gap: 1rem;
+	margin-top: 1rem;
+}
+
+.death-rite-btn {
+	all: unset;
+	cursor: pointer;
+	font-family: var(--font-prose);
+	font-size: 0.9rem;
+	letter-spacing: 0.12em;
+	color: var(--nyx-text-dim);
+	transition: color 300ms ease;
+}
+
+.death-rite-btn:hover { color: var(--nyx-text); }
+.death-rite-btn:disabled { opacity: 0.3; cursor: default; }
+
+.death-rite-btn-gold { color: var(--nyx-oracle-gold); opacity: 0.85; }
+.death-rite-btn-gold:hover { color: var(--nyx-oracle-gold); opacity: 1; }
+
+/* ── The Book Reader ─────────────────────────────────── */
+
+.book-reader-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 70;
+	background: rgba(5, 5, 5, 0.98);
+	display: flex;
+	justify-content: center;
+}
+
+.book-reader-scroll {
+	width: 100%;
+	overflow-y: auto;
+	display: flex;
+	justify-content: center;
+}
+
+.book-reader-page {
+	max-width: 42rem;
+	width: 100%;
+	padding: 5rem 2.5rem 6rem;
+}
+
+.book-reader-empty {
+	font-family: var(--font-prose);
+	font-style: italic;
+	color: var(--nyx-text-dim);
+	text-align: center;
+	margin-top: 8rem;
+}
+
+.book-body {
+	font-family: var(--font-prose);
+	color: var(--nyx-text);
+	line-height: 2;
+}
+
+.book-body .book-title {
+	font-size: 2rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	text-align: center;
+	margin: 0 0 2.5rem;
+	color: var(--nyx-text);
+}
+
+.book-body .book-chapter {
+	font-size: 1.15rem;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	margin: 3rem 0 1.5rem;
+	color: var(--nyx-oracle-gold);
+	opacity: 0.85;
+}
+
+.book-body .book-epitaph {
+	font-style: italic;
+	color: var(--nyx-oracle-gold);
+	border-left: 2px solid rgba(184, 134, 11, 0.4);
+	padding-left: 1.25rem;
+	margin: 2rem 0;
+}
+
+.book-body p { margin: 0 0 1.4rem; }
+.book-body em { color: var(--nyx-text-dim); }
+
+.book-reader-close-row {
+	display: flex;
+	justify-content: center;
+	margin-top: 4rem;
+}
+
+.book-reader-close {
+	all: unset;
+	cursor: pointer;
+	font-family: var(--font-prose);
+	font-size: 0.9rem;
+	letter-spacing: 0.12em;
+	color: var(--nyx-text-dim);
+	transition: color 300ms ease;
+}
+
+.book-reader-close:hover { color: var(--nyx-text); }
+
+/* ── The Library ─────────────────────────────────────── */
+
+.library-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 30;
+	background: rgba(5, 5, 5, 0.92);
+	display: flex;
+	justify-content: center;
+	cursor: default;
+}
+
+.library-frame {
+	max-width: 40rem;
+	width: 100%;
+	padding: 4rem 2rem;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 1rem;
+}
+
+.library-title {
+	font-family: var(--font-mono);
+	font-size: 0.8rem;
+	letter-spacing: 0.3em;
+	color: var(--nyx-text);
+	margin: 0;
+}
+
+.library-subtitle {
+	font-family: var(--font-prose);
+	font-style: italic;
+	font-size: 0.85rem;
+	color: var(--nyx-text-dim);
+	margin: 0 0 2rem;
+}
+
+.library-shelf {
+	width: 100%;
+	display: flex;
+	flex-direction: column;
+	gap: 1rem;
+}
+
+.library-empty {
+	font-family: var(--font-prose);
+	font-style: italic;
+	color: var(--nyx-text-dim);
+	text-align: center;
+	margin-top: 3rem;
+}
+
+.library-spine {
+	all: unset;
+	cursor: pointer;
+	display: flex;
+	flex-direction: column;
+	gap: 0.4rem;
+	padding: 1.1rem 1.4rem;
+	border: 1px solid var(--nyx-border);
+	border-left: 2px solid rgba(184, 134, 11, 0.45);
+	transition: border-color 300ms ease, background 300ms ease;
+}
+
+.library-spine:hover {
+	border-color: rgba(184, 134, 11, 0.5);
+	background: rgba(184, 134, 11, 0.04);
+}
+
+.library-spine-title {
+	font-family: var(--font-prose);
+	font-size: 1.05rem;
+	color: var(--nyx-text);
+	letter-spacing: 0.04em;
+}
+
+.library-spine-meta {
+	font-family: var(--font-mono);
+	font-size: 0.65rem;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	color: var(--nyx-text-dim);
+}
+
+.library-spine-epitaph {
+	font-family: var(--font-prose);
+	font-style: italic;
+	font-size: 0.85rem;
+	color: var(--nyx-oracle-gold);
+	opacity: 0.7;
+}
+
+.library-close {
+	all: unset;
+	cursor: pointer;
+	margin-top: 2.5rem;
+	font-family: var(--font-prose);
+	font-size: 0.9rem;
+	letter-spacing: 0.12em;
+	color: var(--nyx-text-dim);
+	transition: color 300ms ease;
+}
+
+.library-close:hover { color: var(--nyx-text); }
+
+/* ── Doom dread (HUD) ────────────────────────────────── */
+
+.thread-hud.doomed .thread-hud-text {
+	color: var(--nyx-nemesis);
+}
+
+.doom-pips {
+	font-family: var(--font-mono);
+	letter-spacing: 0.25em;
+	color: var(--nyx-nemesis);
+	animation: doom-throb 2.4s ease-in-out infinite;
+}
+
+@keyframes doom-throb {
+	0%, 100% { opacity: 0.55; }
+	50% { opacity: 1; }
+}
+
+/* ── Pane edge pulse (unseen change) ─────────────────── */
+
+.pane-edge.edge-pulse .edge-glyph {
+	color: var(--nyx-oracle-gold);
+	animation: edge-pulse-anim 0.9s ease-in-out 2;
+}
+
+@keyframes edge-pulse-anim {
+	0%, 100% { opacity: 0.6; transform: scale(1); }
+	50% { opacity: 1; transform: scale(1.35); }
+}
+
+/* ── Prose click-to-advance affordance ───────────────── */
+
+.prose-advance { cursor: pointer; }

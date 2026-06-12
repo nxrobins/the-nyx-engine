@@ -4,7 +4,7 @@
   Minimal, borderless, sumi-e aesthetic.
 -->
 <script lang="ts">
-	import { submitAction, isProcessing, isTerminal, resetGame } from '$lib/stores/engine';
+	import { submitAction, isProcessing } from '$lib/stores/engine';
 
 	let inputText = $state('');
 	let inputEl = $state<HTMLInputElement | null>(null);
@@ -33,33 +33,11 @@
 			handleSubmit();
 		}
 	}
-
-	async function handleReset() {
-		await resetGame();
-		inputEl?.focus();
-	}
 </script>
 
+<!-- Terminal state is owned by the Death Rite overlay, not the console. -->
 <div class="relative z-10 px-8 py-4">
-	{#if $isTerminal}
-		<div class="text-center space-y-3">
-			<p
-				class="text-sm font-semibold"
-				style="font-family: var(--font-prose); color: var(--nyx-nemesis);"
-			>
-				Your thread has been severed.
-			</p>
-			<button
-				onclick={handleReset}
-				class="px-5 py-2 text-sm border border-[var(--nyx-text-dim)] text-[var(--nyx-text)]
-					hover:border-[var(--nyx-text)] hover:text-white transition-all duration-300"
-				style="font-family: var(--font-prose); letter-spacing: 0.1em;"
-			>
-				Begin New Thread
-			</button>
-		</div>
-	{:else}
-		<form onsubmit={handleSubmit} class="flex gap-3 items-center">
+	<form onsubmit={handleSubmit} class="flex gap-3 items-center">
 			<input
 				bind:this={inputEl}
 				bind:value={inputText}
@@ -86,5 +64,4 @@
 		{#if error}
 			<p class="text-red-400 text-xs mt-2">{error}</p>
 		{/if}
-	{/if}
 </div>
