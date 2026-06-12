@@ -269,6 +269,21 @@ async def get_book(book_id: str):
 
 
 # ------------------------------------------------------------------
+# GET /assays — The Assayer's report (Morpheus P4)
+# ------------------------------------------------------------------
+
+@router.get("/assays")
+async def get_assays(world_id: str = ""):
+    """Per-world fitness from finished lives, plus the raw verdicts."""
+    from app.services.assayer import list_verdicts, world_fitness
+
+    return {
+        "fitness": world_fitness(world_id or None),
+        "verdicts": [v.model_dump() for v in list_verdicts()][-100:],
+    }
+
+
+# ------------------------------------------------------------------
 # POST /reset — Reset game session
 # ------------------------------------------------------------------
 

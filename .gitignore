@@ -25,6 +25,10 @@ Thumbs.db
 *.db
 *.sqlite3
 
+# Player artifacts (bound lives + weighed lives) — data, not source
+backend/books/
+backend/assays/
+
 # Test artifacts
 *.png
 .playwright-mcp/
