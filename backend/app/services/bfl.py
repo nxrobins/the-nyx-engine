@@ -31,6 +31,7 @@ async def generate_image(
     prompt: str,
     api_key: str,
     model: str = "flux-pro-1.1",
+    output_format: str | None = None,
 ) -> str:
     """Generate an image via BFL Flux API.
 
@@ -38,11 +39,24 @@ async def generate_image(
         prompt: Scene description (will be wrapped in sumi-e style).
         api_key: BFL API key.
         model: BFL model name.
+        output_format: Optional "png"/"jpeg" — omitted when None (BFL's
+            default is jpeg; the Atelier passes "png" because the plate
+            law allows png/webp only).
 
     Returns:
         Image URL string, or empty string on failure/timeout.
+        The returned URL is a hosted, EXPIRING link — callers that keep
+        the image must download the bytes immediately.
     """
     styled_prompt = f"{settings.bfl_style_prefix}, {prompt}, {settings.bfl_style_suffix}"
+
+    payload: dict = {
+        "prompt": styled_prompt,
+        "width": 1024,
+        "height": 768,
+    }
+    if output_format:
+        payload["output_format"] = output_format
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         # Step 1: Submit generation request
@@ -50,11 +64,7 @@ async def generate_image(
             submit_resp = await client.post(
                 f"{_BFL_BASE_URL}/{model}",
                 headers={"x-key": api_key},
-                json={
-                    "prompt": styled_prompt,
-                    "width": 1024,
-                    "height": 768,
-                },
+                json=payload,
             )
             submit_resp.raise_for_status()
             task_id = submit_resp.json().get("id")
