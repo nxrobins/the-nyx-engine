@@ -47,11 +47,13 @@ from app.agents.lachesis import Lachesis
 from app.agents.momus import Momus
 from app.agents.morpheus import Morpheus
 from app.agents.nemesis import Nemesis
+from app.agents.scribe import Scribe
 from app.core.config import settings
 from app.core.director import select_adult_beat
 from app.core.resolver import ConflictResolver, ResolvedOutcome
 from app.core.world_registry import select_world_seed
 from app.core.world_seeds import format_world_context
+from app.schemas.book import Chapter, ScribeSnapshot
 from app.schemas.morpheus import BeatSheet, FloorBeat, MorpheusSnapshot
 from app.schemas.state import (
     DeliberationTrace,
@@ -82,11 +84,16 @@ from app.services.doom import (
     doom_directive,
     maybe_begin_pressure_dooms,
 )
-from app.services.hamartia_engine import determine_hamartia, get_hamartia_profile
+from app.services.hamartia_engine import (
+    determine_hamartia,
+    get_hamartia_profile,
+    get_life_voice,
+)
 from app.services.legacy import build_legacy_echo
 from app.services.oath_engine import detect_oath, verify_oaths
 from app.services.oath_parser import parse_oath_text
 from app.services.beat_gate import gate_beat, preconditions_hold
+from app.services.bookbinder import bind_book, write_book
 from app.services.pressure import apply_pressure_delta, evolve_pressures, pressure_summary
 from app.services.promise_engine import (
     ABANDONMENT_OMEN,
@@ -472,6 +479,7 @@ class NyxKernel:
         self.momus = Momus()
         self.chronicler = Chronicler()
         self.morpheus = Morpheus()
+        self.scribe = Scribe()
 
         # Systems
         self.resolver = ConflictResolver()
@@ -484,6 +492,12 @@ class NyxKernel:
         # Both are advisory — every consumption point has its floor.
         self._morpheus_task: asyncio.Task | None = None
         self._beat_sheet: BeatSheet | None = None
+
+        # Scribe P3: the write-behind biography. Chapters accumulate as
+        # epochs are lived; death binds them. A missing chapter is a
+        # shorter book, never an error.
+        self._scribe_task: asyncio.Task | None = None
+        self._chapters: list[Chapter] = []
 
         # DB persistence (set on initialize, cleared on reset)
         self._thread_id: int | None = None
@@ -505,6 +519,8 @@ class NyxKernel:
         self.state = ThreadState()
         self._cancel_morpheus()
         self._beat_sheet = None
+        self._cancel_scribe()
+        self._chapters = []
         self._thread_id = None
 
         # Validate hamartia ("Unformed" is allowed — Lachesis overwrites at Turn 10)
@@ -520,6 +536,7 @@ class NyxKernel:
         self.state.soul_ledger.hamartia = hamartia
         if hamartia and hamartia != "Unformed":
             self.state.soul_ledger.hamartia_profile = get_hamartia_profile(hamartia)
+            self.state.life_voice = get_life_voice(hamartia, self.state)
 
         # -----------------------------------------------------------
         # Seed soul vectors from first memory archetype (+2 boost)
@@ -666,6 +683,8 @@ class NyxKernel:
         # the one sanctioned pre-turn mutation (ledger updates) happens here,
         # before any baseline reads.
         self._harvest_morpheus()
+        # Scribe P3: shelve a finished chapter (no state mutation at all).
+        self._harvest_scribe()
 
         session = self.state.session
         # Snapshot epoch metadata so a rejected action can roll back cleanly.
@@ -765,7 +784,10 @@ class NyxKernel:
         if assigned_hamartia:
             working_state.soul_ledger.hamartia = assigned_hamartia
             working_state.soul_ledger.hamartia_profile = get_hamartia_profile(assigned_hamartia)
+            # Scribe P3: the Fork is where the life finds its voice.
+            working_state.life_voice = get_life_voice(assigned_hamartia, working_state)
             logger.info(f"HAMARTIA FORKED: 'Unformed' → '{assigned_hamartia}'")
+            logger.info(f"Life-voice: {working_state.life_voice[:60]}...")
         elif (
             working_state.soul_ledger.hamartia
             and working_state.soul_ledger.hamartia != "Unformed"
@@ -1234,12 +1256,16 @@ class NyxKernel:
     # ------------------------------------------------------------------
 
     async def _handle_death(self, ctx: TurnContext) -> TurnResult:
-        """Terminal path: epitaph generation + DB persist + death result."""
+        """Terminal path: epitaph + the Bookbinder's hour + DB + death result."""
         self._cancel_morpheus()  # the Author has no future to write here
         self._beat_sheet = None
         self.state = ctx.outcome.state
         _refresh_derived_environment(self.state)
-        await self._generate_epitaph(ctx.outcome.state, ctx.turn, ctx.death_reason)
+        epitaph = await self._generate_epitaph(ctx.outcome.state, ctx.turn, ctx.death_reason)
+
+        # Scribe P3: the life becomes a book. Failure costs the book, never
+        # the death — book_id is "" and the thread still joins the Tapestry.
+        book_id = await self._bind_book_at_death(epitaph, ctx.death_reason)
 
         # DB persist
         await create_turn(
@@ -1257,6 +1283,7 @@ class NyxKernel:
             terminal=True,
             death_reason=ctx.death_reason,
             turn_number=ctx.turn,
+            book_id=book_id,
         )
 
     # ------------------------------------------------------------------
@@ -1440,6 +1467,159 @@ class NyxKernel:
         self._morpheus_task = None
 
     # ------------------------------------------------------------------
+    # Scribe P3: the write-behind biography
+    # ------------------------------------------------------------------
+
+    _EPOCH_NAMES: dict[int, str] = {
+        1: "The Hearth",
+        2: "The World Outside",
+        3: "The Crucible",
+    }
+
+    def _epoch_name(self, index: int) -> str:
+        return self._EPOCH_NAMES.get(index, f"The Open Road, Part {index - 3}")
+
+    def _settlement_name(self) -> str:
+        if not self.state.canon:
+            return ""
+        for loc in self.state.canon.locations.values():
+            if "settlement" in loc.tags:
+                return loc.name
+        return ""
+
+    def _build_scribe_snapshot(
+        self,
+        *,
+        epoch_index: int,
+        covers: tuple[int, int],
+        death_reason: str = "",
+        epitaph: str = "",
+    ) -> ScribeSnapshot:
+        """Freeze one lived epoch for the biographer (the photograph again)."""
+        state = self.state
+        npc_names: list[str] = []
+        if state.canon:
+            # All statuses — a biography may name its dead.
+            npc_names = [npc.name for npc in state.canon.npcs.values()]
+        return ScribeSnapshot(
+            thread_stamp=f"{state.session.player_id}:{state.session.run_number}",
+            epoch_index=epoch_index,
+            epoch_name=self._epoch_name(epoch_index),
+            covers_turns=covers,
+            boundary_turn=state.session.turn_count,
+            prose_window=list(state.prose_history[-3:]),
+            factual_chronicle=list(state.factual_chronicle),
+            chronicle=list(state.chronicle),
+            life_voice=state.life_voice,
+            player_name=state.session.player_name,
+            player_age=state.session.player_age,
+            hamartia=state.soul_ledger.hamartia,
+            settlement=self._settlement_name(),
+            npc_names=npc_names,
+            death_reason=death_reason,
+            epitaph=epitaph,
+        )
+
+    def _maybe_start_scribe(self, ctx: TurnContext) -> None:
+        """The biographer drafts the epoch just lived, behind the curtain."""
+        if ctx.terminal or ctx.beat_position != "RESOLUTION":
+            return
+        boundary = self.state.session.turn_count
+        epoch_index = boundary // 3
+        if epoch_index < 1:
+            return
+        snapshot = self._build_scribe_snapshot(
+            epoch_index=epoch_index,
+            covers=(boundary - 2, boundary),
+        )
+        self._cancel_scribe()
+        self._scribe_task = asyncio.create_task(self.scribe.draft_chapter(snapshot))
+        logger.info(f"Scribe fired for chapter {epoch_index} (turns {boundary - 2}..{boundary})")
+
+    def _harvest_scribe(self) -> None:
+        """Collect a finished chapter. Failures cost a chapter, nothing more."""
+        task = self._scribe_task
+        if task is None or not task.done():
+            return
+        self._scribe_task = None
+        try:
+            chapter = task.result()
+        except Exception as exc:
+            logger.warning(f"Scribe task failed: {exc!r} — the book is shorter.")
+            return
+        self._accept_chapter(chapter)
+
+    def _accept_chapter(self, chapter: Chapter | None) -> None:
+        if chapter is None:
+            return
+        expected = f"{self.state.session.player_id}:{self.state.session.run_number}"
+        if chapter.thread_stamp != expected:
+            logger.warning("Scribe chapter stamp mismatch — dropped.")
+            return
+        if any(c.epoch_index == chapter.epoch_index for c in self._chapters):
+            logger.warning(f"Duplicate chapter {chapter.epoch_index} — dropped.")
+            return
+        self._chapters.append(chapter)
+        logger.info(f"Chapter {chapter.epoch_index} shelved: {chapter.title}")
+
+    async def _settle_scribe_task(self) -> None:
+        """At death: wait for a mid-draft chapter rather than losing it."""
+        task = self._scribe_task
+        self._scribe_task = None
+        if task is None:
+            return
+        try:
+            self._accept_chapter(await task)
+        except Exception as exc:
+            logger.warning(f"Pending chapter lost at death: {exc!r}")
+
+    async def _bind_book_at_death(self, epitaph: str, death_reason: str) -> str:
+        """The Bookbinder's hour: final chapter, assembly, publication.
+
+        Returns the book_id, or "" if the life produced nothing bindable.
+        Never raises — a failed binding costs the book, not the death.
+        """
+        try:
+            await self._settle_scribe_task()
+
+            covered_through = max(
+                (c.covers_turns[1] for c in self._chapters), default=0
+            )
+            died_turn = self.state.session.turn_count
+            start = min(covered_through + 1, died_turn)
+            final_snapshot = self._build_scribe_snapshot(
+                epoch_index=(max((c.epoch_index for c in self._chapters), default=0) + 1),
+                covers=(max(start, 1), died_turn),
+                death_reason=death_reason,
+                epitaph=epitaph,
+            )
+            final_chapter = await self.scribe.draft_chapter(final_snapshot)
+            self._accept_chapter(final_chapter)
+
+            if not self._chapters:
+                logger.warning("No chapters survived — this life goes unbound.")
+                return ""
+
+            manifest = bind_book(
+                self.state,
+                self._chapters,
+                epitaph=epitaph,
+                death_reason=death_reason,
+            )
+            write_book(manifest)
+            return manifest.book_id
+        except Exception as exc:
+            logger.error(f"Bookbinding failed: {exc!r} — the death stands, unbound.")
+            return ""
+        finally:
+            self._chapters = []
+
+    def _cancel_scribe(self) -> None:
+        if self._scribe_task is not None and not self._scribe_task.done():
+            self._scribe_task.cancel()
+        self._scribe_task = None
+
+    # ------------------------------------------------------------------
     # Shared: Intervention prose appending
     # ------------------------------------------------------------------
 
@@ -1487,8 +1667,10 @@ class NyxKernel:
 
         result = await self._finalize_turn(ctx, prose, choices, validation=validation)
 
-        # Morpheus works behind the curtain Hypnos is about to draw.
+        # Morpheus works behind the curtain Hypnos is about to draw;
+        # the Scribe writes down what the curtain just closed on.
         self._maybe_start_morpheus(ctx)
+        self._maybe_start_scribe(ctx)
 
         # Dream trigger: fire on Resolution beats (turns 3, 6, 9)
         dream = await self._settle_dream_task(dream_task)
@@ -1561,7 +1743,7 @@ class NyxKernel:
 
             # Terminal — emit death
             if ctx.terminal:
-                await self._handle_death(ctx)
+                death_result = await self._handle_death(ctx)
                 yield "data: " + json.dumps({
                     "type": "prose",
                     "text": f"**THREAD SEVERED**\n\n{ctx.death_reason}",
@@ -1572,6 +1754,7 @@ class NyxKernel:
                     "ui_choices": [],
                     "terminal": True,
                     "death_reason": ctx.death_reason,
+                    "book_id": death_result.book_id,
                 }) + "\n\n"
                 db_saved = True  # _handle_death persists to DB
                 return
@@ -1638,8 +1821,10 @@ class NyxKernel:
             )
             db_saved = True
 
-            # Morpheus works behind the curtain Hypnos is about to draw.
+            # Morpheus works behind the curtain Hypnos is about to draw;
+            # the Scribe writes down what the curtain just closed on.
             self._maybe_start_morpheus(ctx)
+            self._maybe_start_scribe(ctx)
 
             yield "data: " + json.dumps({
                 "type": "state",
@@ -1693,8 +1878,8 @@ class NyxKernel:
         state: ThreadState,
         turn: int,
         death_reason: str,
-    ) -> None:
-        """Generate mythic epitaph + persist to DB.
+    ) -> str:
+        """Generate mythic epitaph + persist to DB. Returns the epitaph.
 
         MUST be awaited (not fire-and-forget) to ensure the epitaph
         is written before the player can restart and query ancestors.
@@ -1733,6 +1918,7 @@ class NyxKernel:
             death_reason=death_reason,
             final_soul_vectors=state.soul_ledger.vectors.model_dump(),
         )
+        return epitaph
 
     def reset(self) -> None:
         """Destroy session and reset state."""
@@ -1744,5 +1930,7 @@ class NyxKernel:
         self.state = ThreadState()
         self._cancel_morpheus()
         self._beat_sheet = None
+        self._cancel_scribe()
+        self._chapters = []
         self._thread_id = None
         logger.info("Kernel reset — new thread begins.")
