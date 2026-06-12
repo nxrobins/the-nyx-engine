@@ -229,6 +229,7 @@ export interface TurnResult {
 	image_url: string;
 	ui_choices: string[];
 	book_id: string; // Scribe P3: set on death when the life was bound
+	epitaph: string; // The Witness: the carved line for the Death Rite
 }
 
 /** Scribe P3: a bound life on the library shelf (GET /library) */

@@ -1284,6 +1284,7 @@ class NyxKernel:
             death_reason=ctx.death_reason,
             turn_number=ctx.turn,
             book_id=book_id,
+            epitaph=epitaph,
         )
 
     # ------------------------------------------------------------------
@@ -1755,6 +1756,7 @@ class NyxKernel:
                     "terminal": True,
                     "death_reason": ctx.death_reason,
                     "book_id": death_result.book_id,
+                    "epitaph": death_result.epitaph,
                 }) + "\n\n"
                 db_saved = True  # _handle_death persists to DB
                 return

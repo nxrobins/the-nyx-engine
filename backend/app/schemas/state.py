@@ -396,3 +396,4 @@ class TurnResult(BaseModel):
     image_url: str = ""    # populated if BFL generated a milestone image
     ui_choices: list[str] = Field(default_factory=list)
     book_id: str = ""      # Scribe P3: set on death when the life was bound
+    epitaph: str = ""      # The Witness: the carved line, shown in the Death Rite
