@@ -232,6 +232,43 @@ async def get_player_threads(player_id: str):
 
 
 # ------------------------------------------------------------------
+# GET /library — The Tapestry as a shelf (Scribe P3)
+# ------------------------------------------------------------------
+
+@router.get("/library")
+async def get_library():
+    """All bound lives: manifests for the title-screen shelf."""
+    from app.services.bookbinder import list_books
+
+    return {
+        "books": [
+            {
+                "book_id": b.book_id,
+                "title": b.title,
+                "player_name": b.player_name,
+                "hamartia": b.hamartia,
+                "settlement": b.settlement,
+                "epitaph": b.epitaph,
+                "died_turn": b.died_turn,
+                "chapter_count": len(b.chapters),
+            }
+            for b in list_books()
+        ]
+    }
+
+
+@router.get("/library/{book_id}")
+async def get_book(book_id: str):
+    """One bound life, as markdown. 404 if the shelf has no such spine."""
+    from app.services.bookbinder import load_book_markdown
+
+    markdown = load_book_markdown(book_id)
+    if markdown is None:
+        raise HTTPException(status_code=404, detail="No such book in the Tapestry.")
+    return {"book_id": book_id, "markdown": markdown}
+
+
+# ------------------------------------------------------------------
 # POST /reset — Reset game session
 # ------------------------------------------------------------------
 

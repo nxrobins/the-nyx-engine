@@ -87,11 +87,31 @@ ceiling — same kernel slot, silent per-beat fallback. Dreams read the ledger.
 - Teeth: abandoned promises raise omen; Nemesis reads active promises for
   ironic targeting; Clotho gets THE LOOM REMEMBERS in stratified context.
 
-### P3 — The Scribe (LATER)
-Write-behind biography: drafts each lived epoch as a chapter in a life-voice
-discovered at the Fork, validated against the factual chronicle by the same Momus
-machinery. At death: final chapters + one review pass + typeset → a book that
-enters the Tapestry as a library a descendant can read in-world.
+### P3 — The Scribe (SHIPPED)
+Write-behind biography. Each lived epoch is drafted as a chapter, behind the
+same curtain Morpheus works, in a **life-voice discovered at the Fork**
+(deterministic: hamartia picks the register, the dominant vector garnishes —
+each incarnation reads like a different author). At death the Bookbinder
+drafts the final chapter (the Severing, closing on the epitaph), binds the
+manifest, and publishes atomically to `books/` — the Tapestry is a library.
+
+- Contracts: `app/schemas/book.py` (Chapter — `based_on_turn` may not precede
+  its own events; BookManifest; ScribeSnapshot)
+- Voice: `hamartia_engine.get_life_voice` (set at init for chosen flaws, at
+  the Fork for Unformed)
+- The gate: `app/services/scribe_gate.py` (anachronisms, anti-mysticism,
+  named grounding — a biography that names nobody is a fraud)
+- The agent: `app/agents/scribe.py` (mock = faithful deterministic
+  condensation; real = one call + one informed retry; None = shorter book)
+- The binder: `app/services/bookbinder.py` (atomic publish, fail-loud shelf,
+  slug-guarded loads — no path traversal by book title)
+- Lifecycle: fired at every RESOLUTION beside the Re-Outliner; harvested at
+  turn-top; at death the pending chapter is awaited, the Severing drafted,
+  the book bound — and a binding failure costs the book, never the death.
+- Surface: `GET /library` (the shelf), `GET /library/{book_id}` (one life,
+  as markdown); `TurnResult.book_id` on the death result.
+- Future flourish (P4-adjacent): the ancestor's book existing diegetically
+  in the next incarnation's world.
 
 ### P4 — The Assayer (LATER)
 Post-life evaluation retargeted from "good prose" to "good *life*" (clock
