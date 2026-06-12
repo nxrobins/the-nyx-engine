@@ -21,8 +21,10 @@
 		repairWitness,
 	} from '$lib/stores/engine';
 	import { renderProse } from '$lib/utils/markdown';
+	import { plateManifest, scenePlateUrl } from '$lib/stores/plates';
 	import Console from './Console.svelte';
 	import DeathRite from './DeathRite.svelte';
+	import Marginalia from './Marginalia.svelte';
 
 	/** Current paragraph index within the latest turn's prose */
 	let visibleIndex = $state(0);
@@ -65,16 +67,24 @@
 			visibleIndex++;
 		}
 	}
+
+	/** The Ink: milestone image wins while present; otherwise the scene's
+	    plate; '' (today's bare ground) when the world has no art (INK-E6). */
+	let bgUrl = $derived($backgroundImage || scenePlateUrl($gameState, $plateManifest));
 </script>
 
 <main class="relative flex flex-col h-full overflow-hidden">
-	<!-- BFL Background Image -->
-	{#if $backgroundImage}
+	<!-- The ground: milestone image or the world's scene plate (INK-E6 —
+	     the guard is bgUrl, never $backgroundImage alone) -->
+	{#if bgUrl}
 		<div
 			class="bfl-background visible"
-			style="background-image: url('{$backgroundImage}');"
+			style="background-image: url('{bgUrl}');"
 		></div>
 	{/if}
+
+	<!-- Marginalia: present-NPC portraits (decorative, ≥1100px) -->
+	<Marginalia />
 
 	<!-- Scroll Area -->
 	<div class="flex-1 overflow-y-auto relative z-10">
