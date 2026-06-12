@@ -212,6 +212,7 @@ export interface ThreadState {
 	current_dream: string; // Hypnos dream text (consumed by next Clotho call)
 	craft_notes: string[];
 	ledger: Promise[]; // Morpheus P2: the Promise Ledger
+	life_voice: string; // Scribe P3: the voice this life's book is written in
 	recent_traces: DeliberationTrace[];
 	legacy_echoes: LegacyEcho[];
 }
@@ -227,6 +228,19 @@ export interface TurnResult {
 	turn_number: number;
 	image_url: string;
 	ui_choices: string[];
+	book_id: string; // Scribe P3: set on death when the life was bound
+}
+
+/** Scribe P3: a bound life on the library shelf (GET /library) */
+export interface LibraryBook {
+	book_id: string;
+	title: string;
+	player_name: string;
+	hamartia: string;
+	settlement: string;
+	epitaph: string;
+	died_turn: number;
+	chapter_count: number;
 }
 
 export interface HypnosEvent {
