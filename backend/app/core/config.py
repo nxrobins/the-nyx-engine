@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     hypnos_model: str = "anthropic/claude-haiku-4-5-20251001"
     chronicler_model: str = "anthropic/claude-haiku-4-5-20251001"
     morpheus_model: str = "anthropic/claude-sonnet-4-20250514"
+    scribe_model: str = "anthropic/claude-sonnet-4-20250514"
 
     # BFL (Black Forest Labs) — Image generation
     bfl_api_key: str = ""
@@ -38,6 +39,9 @@ class Settings(BaseSettings):
 
     # World cartridges — empty = backend/worlds/ (module-relative, NC-3)
     worlds_dir: str = ""
+
+    # Bound lives — empty = backend/books/ (module-relative, NC-3)
+    books_dir: str = ""
 
     # ChromaDB — empty = ephemeral in-memory
     chromadb_path: str = ""

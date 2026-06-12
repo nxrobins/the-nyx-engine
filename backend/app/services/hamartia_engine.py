@@ -74,6 +74,58 @@ def get_hamartia_profile(hamartia: str) -> HamartiaProfile | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Life-Voice (Scribe P3) — discovered at the Fork, deterministic
+# ---------------------------------------------------------------------------
+
+_VOICE_BY_FLAW: dict[str, str] = {
+    "hubris": (
+        "Long, confident clauses that occasionally outrun their footing; the "
+        "narrator explains a little too much, certain the reader needs him."
+    ),
+    "wrath": (
+        "Short, percussive sentences. Heat and iron imagery. Anger arrives in "
+        "the prose before understanding does."
+    ),
+    "vainglory": (
+        "The narrator performs — aware of an audience, polishing even the "
+        "shameful moments until they shine brightest."
+    ),
+    "cowardice": (
+        "Hedged, parenthetical, retreating syntax; the narrator notices every "
+        "exit in every room, including the ones in sentences."
+    ),
+}
+
+_VOICE_GARNISH: dict[str, str] = {
+    "metis": "The eye lingers on mechanisms — how things work, how people can be worked.",
+    "bia": "The body is always present: weight, grip, the distance to the nearest thing that breaks.",
+    "kleos": "Names are repeated like coins counted; being seen matters more than being safe.",
+    "aidos": "The telling withholds; the most important things sit just outside the sentences.",
+}
+
+
+def get_life_voice(hamartia: str, state: ThreadState) -> str:
+    """Derive the voice this life's book will be written in.
+
+    Deterministic — flaw picks the register, the dominant soul vector adds
+    a garnish. Discovered once at the Fork (turn 10), used by the Scribe
+    for every chapter, so each incarnation reads like a different author.
+    """
+    lowered = hamartia.lower()
+    base = next(
+        (voice for key, voice in _VOICE_BY_FLAW.items() if key in lowered),
+        "Plain, weathered, declarative — a life told by someone who survived it.",
+    )
+    vectors = state.soul_ledger.vectors
+    pairs = [
+        ("metis", vectors.metis), ("bia", vectors.bia),
+        ("kleos", vectors.kleos), ("aidos", vectors.aidos),
+    ]
+    dominant, _ = max(pairs, key=lambda x: x[1])
+    return f"{base} {_VOICE_GARNISH.get(dominant, '')}".strip()
+
+
 def determine_hamartia(state: ThreadState) -> str | None:
     """Deterministic hamartia assignment based on dominant soul vector.
 

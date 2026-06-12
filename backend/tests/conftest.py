@@ -36,18 +36,20 @@ from app.schemas.state import (
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True)
-def _hermetic_settings(monkeypatch):
+def _hermetic_settings(monkeypatch, tmp_path):
     """Force mock mode + zero simulated latency for every test."""
     for field in (
         "clotho_model", "lachesis_model", "nemesis_model",
         "eris_model", "hypnos_model", "chronicler_model",
-        "morpheus_model",
+        "morpheus_model", "scribe_model",
     ):
         monkeypatch.setattr(settings, field, "mock")
     monkeypatch.setattr(settings, "bfl_api_key", "")
     monkeypatch.setattr(settings, "database_url", "")
     monkeypatch.setattr(settings, "sqlite_store_path", "")
     monkeypatch.setattr(settings, "mock_latency_scale", 0.0)
+    # Bound books land in an isolated per-test dir, never the repo.
+    monkeypatch.setattr(settings, "books_dir", str(tmp_path / "books"))
 
 
 # ---------------------------------------------------------------------------
