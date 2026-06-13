@@ -4,30 +4,39 @@
 
 Generates the canonical image set for one world — settlement, home, faction,
 one portrait per family NPC — from **cartridge facts only**: names, kinds,
-conditions, traits. Nothing is invented; plates depict what the cartridge
-declares (the anti-hallucination rule, applied to pixels). The sumi-e style
-wrap comes from ``generate_image`` exactly as it does for milestones.
+conditions, traits, and a shared world-mood clause drawn from the cartridge's
+visual `world_facts` (the place's look, not the narrative situation). Nothing is invented; plates depict what
+the cartridge declares (the anti-hallucination rule, applied to pixels). The
+sumi-e style wrap comes from ``generate_image`` exactly as for milestones.
 
 Plan/execute split:
   - ``plan_plates(cartridge)`` is pure and deterministic — the tested
     producer/consumer contract (every filename matches ``plates._PLATE_RE``;
-    NPC stems are canon npc_ids verbatim).
-  - ``execute(jobs)`` calls BFL with ``output_format="png"`` and downloads
-    the result bytes IMMEDIATELY (BFL URLs expire), writing atomically
-    (temp + os.replace) to STAGING ONLY: ``worlds/art/_staging/{world_id}/``.
-    Promotion into the live ``worlds/art/{world_id}/`` is the human curation
-    step, by design — the Atelier proposes, the curator canonizes.
+    NPC stems are canon npc_ids verbatim; per-plate seeds are stable).
+  - ``execute(jobs)`` calls BFL with ``output_format="jpeg"`` and the per-plate
+    seed, downloads the bytes immediately (BFL URLs expire), and writes
+    atomically to STAGING ONLY: ``worlds/art/_staging/{world_id}/``. Promotion
+    into the live ``worlds/art/{world_id}/`` is the human curation step.
 
-The dumb limits: ≤ 20 jobs/world (refuse, exit 2, before any API call);
-30 s download timeout; streamed read aborts at 8 MB; a download-only failure
-never re-pays for generation (≤ 2 same-URL retries, then the job fails);
-any failed job → exit 1. ``--dry-run`` prints the plan and calls nothing.
+The dumb limits (the Constraints & Fallbacks matrix, made executable):
+  - jpeg, because BFL cannot produce webp; small + directly promotable.
+  - ≤ MAX_JOBS jobs/world (refuse, exit 2, before any API call).
+  - prompts bounded: mood ≤ MAX_MOOD_CHARS, subject ≤ MAX_PROMPT_CHARS so the
+    final wrapped prompt stays ≤ 480 chars (AT-E3) — style + subject lead.
+  - dimensions are BFL's fixed 1024×768, never cartridge-derived (AT-E6).
+  - 30 s download timeout; streamed read aborts at 8 MB; ≤ 2 same-URL retries,
+    generation never re-paid.
+  - **a downloaded plate over the 512 KB serve cap FAILS the job and is not
+    staged** (AT-E2) — "promotable" means "serveable"; the curator never
+    promotes an unservable plate. Moderation/terminal BFL failures fail fast
+    (AT-E1, in ``generate_image``).
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import logging
 import os
 import sys
@@ -45,53 +54,87 @@ logger = logging.getLogger("nyx.atelier")
 
 MAX_JOBS = 20                       # 3 fixed + ≤12 family + headroom
 DOWNLOAD_TIMEOUT = 30.0             # seconds, per attempt
-MAX_DOWNLOAD_BYTES = 8 * 1024 * 1024  # staging cap (raw pre-curation PNG)
-DOWNLOAD_RETRIES = 2                # same-URL retries; generation is never re-paid
-SERVE_CAP_BYTES = 524_288           # the live 512 KB law — warn the curator early
+MAX_DOWNLOAD_BYTES = 8 * 1024 * 1024  # staging download RAM guard
+DOWNLOAD_RETRIES = 2               # same-URL retries; generation is never re-paid
+SERVE_CAP_BYTES = 524_288           # the live 512 KB serve law (AT-E2: enforced, not warned)
+
+MAX_MOOD_CHARS = 140                # AT-E3: the shared world-mood clause
+# AT-E3: subject cap so prefix + ", " + subject + ", " + suffix ≤ 480 chars.
+_WRAP_OVERHEAD = len(settings.bfl_style_prefix) + len(settings.bfl_style_suffix) + 4
+MAX_PROMPT_CHARS = max(80, 480 - _WRAP_OVERHEAD)
 
 
 @dataclass(frozen=True)
 class PlateJob:
-    """One plate to paint: a lawful filename and a canon-fact prompt."""
+    """One plate to paint: a lawful filename, a canon-fact prompt, a stable seed."""
     filename: str
     prompt: str
+    seed: int
 
 
 # ---------------------------------------------------------------------------
 # Plan (pure — the tested contract)
 # ---------------------------------------------------------------------------
 
+def _bounded(text: str, limit: int) -> str:
+    """Collapse whitespace and truncate to ≤ limit chars at a word boundary."""
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    sp = cut.rfind(" ")
+    return (cut[:sp] if sp > 0 else cut).rstrip(" ,;.")
+
+
+def _world_mood(cartridge: WorldCartridge) -> str:
+    """A short shared mood clause from the world's *visual* facts — the place's
+    look (geography, materials, light), not the narrative `active_situation`
+    (which is the player's tension, not an establishing image). Threads through
+    the world-scale plates so they cohere. Bounded (AT-E3)."""
+    facts = [f.strip().rstrip(".") for f in cartridge.world_facts[:2] if f.strip()]
+    return _bounded("; ".join(facts), MAX_MOOD_CHARS)
+
+
+def _seed(world_id: str, stem: str) -> int:
+    """Deterministic per-plate seed (32-bit, in BFL's range) — reproducible,
+    varied across a world's plates."""
+    return int(hashlib.sha256(f"{world_id}:{stem}".encode("utf-8")).hexdigest()[:8], 16)
+
+
 def plan_plates(cartridge: WorldCartridge, only: set[str] | None = None) -> list[PlateJob]:
     """Compose the plate jobs for a cartridge. Pure, deterministic.
 
-    Prompts are assembled from cartridge fields verbatim — no invention.
-    Raises ValueError if the plan exceeds MAX_JOBS (refusal happens before
-    any API call).
+    Prompts are assembled from cartridge fields verbatim — no invention — and
+    bounded (AT-E3). Raises ValueError if the plan exceeds MAX_JOBS (refusal
+    before any API call).
     """
-    jobs: list[PlateJob] = []
-
-    jobs.append(PlateJob(
-        filename="settlement.png",
-        prompt=(
-            f"distant view of {cartridge.settlement}, "
-            f"a {cartridge.settlement_type} in {cartridge.region}"
-        ),
-    ))
+    wid = cartridge.world_id
+    mood = _world_mood(cartridge)
     home = cartridge.home_location
-    jobs.append(PlateJob(
-        filename="home.png",
-        prompt=f"{home.name}, a {home.kind}; {home.condition}",
-    ))
     faction = cartridge.faction
-    jobs.append(PlateJob(
-        filename="faction.png",
-        prompt=f"the presence of {faction.name}, {faction.stance}; {faction.notes}",
-    ))
+
+    raw: list[tuple[str, str]] = [
+        ("settlement",
+         f"distant view of {cartridge.settlement}, a {cartridge.settlement_type} "
+         f"in {cartridge.region}; {mood}"),
+        ("home",
+         f"interior of {home.name}, a {home.kind} in {cartridge.settlement}; "
+         f"{home.condition}; {mood}"),
+        ("faction",
+         f"the presence of {faction.name} in {cartridge.settlement}, "
+         f"{faction.stance}; {faction.notes}; {mood}"),
+    ]
     for npc in cartridge.family:
-        jobs.append(PlateJob(
-            filename=f"npc_{slugify(npc.name)}.png",
-            prompt=f"portrait of {npc.name}, {npc.role}, {npc.trait}",
+        raw.append((
+            f"npc_{slugify(npc.name)}",
+            f"portrait of {npc.name}, {npc.role} of {cartridge.settlement}; {npc.trait}",
         ))
+
+    jobs = [
+        PlateJob(filename=f"{stem}.jpg", prompt=_bounded(prompt, MAX_PROMPT_CHARS),
+                 seed=_seed(wid, stem))
+        for stem, prompt in raw
+    ]
 
     if only:
         jobs = [j for j in jobs if j.filename.rsplit(".", 1)[0] in only]
@@ -155,16 +198,22 @@ def _write_atomic(path: Path, data: bytes) -> None:
 
 
 async def execute(jobs: list[PlateJob], world_id: str, api_key: str) -> int:
-    """Paint every job into staging. Returns the number of FAILED jobs."""
+    """Paint every job into staging. Returns the number of FAILED jobs.
+
+    AT-E2: a plate over the serve cap fails the job and is NOT staged — the
+    curator never sees, and so never promotes, an unservable plate.
+    """
     staging = _staging_dir(world_id)
     failed = 0
 
     async with httpx.AsyncClient() as client:
         for job in jobs:
             print(f"  painting {job.filename} ...")
-            url = await generate_image(job.prompt, api_key=api_key, output_format="png")
+            url = await generate_image(
+                job.prompt, api_key=api_key, output_format="jpeg", seed=job.seed
+            )
             if not url:
-                logger.warning(f"{job.filename}: generation failed")
+                logger.warning(f"{job.filename}: generation failed (moderation/error/timeout)")
                 failed += 1
                 continue
 
@@ -174,13 +223,17 @@ async def execute(jobs: list[PlateJob], world_id: str, api_key: str) -> int:
                 failed += 1
                 continue
 
+            if len(data) > SERVE_CAP_BYTES:  # AT-E2: never stage what serve would 413
+                logger.warning(
+                    f"{job.filename}: {len(data)} B > {SERVE_CAP_BYTES} serve cap — "
+                    f"rejected, not staged (regenerate)"
+                )
+                failed += 1
+                continue
+
             target = staging / job.filename
             _write_atomic(target, data)
-            note = ""
-            if len(data) > SERVE_CAP_BYTES:
-                note = f"  [!] {len(data)} B exceeds the 512 KB serve law — convert to webp before promoting"
-                logger.warning(f"{job.filename}: {note.strip()}")
-            print(f"  staged  {target}{note}")
+            print(f"  staged  {target} ({len(data)} B)")
 
     return failed
 
@@ -221,7 +274,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"The Atelier — {len(jobs)} plate(s) for '{args.world}':")
     for job in jobs:
-        print(f"  {job.filename:32s} {job.prompt}")
+        print(f"  {job.filename:28s} [seed {job.seed}] {job.prompt}")
 
     if args.dry_run:
         print("dry run — nothing painted.")

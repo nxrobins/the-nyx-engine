@@ -29,6 +29,11 @@ Thumbs.db
 backend/books/
 backend/assays/
 
+# Atelier staging — intermediate plate output. Curated plates under
+# worlds/art/{world}/ ARE committed (canon); staging never is. Extension-
+# agnostic, so it holds for jpeg (the old *.png rule only caught png).
+backend/worlds/art/_staging/
+
 # Test artifacts
 *.png
 .playwright-mcp/

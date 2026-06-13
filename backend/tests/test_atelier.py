@@ -1,9 +1,9 @@
 """The Atelier — the producer side of the plate law.
 
 The load-bearing contract: every filename plan_plates emits must satisfy
-the consumer's _PLATE_RE, and NPC stems must equal the canon npc_ids that
-bootstrap_canon will mint for the same cartridge. Execution is tested with
-mocked generation/download — staging-only, atomic, failure-counted.
+the consumer's _PLATE_RE, NPC stems must equal the canon npc_ids, and seeds
+must be deterministic-per-plate. Execution is tested with mocked generation/
+download — staging-only, atomic, failure-counted, oversize-rejected (AT-E2).
 """
 
 from __future__ import annotations
@@ -39,10 +39,19 @@ class TestPlan:
         for cart in carts:
             for job in plan_plates(cart):
                 assert _PLATE_RE.fullmatch(job.filename), (cart.world_id, job.filename)
+                assert job.filename.endswith(".jpg")  # BFL can't do webp → jpeg
 
     def test_plan_is_deterministic(self):
         cart = _builtin_cartridges()[0]
         assert plan_plates(cart) == plan_plates(cart)
+
+    def test_seeds_are_deterministic_and_per_plate(self):
+        cart = _builtin_cartridges()[0]
+        a = {j.filename: j.seed for j in plan_plates(cart)}
+        b = {j.filename: j.seed for j in plan_plates(cart)}
+        assert a == b  # same world → identical seeds (reproducible)
+        assert len(set(a.values())) == len(a)  # varied across plates
+        assert all(0 <= s < 2**32 for s in a.values())  # 32-bit, BFL's range
 
     def test_npc_stems_are_canon_npc_ids_verbatim(self):
         for cart in _builtin_cartridges():
@@ -67,10 +76,23 @@ class TestPlan:
             assert npc.name in jobs[stem].prompt
             assert npc.trait in jobs[stem].prompt
 
+    def test_prompts_carry_the_world_mood(self):
+        cart = _builtin_cartridges()[0]
+        mood = atelier._world_mood(cart)
+        assert mood  # builtins have an active_situation
+        jobs = {j.filename.rsplit(".", 1)[0]: j for j in plan_plates(cart)}
+        # the shared mood threads through the world-scale plates
+        assert mood[:24] in jobs["settlement"].prompt
+
+    def test_prompts_are_length_bounded(self):
+        for cart in _builtin_cartridges():
+            for job in plan_plates(cart):
+                assert len(job.prompt) <= atelier.MAX_PROMPT_CHARS
+
     def test_only_filters_by_stem(self):
         cart = _builtin_cartridges()[0]
         jobs = plan_plates(cart, only={"settlement", "home"})
-        assert sorted(j.filename for j in jobs) == ["home.png", "settlement.png"]
+        assert sorted(j.filename for j in jobs) == ["home.jpg", "settlement.jpg"]
 
     def test_job_cap_refuses_before_any_call(self, monkeypatch):
         monkeypatch.setattr(atelier, "MAX_JOBS", 2)
@@ -95,7 +117,7 @@ class TestFindCartridge:
 
 
 # ---------------------------------------------------------------------------
-# Execution — staging-only, atomic, failure-counted
+# Execution — staging-only, atomic, jpeg+seed, oversize-rejected
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
@@ -107,45 +129,48 @@ def staging(tmp_path, monkeypatch):
 
 class TestExecute:
     @pytest.mark.asyncio
-    async def test_stages_bytes_atomically(self, staging, monkeypatch):
-        async def fake_generate(prompt, api_key, model="x", output_format=None):
-            assert output_format == "png"  # the plate law allows png/webp only
-            return "https://bfl.example/result.png"
+    async def test_stages_jpeg_with_seed_atomically(self, staging, monkeypatch):
+        seeds: list[int] = []
+
+        async def fake_generate(prompt, api_key, model="x", output_format=None, seed=None):
+            assert output_format == "jpeg"  # BFL can't do webp; jpeg is directly promotable
+            seeds.append(seed)
+            return "https://bfl.example/result.jpg"
 
         async def fake_download(client, url):
-            return b"\x89PNG-bytes"
+            return b"\xff\xd8\xff-jpeg-bytes"
 
         monkeypatch.setattr(atelier, "generate_image", fake_generate)
         monkeypatch.setattr(atelier, "_download", fake_download)
 
-        jobs = [PlateJob("settlement.png", "p"), PlateJob("npc_mara.png", "q")]
+        jobs = [PlateJob("settlement.jpg", "p", seed=4242), PlateJob("npc_mara.jpg", "q", seed=99)]
         failed = await execute(jobs, "w-test", api_key="k")
 
         assert failed == 0
+        assert seeds == [4242, 99]  # each plate's seed reaches BFL
         world_staging = staging / "w-test"
-        assert (world_staging / "settlement.png").read_bytes() == b"\x89PNG-bytes"
-        assert (world_staging / "npc_mara.png").exists()
+        assert (world_staging / "settlement.jpg").read_bytes() == b"\xff\xd8\xff-jpeg-bytes"
+        assert (world_staging / "npc_mara.jpg").exists()
         assert list(world_staging.glob("*.tmp")) == []  # atomic — no temp left
-        # staging only: the live art dir was never created
-        assert not (staging.parent / "w-test").exists()
+        assert not (staging.parent / "w-test").exists()  # staging only; live dir untouched
 
     @pytest.mark.asyncio
     async def test_generation_failure_counts_and_writes_nothing(self, staging, monkeypatch):
-        async def dead_generate(prompt, api_key, model="x", output_format=None):
-            return ""
+        async def dead_generate(prompt, api_key, model="x", output_format=None, seed=None):
+            return ""  # moderation/error/timeout already collapsed to "" in generate_image
 
         monkeypatch.setattr(atelier, "generate_image", dead_generate)
-        failed = await execute([PlateJob("settlement.png", "p")], "w-test", api_key="k")
+        failed = await execute([PlateJob("settlement.jpg", "p", seed=1)], "w-test", api_key="k")
         assert failed == 1
-        assert not (staging / "w-test" / "settlement.png").exists()
+        assert not (staging / "w-test" / "settlement.jpg").exists()
 
     @pytest.mark.asyncio
     async def test_download_failure_never_repays_generation(self, staging, monkeypatch):
         calls = {"gen": 0}
 
-        async def counting_generate(prompt, api_key, model="x", output_format=None):
+        async def counting_generate(prompt, api_key, model="x", output_format=None, seed=None):
             calls["gen"] += 1
-            return "https://bfl.example/result.png"
+            return "https://bfl.example/result.jpg"
 
         async def dead_download(client, url):
             return None
@@ -153,14 +178,16 @@ class TestExecute:
         monkeypatch.setattr(atelier, "generate_image", counting_generate)
         monkeypatch.setattr(atelier, "_download", dead_download)
 
-        failed = await execute([PlateJob("settlement.png", "p")], "w-test", api_key="k")
+        failed = await execute([PlateJob("settlement.jpg", "p", seed=1)], "w-test", api_key="k")
         assert failed == 1
         assert calls["gen"] == 1  # the paid call happened exactly once
 
     @pytest.mark.asyncio
-    async def test_oversize_staged_with_warning_not_dropped(self, staging, monkeypatch, caplog):
-        async def fake_generate(prompt, api_key, model="x", output_format=None):
-            return "https://bfl.example/result.png"
+    async def test_oversize_fails_and_is_not_staged(self, staging, monkeypatch, caplog):
+        # AT-E2: a plate over the serve cap fails the job and is NOT staged —
+        # the curator never promotes something the serve gate would 413.
+        async def fake_generate(prompt, api_key, model="x", output_format=None, seed=None):
+            return "https://bfl.example/result.jpg"
 
         async def big_download(client, url):
             return b"\x00" * (atelier.SERVE_CAP_BYTES + 1)
@@ -169,14 +196,14 @@ class TestExecute:
         monkeypatch.setattr(atelier, "_download", big_download)
 
         with caplog.at_level("WARNING", logger="nyx.atelier"):
-            failed = await execute([PlateJob("settlement.png", "p")], "w-test", api_key="k")
+            failed = await execute([PlateJob("settlement.jpg", "p", seed=1)], "w-test", api_key="k")
 
-        assert failed == 0  # staging accepts it — the curator converts
-        assert (staging / "w-test" / "settlement.png").exists()
-        assert any("webp" in r.message for r in caplog.records)
+        assert failed == 1
+        assert not (staging / "w-test" / "settlement.jpg").exists()
+        assert any("serve cap" in r.message for r in caplog.records)
 
     def test_write_atomic_overwrites_idempotently(self, tmp_path):
-        target = tmp_path / "a" / "settlement.png"
+        target = tmp_path / "a" / "settlement.jpg"
         atelier._write_atomic(target, b"one")
         atelier._write_atomic(target, b"two")
         assert target.read_bytes() == b"two"
@@ -197,7 +224,8 @@ class TestCli:
         code = main(["--world", world_id, "--dry-run"])
         assert code == 0
         out = capsys.readouterr().out
-        assert "settlement.png" in out
+        assert "settlement.jpg" in out
+        assert "seed" in out
         assert "dry run" in out
 
     def test_unknown_world_refuses_exit_2(self):

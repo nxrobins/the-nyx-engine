@@ -32,7 +32,10 @@ logger = logging.getLogger("nyx.plates")
 
 # The filename law. NPC stems are canon npc_ids verbatim (canon._slug emits
 # [a-z0-9_], so ``npc_{slug}`` round-trips with zero frontend slugging).
-_PLATE_RE = re.compile(r"^(settlement|home|faction|npc_[a-z0-9_]{1,80})\.(png|webp)$")
+# AT-E4: the extension group is non-executable RASTER only — never svg/html or
+# any browser-executable format. jpeg is first-class (small lossy backgrounds
+# are its purpose); the Atelier outputs jpeg because BFL cannot produce webp.
+_PLATE_RE = re.compile(r"^(settlement|home|faction|npc_[a-z0-9_]{1,80})\.(png|webp|jpe?g)$")
 
 # Mirrors the registry's world_id law (cartridge.py pattern).
 _WORLD_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{2,62}$")
@@ -40,7 +43,12 @@ _WORLD_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{2,62}$")
 MAX_PLATE_BYTES = 524_288  # 512 KB — enforced at scan AND serve
 MAX_DIR_ENTRIES = 64       # name-sorted; entries beyond are dropped, one WARNING
 
-_MEDIA_TYPES = {".png": "image/png", ".webp": "image/webp"}
+_MEDIA_TYPES = {
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+}
 
 
 def _art_root(world_id: str) -> Path:
