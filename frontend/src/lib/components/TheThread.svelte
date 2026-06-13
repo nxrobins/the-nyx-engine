@@ -6,6 +6,7 @@
 -->
 <script lang="ts">
 	import { fade } from 'svelte/transition';
+	import { get } from 'svelte/store';
 	import {
 		proseHistory,
 		streamingProse,
@@ -19,6 +20,7 @@
 		dismissDream,
 		deliberationTrace,
 		repairWitness,
+		flinchToken,
 	} from '$lib/stores/engine';
 	import { renderProse } from '$lib/utils/markdown';
 	import { plateManifest, scenePlateUrl } from '$lib/stores/plates';
@@ -71,6 +73,22 @@
 	/** The Ink: milestone image wins while present; otherwise the scene's
 	    plate; '' (today's bare ground) when the world has no art (INK-E6). */
 	let bgUrl = $derived($backgroundImage || scenePlateUrl($gameState, $plateManifest));
+
+	/** The Tell: the committed prose flinches once at a charged threshold, then
+	    settles. `lastFlinchSeq` starts at the LIVE token seq (VS-E13) — a fresh
+	    mount can never replay a stale tell, only a strictly-newer bump. The
+	    flinch arms only on the first paragraph, off-terminal (sever owns death,
+	    VS-E14), and disarms on animationend. */
+	let lastFlinchSeq = $state(get(flinchToken).seq);
+	let activeFlinch = $derived.by(() => {
+		const t = $flinchToken;
+		if ($isTerminal || $isProcessing) return null;
+		if (t.seq === 0 || t.seq === lastFlinchSeq || visibleIndex !== 0) return null;
+		return t;
+	});
+	function consumeFlinch() {
+		lastFlinchSeq = $flinchToken.seq;
+	}
 
 	/** While Clotho streams, surface only the FIRST paragraph — the rest
 	    arrives behind the curtain. The paginated read then opens on the
@@ -146,15 +164,30 @@
 			     the affordance, the whole breath is the target. -->
 			{#if paragraphs.length > 0 && !$isProcessing}
 				{#key visibleIndex}
+					<!-- The Tell: the flinch animates THIS wrapper (transform/
+					     opacity/filter), never the resting .prose-nyx box —
+					     geometry and the click target stay fixed (VS-E10). -->
 					<div
-						class="prose-nyx mb-6 max-w-2xl mx-auto"
-						class:prose-advance={visibleIndex < paragraphs.length - 1}
+						class="prose-flinch-wrap mb-6 max-w-2xl mx-auto"
+						class:vs-flinch={activeFlinch}
+						class:vs-nemesis={activeFlinch?.agent === 'nemesis'}
+						class:vs-eris={activeFlinch?.agent === 'eris'}
+						class:vs-atropos={activeFlinch?.agent === 'atropos'}
+						class:vs-momus={activeFlinch?.agent === 'momus'}
+						class:vs-sever={$isTerminal}
+						style="--vs-flinch-intensity: {activeFlinch?.intensity ?? 0};"
 						in:fade={{ duration: 600, delay: 200 }}
 						out:fade={{ duration: 400 }}
-						onclick={advanceText}
-						role="presentation"
+						onanimationend={consumeFlinch}
 					>
-						{@html renderProse(paragraphs[visibleIndex] ?? '')}
+						<div
+							class="prose-nyx"
+							class:prose-advance={visibleIndex < paragraphs.length - 1}
+							onclick={advanceText}
+							role="presentation"
+						>
+							{@html renderProse(paragraphs[visibleIndex] ?? '')}
+						</div>
 					</div>
 				{/key}
 			{/if}

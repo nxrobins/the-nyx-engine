@@ -1102,3 +1102,73 @@ hr.nyx-divider {
 	object-fit: cover;
 	display: block;
 }
+
+/* ════════════════════════════════════════════════════════════════
+   THE FLINCH — the prose's one-shot tell at a charged threshold
+
+   Animates the .prose-flinch-wrap ONLY; the resting .prose-nyx box and
+   its click target never move (VS-E10). Every tell SETTLES to pristine
+   (the 100% keyframe is identity). The legibility floor holds at every
+   frame (VS-E9): opacity ≥ 0.6, blur ≤ 1.5px, translate ≤ 6px, rotate
+   ≤ 0.6°, scale ∈ [0.97,1.03]. Magnitude scales with --vs-flinch-
+   intensity (0..1); a missing/NaN var resolves to 0 = no motion. All
+   durations ≤ 1200ms.
+   ════════════════════════════════════════════════════════════════ */
+
+.prose-flinch-wrap.vs-flinch,
+.prose-flinch-wrap.vs-sever { will-change: transform, filter, opacity; }
+
+.prose-flinch-wrap.vs-nemesis { animation: vs-nemesis 900ms cubic-bezier(.2,.7,.3,1) 1 forwards; }
+.prose-flinch-wrap.vs-eris    { animation: vs-eris 1000ms ease-out 1 forwards; }
+.prose-flinch-wrap.vs-atropos { animation: vs-atropos 1100ms ease-out 1 forwards; }
+.prose-flinch-wrap.vs-momus   { animation: vs-momus 550ms linear 1 forwards; }
+
+/* Nemesis — the column recoils inward, then springs to full measure. */
+@keyframes vs-nemesis {
+	0%   { transform: scale(calc(1 - 0.015 * var(--vs-flinch-intensity, 0)));
+	       text-shadow: 0 0 calc(6px * var(--vs-flinch-intensity, 0)) rgba(220, 38, 38, 0.5); }
+	55%  { transform: scale(calc(1 + 0.004 * var(--vs-flinch-intensity, 0))); text-shadow: none; }
+	100% { transform: scale(1); text-shadow: none; }
+}
+
+/* Eris — a damped wobble that stills. */
+@keyframes vs-eris {
+	0%   { transform: translateX(calc(-6px * var(--vs-flinch-intensity, 0))) rotate(calc(-0.4deg * var(--vs-flinch-intensity, 0))); }
+	25%  { transform: translateX(calc(5px * var(--vs-flinch-intensity, 0))) rotate(calc(0.4deg * var(--vs-flinch-intensity, 0))); }
+	50%  { transform: translateX(calc(-3px * var(--vs-flinch-intensity, 0))) rotate(calc(-0.2deg * var(--vs-flinch-intensity, 0))); }
+	75%  { transform: translateX(calc(2px * var(--vs-flinch-intensity, 0))) rotate(0); }
+	100% { transform: translateX(0) rotate(0); }
+}
+
+/* Atropos / doom — the glyphs drain pale and thin, then ink back to clear. */
+@keyframes vs-atropos {
+	0%   { opacity: calc(1 - 0.4 * var(--vs-flinch-intensity, 0)); /* ≥ 0.6 */
+	       filter: blur(calc(1.5px * var(--vs-flinch-intensity, 0))); letter-spacing: 0.06em; }
+	100% { opacity: 1; filter: blur(0); letter-spacing: normal; }
+}
+
+/* Momus / invalid — the static flicker of a contradiction the weave rejects. */
+@keyframes vs-momus {
+	0%, 40%, 80%, 100% { opacity: 1; transform: translateY(0); }
+	20% { opacity: 0.6; transform: translateY(calc(-1px * var(--vs-flinch-intensity, 0))); }
+	60% { opacity: 0.7; transform: translateY(calc(1px * var(--vs-flinch-intensity, 0))); }
+}
+
+/* The Sever — death's one earned, non-settling deformation (VS-E2 exception);
+   gated on $isTerminal, veiled by the DeathRite overlay. */
+.prose-flinch-wrap.vs-sever { animation: vs-sever 1500ms ease-in 1 forwards; }
+@keyframes vs-sever {
+	0%   { opacity: 1; filter: blur(0); transform: translateY(0); clip-path: inset(0 0 0 0); }
+	100% { opacity: 0.15; filter: blur(2px); transform: translateY(10px) scale(0.99); clip-path: inset(0 0 40% 0); }
+}
+
+/* Reduced motion: no tell, no sever — the block enters via in:fade (or simply
+   appears) and rests pristine (VS-E16). Dedicated rule; the Ink's is scoped to
+   .ink-weather and never reaches the prose. */
+@media (prefers-reduced-motion: reduce) {
+	.prose-flinch-wrap.vs-nemesis,
+	.prose-flinch-wrap.vs-eris,
+	.prose-flinch-wrap.vs-atropos,
+	.prose-flinch-wrap.vs-momus,
+	.prose-flinch-wrap.vs-sever { animation: none !important; }
+}
