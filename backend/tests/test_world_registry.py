@@ -1,8 +1,8 @@
 """World Registry tests — loading resilience, selection determinism, fallbacks.
 
 Covers the Constraints & Fallbacks rules that live in the loader/selector:
-per-file isolation (NC-4), version/encoding/size fail-fast, builtins-always-in-pool
-(NC-7), sha256 determinism (NC-8), and the non-derived adversarial fixture (NC-13).
+per-file isolation (NC-4), version/encoding/size fail-fast, cartridge-supersedes-builtin
+(NC-7 amended), sha256 determinism (NC-8), and the non-derived adversarial fixture (NC-13).
 """
 
 from __future__ import annotations
@@ -106,18 +106,18 @@ class TestEmptyDirFallback:
 class TestAdversarialFixture:
     """NC-13: a non-derived cartridge must load and convert cleanly."""
 
-    def test_adversarial_loads_and_selects(self, worlds):
+    def test_adversarial_supersedes_the_builtin(self, worlds):
         directory, reg = worlds
         _write(directory, "bleakmoor.nyx-world.json", _adversarial_payload())
         reg.reload()
-        # 12 NPCs, unicode, two archetypes — pin run so the new world wins is
-        # not required; assert it is *reachable* by checking the candidate pool.
+        # NC-7 (amended): the cartridge supersedes its archetype's builtin —
+        # every "light" life gets Bléakmoor (the only light cartridge), never
+        # the Thornwell builtin it replaces.
         seeds = {
             reg.select("a light", player_id=f"p{n}", run_number=n)[1].settlement
             for n in range(20)
         }
-        assert "Bléakmoor" in seeds          # the adversarial world is selectable
-        assert "Thornwell" in seeds          # builtin still in the union (NC-7)
+        assert seeds == {"Bléakmoor"}        # cartridge wins; builtin not in pool
 
     def test_adversarial_npc_count_survives(self, worlds):
         directory, reg = worlds
@@ -145,13 +145,22 @@ class TestDeterminism:
     def test_different_run_may_differ(self, worlds):
         directory, reg = worlds
         _write(directory, "bleakmoor.nyx-world.json", _adversarial_payload())
+        # A second light cartridge — with two candidates for the archetype,
+        # different runs can pick different worlds (no builtin in the pool now).
+        second = _adversarial_payload()
+        second["world_id"] = "saltmere-9a1b"
+        second["settlement"] = "Saltmere"
+        second["archetypes"] = ["light"]
+        second["home_location"] = {**second["home_location"], "id": "saltmere_house"}
+        second["faction"] = {**second["faction"], "id": "saltmere_reeve"}
+        _write(directory, "saltmere.nyx-world.json", second)
         reg.reload()
         settlements = {
             reg.select("a light", player_id="abc", run_number=n)[1].settlement
             for n in range(30)
         }
-        # Both the builtin and the adversarial light-world should appear.
-        assert len(settlements) >= 2
+        assert settlements <= {"Bléakmoor", "Saltmere"}  # only the two cartridges
+        assert len(settlements) == 2                       # different runs differ
 
 
 class TestResilience:
