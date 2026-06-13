@@ -8,9 +8,11 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { gameState, mechanicToast } from '$lib/stores/engine';
-	import { deriveWeather } from '$lib/utils/weather';
+	import { deriveViewSpec } from '$lib/viewspec/viewspec';
 
-	let weather = $derived(deriveWeather($gameState));
+	// The room's steady state: the Ink, plus the dominant soul vector's grammar
+	// and the lingering memory of the last intervention (The Tell, Phase B).
+	let ambient = $derived(deriveViewSpec($gameState).ambient);
 
 	/** One-shot strike ripple — keyed remount per Nemesis/Eris strike.
 	    Increments only on the false→true toast edge (never on clear, never
@@ -35,8 +37,11 @@
 
 <div
 	class="ink-weather"
+	data-soul={ambient.soulVector}
+	class:nemesis-tint={ambient.lastIntervention === 'nemesis'}
+	class:eris-tint={ambient.lastIntervention === 'eris'}
 	aria-hidden="true"
-	style="--ink-turbulence: {weather.turbulence}; --ink-doom: {weather.doom}; --ink-edge: {weather.edge}; --ink-tint: {weather.tint};"
+	style="--ink-turbulence: {ambient.turbulence}; --ink-doom: {ambient.doom}; --ink-edge: {ambient.edge}; --ink-tint: {ambient.tint}; --ink-soul-bias: {ambient.soulBias};"
 >
 	<!-- the pool: edge vignette, deepens with wounds / faction heat -->
 	<div class="ink-pool"></div>

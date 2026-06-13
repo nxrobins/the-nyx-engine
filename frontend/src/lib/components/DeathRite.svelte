@@ -35,6 +35,14 @@
 	let hamartia = $derived($gameState?.soul_ledger.hamartia ?? '');
 	let lifeVoice = $derived($gameState?.life_voice ?? '');
 
+	// The Tell: the epitaph cascades in, word by word. The per-word step
+	// shrinks with length so the last word always lands ≤ 2500ms, however
+	// long the Scribe's final line runs.
+	let epitaphWords = $derived(
+		($epitaph || 'A thread lost to silence.').split(/\s+/).filter(Boolean)
+	);
+	let epitaphStep = $derived(Math.min(70, 2500 / Math.max(epitaphWords.length, 1)));
+
 	const vectorRows: { key: 'metis' | 'bia' | 'kleos' | 'aidos'; label: string }[] = [
 		{ key: 'metis', label: 'CUNNING' },
 		{ key: 'bia', label: 'FORCE' },
@@ -56,7 +64,9 @@
 				<div class="death-rite-content" in:fade={{ duration: 700 }}>
 					<p class="death-rite-kicker">THE STONE READS</p>
 					<blockquote class="epitaph-card">
-						{$epitaph || 'A thread lost to silence.'}
+						{#each epitaphWords as word, i}<span
+								class="epitaph-word"
+								style="--d: {Math.round(i * epitaphStep)}ms">{word}</span>{' '}{/each}
 					</blockquote>
 				</div>
 			{:else}

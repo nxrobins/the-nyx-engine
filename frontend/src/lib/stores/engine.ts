@@ -21,6 +21,7 @@ import type {
 } from '$lib/types/engine';
 import { vestibuleState } from '$lib/stores/vestibule';
 import { clearPlates, loadPlates, plateManifest, scenePlateUrl } from '$lib/stores/plates';
+import { deriveFlinch, type FlinchAgent } from '$lib/viewspec/viewspec';
 
 // ── Session ID ──────────────────────────────────────────────────
 
@@ -95,6 +96,39 @@ export const uiChoices = writable<string[]>([]);
 /** Dream interlude text from Hypnos (displayed as full-screen overlay) */
 export const activeDream = writable<string>('');
 
+// ── The Tell: the flinch token ──────────────────────────────────
+//
+// A charged turn (Nemesis/Eris strike, doom advance, invalid action) emits a
+// one-shot token; TheThread's committed block reads it once to play an entrance
+// flinch that settles to pristine. Charged events surface at two times —
+// nemesis/eris/invalid on the `mechanic` event, atropos/doom only at `state` —
+// so detection runs in both, guarded to at most one flinch per committed turn.
+
+/** A one-shot prose-flinch instruction. seq is monotonic; a consumer fires only
+    on a strictly-newer seq, so a fresh mount can never replay a stale tell. */
+export interface FlinchToken {
+	agent: FlinchAgent;
+	intensity: number;
+	seq: number;
+}
+
+export const flinchToken = writable<FlinchToken>({ agent: 'none', intensity: 0, seq: 0 });
+
+/** Session memory the pure IR refuses to hold: the prior committed doom stage
+    (for the advance delta) and the once-per-turn emit guard. */
+let _prevDoomStage: number | null = null;
+let _flinchEmittedThisTurn = false;
+
+/** Emit a flinch if the derivation finds a charged agent. At most one per turn:
+    the `state` phase only fires if `mechanic` didn't already. */
+function emitFlinch(state: ThreadState | null, event: MechanicEvent | null): void {
+	if (_flinchEmittedThisTurn) return;
+	const f = deriveFlinch(state, event, _prevDoomStage);
+	if (f.agent === 'none') return;
+	_flinchEmittedThisTurn = true;
+	flinchToken.update((t) => ({ agent: f.agent, intensity: f.intensity, seq: t.seq + 1 }));
+}
+
 /** Dismiss the dream overlay — called by [ Awaken ] button */
 export function dismissDream(): void {
 	activeDream.set('');
@@ -144,6 +178,11 @@ export async function initGame(params: {
 	repairWitness.set(null);
 	isInitialized.set(true);
 
+	// The Tell: a new incarnation never inherits the prior life's tell (VS-E13).
+	flinchToken.set({ agent: 'none', intensity: 0, seq: 0 });
+	_prevDoomStage = null;
+	_flinchEmittedThisTurn = false;
+
 	// The Ink: fetch this world's plates — fire-and-forget, self-catching
 	// (INK-E5: never awaited in the init path, never throws into it).
 	void loadPlates(result.state?.world_id);
@@ -171,6 +210,7 @@ export async function submitAction(action: string): Promise<void> {
 	repairWitness.set(null);
 	uiChoices.set([]);
 	activeDream.set('');
+	_flinchEmittedThisTurn = false; // re-arm: one flinch per committed turn
 
 	const response = await fetch('/api/turn', {
 		method: 'POST',
@@ -258,6 +298,8 @@ function handleStreamEvent(data: Record<string, unknown>): void {
 			mechanicToast.set(payload);
 			// Auto-clear toast after 2.5s
 			setTimeout(() => mechanicToast.set(null), 2500);
+			// The Tell: nemesis/eris/invalid surface here, before prose.
+			emitFlinch(get(gameState), payload);
 			break;
 		}
 
@@ -303,6 +345,12 @@ function handleStreamEvent(data: Record<string, unknown>): void {
 
 			// The Ink: the milestone yields when the scene it crowned ends.
 			yieldMilestoneIfSceneChanged(payload);
+
+			// The Tell: atropos/doom-advance are only knowable now. Suppress on
+			// a terminal turn — the death sever owns the block (VS-E14). The
+			// committed prose mounts after this, so the token is ready in time.
+			if (!terminal) emitFlinch(payload, get(mechanicToast));
+			_prevDoomStage = payload.doom?.active ? (payload.doom.stage ?? 0) : null;
 
 			if (terminal) {
 				isTerminal.set(true);
@@ -381,6 +429,9 @@ export async function resetGame(): Promise<void> {
 	backgroundImage.set('');
 	_milestoneLocationId = null;
 	clearPlates();
+	flinchToken.set({ agent: 'none', intensity: 0, seq: 0 });
+	_prevDoomStage = null;
+	_flinchEmittedThisTurn = false;
 	isProcessing.set(false);
 	isTerminal.set(false);
 	deathReason.set('');
