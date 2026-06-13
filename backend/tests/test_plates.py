@@ -73,13 +73,16 @@ class TestManifest:
     def test_unlawful_names_skipped_with_reason(self, client, art_dir):
         _write(art_dir / "settlement.png")
         _write(art_dir / "notes.txt")
-        _write(art_dir / "scene.jpg")          # jpeg is not in the law
+        _write(art_dir / "scene.jpg")          # 'scene' is not a lawful stem
+        _write(art_dir / "settlement.svg")     # AT-E4: lawful stem, executable ext
         _write(art_dir / "NPC_Mara.png")       # uppercase
         _write(art_dir / "settlement (1).png")  # the curator's classic
         body = client.get(f"/api/plates/{WORLD}").json()
         assert list(body["plates"]) == ["settlement"]
         skipped = {s["file"] for s in body["skipped"]}
-        assert skipped == {"notes.txt", "scene.jpg", "NPC_Mara.png", "settlement (1).png"}
+        assert skipped == {
+            "notes.txt", "scene.jpg", "settlement.svg", "NPC_Mara.png", "settlement (1).png"
+        }
         assert all("name" in s["reason"] for s in body["skipped"])
 
     def test_oversize_skipped_with_webp_nudge(self, client, art_dir):
@@ -134,14 +137,26 @@ class TestServe:
         resp = client.get(f"/api/plates/{WORLD}/home.webp")
         assert resp.headers["content-type"] == "image/webp"
 
+    def test_jpeg_is_first_class(self, client, art_dir):
+        # jpeg is the Atelier's output format (BFL can't produce webp):
+        # listed in the manifest and served as image/jpeg.
+        _write(art_dir / "settlement.jpg")
+        body = client.get(f"/api/plates/{WORLD}").json()
+        assert body["plates"]["settlement"] == f"/api/plates/{WORLD}/settlement.jpg"
+        resp = client.get(f"/api/plates/{WORLD}/settlement.jpg")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "image/jpeg"
+
     def test_missing_plate_404(self, client):
         assert client.get(f"/api/plates/{WORLD}/settlement.png").status_code == 404
 
     def test_unlawful_names_404_before_filesystem(self, client, art_dir):
         _write(art_dir / "settlement.png")
         for bad in (
-            "settlement.jpg", "SETTLEMENT.png", "npc_..png",
-            "npc_M.png", "anything.png", "settlement.png.bak",
+            "SETTLEMENT.png", "npc_..png", "npc_M.png", "anything.png",
+            "settlement.png.bak",
+            # AT-E4: lawful stem, NON-raster / browser-executable extension → 404
+            "settlement.svg", "settlement.html", "settlement.gif",
         ):
             assert client.get(f"/api/plates/{WORLD}/{bad}").status_code == 404, bad
 

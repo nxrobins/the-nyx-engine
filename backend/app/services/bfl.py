@@ -26,12 +26,18 @@ _BFL_BASE_URL = "https://api.bfl.ai/v1"  # api.bfl.ml was retired
 _POLL_INTERVAL = 1.0  # seconds
 _POLL_TIMEOUT = 30.0  # seconds
 
+# AT-E1: terminal non-Ready statuses — fail fast, never poll one to the timeout.
+_TERMINAL_FAILURES = frozenset(
+    {"Error", "Failed", "Content Moderated", "Request Moderated", "Task not found", "Expired"}
+)
+
 
 async def generate_image(
     prompt: str,
     api_key: str,
     model: str = "flux-pro-1.1",
     output_format: str | None = None,
+    seed: int | None = None,
 ) -> str:
     """Generate an image via BFL Flux API.
 
@@ -39,9 +45,12 @@ async def generate_image(
         prompt: Scene description (will be wrapped in sumi-e style).
         api_key: BFL API key.
         model: BFL model name.
-        output_format: Optional "png"/"jpeg" — omitted when None (BFL's
-            default is jpeg; the Atelier passes "png" because the plate
-            law allows png/webp only).
+        output_format: Optional "jpeg"/"png" — omitted when None (BFL's
+            default; the Atelier passes "jpeg" for small, directly-promotable
+            plates). BFL does not support webp.
+        seed: Optional reproducibility seed — omitted when None (milestone
+            images stay seedless so they vary; the Atelier passes a per-plate
+            deterministic seed).
 
     Returns:
         Image URL string, or empty string on failure/timeout.
@@ -57,6 +66,8 @@ async def generate_image(
     }
     if output_format:
         payload["output_format"] = output_format
+    if seed is not None:  # AT-E5: None → omitted, so the milestone path is unchanged
+        payload["seed"] = seed
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         # Step 1: Submit generation request
@@ -97,8 +108,8 @@ async def generate_image(
                     url = data.get("result", {}).get("sample", "")
                     logger.info(f"BFL image ready: {url[:80]}...")
                     return url
-                elif status in ("Error", "Failed"):
-                    logger.error(f"BFL generation failed: {data}")
+                elif status in _TERMINAL_FAILURES:
+                    logger.error(f"BFL terminal status {status!r}: {data}")
                     return ""
                 # Otherwise keep polling ("Pending", "Processing")
             except Exception as e:
