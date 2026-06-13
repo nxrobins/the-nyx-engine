@@ -76,6 +76,15 @@ class TestPlan:
             assert npc.name in jobs[stem].prompt
             assert npc.trait in jobs[stem].prompt
 
+    def test_people_descriptor_in_portraits_and_factions(self):
+        # Art direction: the people of the Age of Ash are Black/Brown — applied
+        # to every portrait and faction crowd, and never truncated by the cap.
+        for cart in _builtin_cartridges():
+            for job in plan_plates(cart):
+                stem = job.filename.rsplit(".", 1)[0]
+                if stem.startswith("npc_") or stem == "faction":
+                    assert atelier.PEOPLE_DESCRIPTOR in job.prompt, job.filename
+
     def test_prompts_carry_the_world_mood(self):
         cart = _builtin_cartridges()[0]
         mood = atelier._world_mood(cart)

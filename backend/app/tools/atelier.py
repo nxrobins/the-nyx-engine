@@ -58,6 +58,12 @@ MAX_DOWNLOAD_BYTES = 8 * 1024 * 1024  # staging download RAM guard
 DOWNLOAD_RETRIES = 2               # same-URL retries; generation is never re-paid
 SERVE_CAP_BYTES = 524_288           # the live 512 KB serve law (AT-E2: enforced, not warned)
 
+# Art direction: the people of the Age of Ash are Black/Brown. The cartridge
+# schema carries no appearance field, so this is a named, tunable adjective
+# phrase, applied to portraits AND faction crowds (placed early in each prompt
+# so the length cap never truncates it).
+PEOPLE_DESCRIPTOR = "dark-skinned Black"
+
 MAX_MOOD_CHARS = 140                # AT-E3: the shared world-mood clause
 # AT-E3: subject cap so prefix + ", " + subject + ", " + suffix ≤ 480 chars.
 _WRAP_OVERHEAD = len(settings.bfl_style_prefix) + len(settings.bfl_style_suffix) + 4
@@ -121,13 +127,14 @@ def plan_plates(cartridge: WorldCartridge, only: set[str] | None = None) -> list
          f"interior of {home.name}, a {home.kind} in {cartridge.settlement}; "
          f"{home.condition}; {mood}"),
         ("faction",
-         f"the presence of {faction.name} in {cartridge.settlement}, "
-         f"{faction.stance}; {faction.notes}; {mood}"),
+         f"the presence of {faction.name}, {PEOPLE_DESCRIPTOR} people, in "
+         f"{cartridge.settlement}, {faction.stance}; {faction.notes}; {mood}"),
     ]
     for npc in cartridge.family:
         raw.append((
             f"npc_{slugify(npc.name)}",
-            f"portrait of {npc.name}, {npc.role} of {cartridge.settlement}; {npc.trait}",
+            f"portrait of a {PEOPLE_DESCRIPTOR} person, {npc.name}, {npc.role} of "
+            f"{cartridge.settlement}; {npc.trait}",
         ))
 
     jobs = [
