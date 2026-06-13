@@ -22,7 +22,7 @@ from app.core.config import settings
 
 logger = logging.getLogger("nyx.bfl")
 
-_BFL_BASE_URL = "https://api.bfl.ml/v1"
+_BFL_BASE_URL = "https://api.bfl.ai/v1"  # api.bfl.ml was retired
 _POLL_INTERVAL = 1.0  # seconds
 _POLL_TIMEOUT = 30.0  # seconds
 
@@ -67,7 +67,9 @@ async def generate_image(
                 json=payload,
             )
             submit_resp.raise_for_status()
-            task_id = submit_resp.json().get("id")
+            submit_data = submit_resp.json()
+            task_id = submit_data.get("id")
+            polling_url = submit_data.get("polling_url")  # modern API returns a region-routed URL
             if not task_id:
                 logger.error("BFL: No task ID in response")
                 return ""
@@ -83,8 +85,9 @@ async def generate_image(
 
             try:
                 poll_resp = await client.get(
-                    f"{_BFL_BASE_URL}/get_result",
-                    params={"id": task_id},
+                    polling_url or f"{_BFL_BASE_URL}/get_result",
+                    params=None if polling_url else {"id": task_id},
+                    headers={"x-key": api_key},
                 )
                 poll_resp.raise_for_status()
                 data = poll_resp.json()
