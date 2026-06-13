@@ -551,6 +551,14 @@ hr.nyx-divider {
 	animation: hypnos-breathe 3s ease-in-out infinite;
 }
 
+/* Inline variant: sits under the streaming paragraph while the rest
+   of the turn is woven out of sight — quieter, smaller, same pulse. */
+.weaving-thread-inline {
+	height: 36px;
+	margin-bottom: 0;
+	opacity: 0.55;
+}
+
 /* ══════════════════════════════════════════════════════ */
 /* THE WITNESS — death rite, the book, the library, dread */
 /* ══════════════════════════════════════════════════════ */

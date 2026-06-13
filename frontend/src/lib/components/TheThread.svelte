@@ -71,6 +71,21 @@
 	/** The Ink: milestone image wins while present; otherwise the scene's
 	    plate; '' (today's bare ground) when the world has no art (INK-E6). */
 	let bgUrl = $derived($backgroundImage || scenePlateUrl($gameState, $plateManifest));
+
+	/** While Clotho streams, surface only the FIRST paragraph — the rest
+	    arrives behind the curtain. The paginated read then opens on the
+	    same paragraph the player was just watching form: no full-text
+	    flash, no snap back. */
+	let streamingFirst = $derived.by(() => {
+		const text = $streamingProse.replace(/^\s+/, '');
+		const cut = text.indexOf('\n\n');
+		return cut === -1 ? text : text.slice(0, cut);
+	});
+
+	/** More paragraphs already woven beyond the visible one. */
+	let streamingHasMore = $derived(
+		$streamingProse.replace(/^\s+/, '').includes('\n\n')
+	);
 </script>
 
 <main class="relative flex flex-col h-full overflow-hidden">
@@ -112,11 +127,18 @@
 				</div>
 			{/if}
 
-			<!-- Streaming prose (typewriter effect during Clotho Phase 2) -->
+			<!-- Streaming prose (typewriter effect during Clotho Phase 2).
+			     Only the FIRST paragraph types in view; the rest of the
+			     turn arrives unseen so the paginated read never snaps. -->
 			{#if $isProcessing && $streamingProse}
 				<div class="prose-nyx mb-6 max-w-2xl mx-auto clotho-enter">
-					{@html renderProse($streamingProse)}
+					{@html renderProse(streamingFirst)}
 				</div>
+				{#if streamingHasMore}
+					<div class="flex justify-center mb-6">
+						<div class="weaving-thread weaving-thread-inline" title="The Fates still weave"></div>
+					</div>
+				{/if}
 			{/if}
 
 			<!-- Paginated paragraph display (after prose arrives).
