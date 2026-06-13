@@ -11,7 +11,8 @@ a "Constraints & Fallbacks" line made executable:
     never disable the others or the builtins.
   - Bounded payloads (64 KB / 256 files) so a hostile or corrupt directory can
     neither hang startup nor exhaust memory.
-  - Builtins are ALWAYS in the candidate pool (NC-7) — the union, never an else.
+  - A cartridge supersedes its archetype's builtin (NC-7 amended): the builtin
+    is the fallback only when no cartridge serves the archetype.
   - Selection is a pure sha256 ranking (NC-8): no RNG, no dict/sort-order
     dependence, reproducible for a fixed (player_id, run_number, library).
 
@@ -154,13 +155,17 @@ class WorldRegistry:
             return "builtin-shadow", get_world_seed(first_memory)  # shadow catch-all
 
         candidates: list[_Candidate] = list(self._by_archetype.get(archetype, []))
-        # NC-7: the builtin is ALWAYS in the pool, even when cartridges exist.
-        candidates.append(
-            _Candidate(world_id=f"builtin-{archetype}", seed=WORLD_SEEDS[archetype])
-        )
-
-        if not candidates:  # impossible (builtin just appended) — fail loud, never None
-            raise RuntimeError(f"empty candidate set for archetype '{archetype}'")
+        # NC-7 (amended): a valid cartridge SUPERSEDES its archetype's in-code
+        # builtin. The cartridge is content-identical but strictly richer (it
+        # carries the curated art and the clocks/mystery forward-slots), so a
+        # player should never randomly draw the poorer fallback when a real
+        # world exists. The builtin remains the guaranteed fallback ONLY when no
+        # cartridge serves the archetype (absent dir, or all candidates malformed
+        # and skipped by the fail-loud loader).
+        if not candidates:
+            candidates.append(
+                _Candidate(world_id=f"builtin-{archetype}", seed=WORLD_SEEDS[archetype])
+            )
 
         chosen = min(
             candidates,

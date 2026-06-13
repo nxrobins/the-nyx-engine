@@ -33,7 +33,7 @@ class TestDeathWritesVerdict:
     @pytest.mark.asyncio
     async def test_world_id_tracked_from_birth(self, kernel):
         await _init(kernel)
-        assert kernel.state.world_id  # cartridge id or builtin-stone
+        assert kernel.state.world_id  # the stone cartridge id (ashfall) — supersedes the builtin
 
     @pytest.mark.asyncio
     async def test_verdict_written_at_death(self, kernel):
