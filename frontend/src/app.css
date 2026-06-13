@@ -1200,13 +1200,25 @@ hr.nyx-divider {
 	100% { opacity: 0.15; filter: blur(2px); transform: translateY(10px) scale(0.99); clip-path: inset(0 0 40% 0); }
 }
 
-/* Reduced motion: no tell, no sever — the block enters via in:fade (or simply
-   appears) and rests pristine (VS-E16). Dedicated rule; the Ink's is scoped to
-   .ink-weather and never reaches the prose. */
+/* The epitaph cascade — the stone is read word by word (The Tell, Phase C). */
+.epitaph-word {
+	display: inline-block;
+	opacity: 0;
+	animation: epitaph-rise 600ms ease-out var(--d, 0ms) forwards;
+}
+@keyframes epitaph-rise {
+	from { opacity: 0; transform: translateY(8px); }
+	to   { opacity: 1; transform: none; }
+}
+
+/* Reduced motion: no tell, no sever, no cascade — the block enters via in:fade
+   (or simply appears) and rests pristine (VS-E16). Dedicated rule; the Ink's is
+   scoped to .ink-weather and never reaches the prose. */
 @media (prefers-reduced-motion: reduce) {
 	.prose-flinch-wrap.vs-nemesis,
 	.prose-flinch-wrap.vs-eris,
 	.prose-flinch-wrap.vs-atropos,
 	.prose-flinch-wrap.vs-momus,
 	.prose-flinch-wrap.vs-sever { animation: none !important; }
+	.epitaph-word { animation: none !important; opacity: 1 !important; transform: none !important; }
 }
