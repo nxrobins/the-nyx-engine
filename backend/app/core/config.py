@@ -97,6 +97,13 @@ class Settings(BaseSettings):
         "http://localhost:3000",
     ]
 
+    # The Vigil (Player Safety) — HARD merge gate. The full duty-of-care
+    # SURFACE (consent UI, crisis-resource copy, ideation detection patterns,
+    # the welfare classifier) is DEFERRED to human + clinical review and must
+    # not render live until reviewed copy lands. See backend/SAFETY.md. Phase 1
+    # ships only the pure-engineering floor: input redaction + death permanence.
+    welfare_copy_reviewed: bool = False
+
     # Atropos death keywords (self-destruction triggers)
     atropos_death_keywords: list[str] = [
         "surrender to death",
