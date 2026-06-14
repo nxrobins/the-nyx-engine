@@ -96,6 +96,19 @@ class SessionData(BaseModel):
 # Canonical World State
 # ---------------------------------------------------------------------------
 
+class NPCEvent(BaseModel):
+    """One compressed memory of what the player did to an NPC.
+
+    Deterministic: the note is a template, never a model write. The events
+    ring is SURFACING-only — the compounding betrayal math reads the dedicated
+    CanonNPC.betrayal_count integer, never this lossy list (Depth: E6).
+    """
+    turn: int = 0
+    kind: str = "neutral"   # betrayed|harmed|coerced|aided|protected|confided|honored|neutral
+    valence: float = Field(default=0.0, ge=-2.0, le=2.0)
+    note: str = ""          # <= 80 chars; deterministic template, never a model write
+
+
 class CanonNPC(BaseModel):
     """A named person in the world canon."""
     npc_id: str
@@ -109,6 +122,12 @@ class CanonNPC(BaseModel):
     obligation: float = 0.0
     tags: list[str] = Field(default_factory=list)
     last_seen_turn: int = 0
+    # Depth: the populated mind — authored want + a friction-weighted memory.
+    want: str = ""                                   # standing desire, authored, immutable at runtime
+    bond: float = Field(default=0.0, ge=-10.0, le=10.0)   # trajectory; sours fast, warms slow
+    betrayal_weight: float = Field(default=0.0, ge=0.0, le=10.0)  # monotone; never decremented
+    betrayal_count: int = Field(default=0, ge=0, le=99)          # monotone tally; compounding reads THIS
+    events: list[NPCEvent] = Field(default_factory=list)         # bounded ring (EVENT_CAP)
 
 
 class CanonLocation(BaseModel):

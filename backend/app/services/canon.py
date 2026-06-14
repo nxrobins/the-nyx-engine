@@ -15,6 +15,7 @@ from app.schemas.state import (
     CanonFaction,
     CanonLocation,
     CanonNPC,
+    NPCEvent,
     SceneClock,
     SceneState,
     ThreadState,
@@ -87,6 +88,7 @@ def bootstrap_canon(seed: WorldSeed, player_name: str, player_gender: str) -> Wo
             obligation=npc.obligation,
             tags=list(npc.tags),
             last_seen_turn=1,
+            want=npc_want(npc.name),
         )
         present_npc_ids.append(npc_id)
 
@@ -145,12 +147,21 @@ def render_scene_snapshot(state: ThreadState) -> str:
     if location:
         lines.append(f"CURRENT LOCATION: {location.name} ({location.kind}, {location.region})")
 
-    present = []
-    for npc_id in _alive_present_ids(canon, scene.present_npc_ids):
+    present_lines: list[str] = []
+    for idx, npc_id in enumerate(_alive_present_ids(canon, scene.present_npc_ids)):
         npc = canon.npcs[npc_id]
-        present.append(f"{npc.name} ({npc.role})")
-    if present:
-        lines.append("PRESENT: " + ", ".join(present))
+        if idx < 3:
+            present_lines.append(render_npc_interior(npc))   # full interior for the first few
+        else:
+            tail = f"{npc.name} ({npc.role})"                 # degrade past the cap
+            if npc.want:
+                tail += f" (wants {npc.want})"
+            present_lines.append(tail)
+    if present_lines:
+        present_str = " | ".join(present_lines)
+        if len(present_str) > 400:                            # hard prompt-budget guard
+            present_str = present_str[:397].rstrip() + "..."
+        lines.append("PRESENT: " + present_str)
 
     clocks = []
     for clock_id in scene.active_clock_ids:
@@ -403,3 +414,228 @@ def apply_intervention_dispositions(
     if not witnesses:
         return ""
     return f"Witnesses {verdict}: {', '.join(witnesses)} will remember this."
+
+
+# ---------------------------------------------------------------------------
+# Relationship memory — the present cast remembers what the player did (Depth)
+#
+# Deterministic, friction-weighted, zero LLM. update_npc_relations is the SOLE
+# writer of bond/events/betrayal; apply_intervention_dispositions above moves
+# only trust/fear, so the consequence economy is structurally unable to scar
+# the betrayal axis (the carve). Souring is cheap; warming is named, committed,
+# and throttled by accumulated betrayal; betrayal compounds via a dedicated
+# monotone integer the lossy events ring never feeds. bond grants NO mechanical
+# buff — its only payload is rendered interiority (completion-as-tragedy).
+# ---------------------------------------------------------------------------
+
+EVENT_CAP = 6
+_WARM_BASE = {"aided": 0.5, "protected": 0.5, "confided": 0.3, "honored": 0.3}
+_SOUR_VALENCE = {"betrayed": -2.0, "harmed": -1.5, "coerced": -1.0}
+_SOURING_KINDS = frozenset(_SOUR_VALENCE)
+
+# Ordered keyword table; first token match wins (souring verbs precede warming).
+_VERB_TABLE: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("betrayed", ("betray", "betrayed", "betrays", "abandon", "abandoned", "abandons",
+                  "forsake", "forsook", "sell out", "sold out", "rat out", "lie", "lied", "lies")),
+    ("harmed", ("kill", "killed", "stab", "stabbed", "strike", "struck", "hit", "beat",
+                "burn", "burned", "steal", "stole", "rob", "robbed", "attack", "attacked",
+                "maim", "wound", "wounded", "slay", "slew")),
+    ("coerced", ("threaten", "threatened", "force", "forced", "blackmail", "coerce",
+                 "coerced", "extort", "extorted", "intimidate")),
+    ("aided", ("save", "saved", "heal", "healed", "feed", "fed", "shelter", "sheltered",
+               "rescue", "rescued", "help", "helped", "nurse", "nursed", "mend", "tend")),
+    ("protected", ("defend", "defended", "protect", "protected", "shield", "shielded",
+                   "guard", "guarded")),
+    ("confided", ("confide", "confided", "confess", "confessed", "trust", "trusted",
+                  "share", "shared", "tell", "told")),
+    ("honored", ("honor", "honored", "keep", "kept", "swear", "swore", "vow", "vowed",
+                 "pledge", "pledged")),
+)
+_VERB_LOOKUP: dict[str, str] = {v: kind for kind, verbs in _VERB_TABLE for v in verbs if " " not in v}
+_VERB_PHRASES: tuple[tuple[str, str], ...] = tuple(
+    (v, kind) for kind, verbs in _VERB_TABLE for v in verbs if " " in v
+)
+_NEGATION_TOKENS = frozenset({
+    "not", "never", "no", "refuse", "refuses", "refused", "pretend", "pretends",
+    "pretended", "decline", "declines", "declined", "wont", "didnt", "cannot", "cant",
+})
+_NEGATION_WINDOW = 3
+
+# Standing wants for the authored builtin family (Nyx-authored content in v1;
+# cartridge-authored wants are a clean follow-up that owns the schema change).
+_NPC_WANTS = {
+    "sera": "to keep the candlehouse lit through one more winter",
+    "aldric": "to come home without shame",
+    "maren": "to see one child leave the mine alive",
+    "kael": "to be forgiven for what the work made of him",
+    "halda": "to hold the stall against the lord's men",
+    "ren": "to be remembered as more than a hawker",
+    "gran": "to die in the stone house, not the fen",
+}
+
+
+def npc_want(name: str) -> str:
+    return _NPC_WANTS.get(name.lower(), "")
+
+
+def _tokens(text: str) -> list[str]:
+    return re.findall(r"[a-z']+", text.lower())
+
+
+def _valence_for(kind: str) -> float:
+    if kind in _SOUR_VALENCE:
+        return _SOUR_VALENCE[kind]
+    return _WARM_BASE.get(kind, 0.0)
+
+
+def _phrase_negated(lowered: str, phrase: str) -> bool:
+    before = lowered[: lowered.find(phrase)].split()[-_NEGATION_WINDOW:]
+    return any(w in _NEGATION_TOKENS for w in before)
+
+
+def classify_interaction(action: str) -> tuple[str, float]:
+    """Classify a committed action's verb into an interaction kind.
+
+    Pure keyword matching with a negation guard. Returns (kind, base_valence);
+    ('neutral', 0.0) on no match, ambiguity, or a negated/sarcastic verb. Zero
+    LLM. Object resolution (which present NPC) is the caller's job (E3).
+    """
+    toks = _tokens(action)
+    if not toks:
+        return ("neutral", 0.0)
+    lowered = " ".join(toks)
+    for phrase, kind in _VERB_PHRASES:
+        if phrase in lowered and not _phrase_negated(lowered, phrase):
+            return (kind, _valence_for(kind))
+    for i, tok in enumerate(toks):
+        kind = _VERB_LOOKUP.get(tok)
+        if kind is None:
+            continue
+        if any(w in _NEGATION_TOKENS for w in toks[max(0, i - _NEGATION_WINDOW):i]):
+            return ("neutral", 0.0)
+        return (kind, _valence_for(kind))
+    return ("neutral", 0.0)
+
+
+def _names_npc(action_lower: str, npc: CanonNPC) -> bool:
+    """True if the NPC's name or role is a word-boundary substring (E3)."""
+    for token in (npc.name, npc.role):
+        token = token.strip().lower()
+        if token and re.search(r"\b" + re.escape(token) + r"\b", action_lower):
+            return True
+    return False
+
+
+def _clamp(value: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, value))
+
+
+def _note_for(kind: str, action: str, turn: int) -> str:
+    excerpt = re.sub(r"\s+", " ", action).strip()[:48]
+    return f"you {kind} them: {excerpt} (t{turn})"[:80]
+
+
+def _compact_events(events: list[NPCEvent]) -> list[NPCEvent]:
+    """Keep the earliest souring scar + the most recent EVENT_CAP-1 events."""
+    if len(events) <= EVENT_CAP:
+        return events
+    recent = events[-(EVENT_CAP - 1):]
+    souring = [e for e in events if e.kind in _SOURING_KINDS]
+    if souring:
+        scar = min(souring, key=lambda e: e.turn)
+        if scar not in recent:
+            return [scar] + recent
+    return events[-EVENT_CAP:]
+
+
+def _record_souring(npc: CanonNPC, kind: str, action: str, turn: int) -> str:
+    if kind == "betrayed":
+        prior = npc.betrayal_count
+        effective = -2.0 - 0.5 * min(prior, 4)                          # compounds, capped at -4
+        npc.betrayal_weight = _clamp(npc.betrayal_weight + 1.0 + 0.5 * prior, 0.0, 10.0)
+        npc.betrayal_count = min(npc.betrayal_count + 1, 99)            # monotone integer (E6)
+    else:
+        effective = _SOUR_VALENCE[kind]
+    npc.bond = _clamp(npc.bond + effective, -10.0, 10.0)
+    npc.events.append(NPCEvent(turn=turn, kind=kind, valence=_SOUR_VALENCE[kind],
+                               note=_note_for(kind, action, turn)))
+    npc.events = _compact_events(npc.events)
+    return f"{npc.name} will not forget being {kind}."
+
+
+def _record_warming(npc: CanonNPC, kind: str, action: str, turn: int) -> None:
+    base = _WARM_BASE[kind]
+    throttle = max(0.0, 1.0 - npc.betrayal_weight / 5.0)               # past weight 5, no warmth
+    npc.bond = _clamp(npc.bond + base * throttle, -10.0, 10.0)
+    npc.events.append(NPCEvent(turn=turn, kind=kind, valence=base,
+                               note=_note_for(kind, action, turn)))
+    npc.events = _compact_events(npc.events)
+
+
+def update_npc_relations(state: ThreadState, action: str, outcome) -> list[str]:
+    """Fold the committed turn into each present NPC's friction-weighted memory.
+
+    The SOLE writer of bond/events/betrayal. Pure, deterministic, zero LLM.
+    Souring/warming applies ONLY to a present NPC named in the committed action
+    (E3); un-named present NPCs are presence-only (last_seen bump). Returns at
+    most 2 souring notes for Clotho.
+    """
+    assert getattr(outcome, "action_valid", True), "rejected actions never reach memory"
+    canon = state.canon
+    if not canon or not canon.current_scene:
+        return []
+
+    turn = state.session.turn_count
+    oath_broken = bool(getattr(outcome, "oath_broken", None))
+    action_lower = action.lower()
+    base_kind, _ = classify_interaction(action)
+    notes: list[str] = []
+
+    for npc_id in _alive_present_ids(canon, canon.current_scene.present_npc_ids):
+        npc = canon.npcs[npc_id]
+        npc.last_seen_turn = turn                       # every present NPC, stationary too (E6)
+
+        if not _names_npc(action_lower, npc):
+            continue                                    # presence-only — no scene-wide valence (E3)
+
+        kind = base_kind
+        # Breaking an oath that names this NPC IS the betrayal (a committed player act).
+        if oath_broken and kind in ("neutral", "harmed"):
+            kind = "betrayed"
+        if kind == "neutral":
+            continue
+
+        if kind in _SOURING_KINDS:
+            notes.append(_record_souring(npc, kind, action, turn))
+        else:
+            _record_warming(npc, kind, action, turn)
+
+    return notes[:2]
+
+
+_BOND_BANDS = (
+    (-6.0, "will not forgive you"),
+    (-2.0, "wary, souring"),
+    (2.0, "guarded"),
+    (6.0, "warm but wary"),
+)
+
+
+def _bond_band(bond: float) -> str:
+    for ceiling, label in _BOND_BANDS:
+        if bond < ceiling:
+            return label
+    return "would die for you"
+
+
+def render_npc_interior(npc: CanonNPC) -> str:
+    """A compact, deterministic interior gloss for a present NPC (read-only)."""
+    parts = [f"{npc.name} ({npc.role})"]
+    if npc.want:
+        parts.append(f"wants {npc.want}")
+    parts.append(f"bond: {_bond_band(npc.bond)}")
+    heavy = sorted(npc.events, key=lambda e: (-abs(e.valence), e.turn))[:2]
+    mems = "; ".join(e.note for e in heavy if e.note)
+    if mems:
+        parts.append(f"remembers: {mems}")
+    return " — ".join(parts)
