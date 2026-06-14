@@ -108,6 +108,7 @@ class Atropos(AgentBase):
             return _attach_proposal(AtroposResponse(
                 terminal_state=True,
                 death_reason="You chose oblivion. The thread ends by your own hand.",
+                self_destruction_origin=True,   # The Vigil: non-miracleable (permanence)
             ), action=action, nemesis_lethal=nemesis_lethal)
 
         # --- Trigger 4: LLM narrative dead-end check (Phase 2) ---

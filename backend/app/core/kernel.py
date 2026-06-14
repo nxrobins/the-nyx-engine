@@ -80,6 +80,7 @@ from app.services.canon import (
     tick_scene_clocks,
     update_npc_relations,
 )
+from app.services.welfare import REDACTION_TOKEN, flags_sensitive_input
 from app.services.doom import (
     advance_doom,
     begin_doom,
@@ -462,6 +463,15 @@ class TurnContext:
     pressure_summary: str = ""
     # Non-terminal Atropos warning ("the Fates grow restless") — fed to Clotho
     atropos_warning: str = ""
+    # The Vigil: this turn's action contains a self-destruction framing, so it
+    # is redacted at every durable/observable store (privacy). The fiction's
+    # math is computed from the real action and is unaffected.
+    crisis_flagged: bool = False
+
+
+def _persisted_action(ctx: "TurnContext") -> str:
+    """Redact a welfare-flagged action before it reaches any durable store."""
+    return REDACTION_TOKEN if ctx.crisis_flagged else ctx.action
 
 
 # ---------------------------------------------------------------------------
@@ -710,7 +720,10 @@ class NyxKernel:
         )
         session.turn_count += 1
         turn = session.turn_count
-        logger.info(f"Turn {turn}: '{action}'")
+        # The Vigil: a self-destruction framing is redacted from every durable
+        # store (log/DB/RAG). The fiction's math still reads the real action.
+        crisis_flagged = flags_sensitive_input(action)
+        logger.info(f"Turn {turn}: '{REDACTION_TOKEN if crisis_flagged else action}'")
 
         # Epoch state machine → Director metadata (Sprint 8)
         phase, age, ui_mode, beat_position, vignette_directive = _get_turn_metadata(turn)
@@ -779,6 +792,7 @@ class NyxKernel:
                 ),
                 deliberation_trace=invalid_trace,
                 pressure_summary=pressure_summary(self.state),
+                crisis_flagged=crisis_flagged,
             )
 
         # Step 2: Apply vector deltas from Lachesis
@@ -1057,6 +1071,7 @@ class NyxKernel:
                 "" if atropos_result.terminal_state
                 else atropos_result.death_reason
             ),
+            crisis_flagged=crisis_flagged,
         )
 
     # ------------------------------------------------------------------
@@ -1285,7 +1300,7 @@ class NyxKernel:
         add_result, query_result = await asyncio.gather(
             self.rag.add_turn(
                 turn_number=ctx.turn,
-                action=ctx.action,
+                action=_persisted_action(ctx),
                 outcome=outcome.state.last_outcome or "neutral",
                 prose_summary=prose[:200],
                 environment=outcome.state.session.current_environment,
@@ -1317,7 +1332,7 @@ class NyxKernel:
         await create_turn(
             thread_id=self._thread_id,
             turn_number=ctx.turn,
-            action=ctx.action,
+            action=_persisted_action(ctx),
             outcome=outcome.state.last_outcome or "neutral",
             prose_summary=prose[:200],
             soul_vectors=outcome.state.soul_ledger.vectors.model_dump(),
@@ -1364,7 +1379,7 @@ class NyxKernel:
         await create_turn(
             thread_id=self._thread_id,
             turn_number=ctx.turn,
-            action=ctx.action,
+            action=_persisted_action(ctx),
             outcome="terminal",
             prose_summary=ctx.death_reason[:200],
             soul_vectors=ctx.outcome.state.soul_ledger.vectors.model_dump(),
@@ -1984,7 +1999,7 @@ class NyxKernel:
                     await create_turn(
                         thread_id=self._thread_id,
                         turn_number=ctx.turn,
-                        action=action,
+                        action=(REDACTION_TOKEN if flags_sensitive_input(action) else action),
                         outcome=self.state.last_outcome or "partial",
                         prose_summary=full_prose_buffer[:200] if full_prose_buffer else "disconnected",
                         soul_vectors=self.state.soul_ledger.vectors.model_dump(),
