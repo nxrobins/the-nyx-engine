@@ -17,9 +17,10 @@ import type {
 	TurnResult,
 	HamartiaOptions,
 	MechanicEvent,
-	DeliberationTrace
+	DeliberationTrace,
+	CrisisResources
 } from '$lib/types/engine';
-import { vestibuleState } from '$lib/stores/vestibule';
+import { vestibuleState, currentContentPrefs } from '$lib/stores/vestibule';
 import { clearPlates, loadPlates, plateManifest, scenePlateUrl } from '$lib/stores/plates';
 import { deriveFlinch, type FlinchAgent } from '$lib/viewspec/viewspec';
 
@@ -134,6 +135,26 @@ export function dismissDream(): void {
 	activeDream.set('');
 }
 
+// ── The Vigil: the crisis interstitial ──────────────────────────
+//
+// Holds the static care payload while it is shown. Set by the server's
+// position-0 `crisis_resources` SSE frame (gate-on) OR by a CrisisLink click
+// (the hardcoded client copy, always available). It is INDEPENDENT of game
+// state: opening or dismissing it never touches gameState/isTerminal/proseHistory,
+// so the fiction is never softened to be kind to the person (SAFE-C6/C9).
+
+export const crisisInterstitial = writable<CrisisResources | null>(null);
+
+/** Open the care surface with the given (static) resources. */
+export function openCrisis(resources: CrisisResources): void {
+	crisisInterstitial.set(resources);
+}
+
+/** Dismiss the care surface — only ever on an explicit player click. */
+export function dismissCrisis(): void {
+	crisisInterstitial.set(null);
+}
+
 // ── Turn 0: Initialize Session ──────────────────────────────────
 
 /**
@@ -160,7 +181,8 @@ export async function initGame(params: {
 	const res = await fetch('/api/init', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(params),
+		// The Vigil: carry self-asserted content prefs (not yet acted on).
+		body: JSON.stringify({ ...params, content_prefs: currentContentPrefs() }),
 	});
 
 	if (!res.ok) throw new Error('Initialization failed');
@@ -215,7 +237,7 @@ export async function submitAction(action: string): Promise<void> {
 	const response = await fetch('/api/turn', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ action, session_id: _sessionId }),
+		body: JSON.stringify({ action, session_id: _sessionId, content_prefs: currentContentPrefs() }),
 	});
 
 	if (!response.ok || !response.body) {
@@ -388,6 +410,16 @@ function handleStreamEvent(data: Record<string, unknown>): void {
 					_milestoneLocationId = null;
 				}
 			}
+			break;
+		}
+
+		case 'crisis_resources': {
+			// The Vigil: the server yields this at stream position 0 on a flagged
+			// turn (gate-on). Open the interstitial WITHOUT touching any game store
+			// — the turn (incl. a self-destruction death) resolves untouched, and
+			// the card stays up until the player explicitly dismisses it.
+			const payload = data.payload as CrisisResources;
+			if (payload) openCrisis(payload);
 			break;
 		}
 

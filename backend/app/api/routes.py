@@ -3,6 +3,7 @@
 POST /init    - Initialize session with hamartia choice (Turn 0)
 POST /action  - Submit a player action, get full turn result
 POST /turn    - SSE stream: 3-Phase pipeline (mechanic → prose → state)
+GET  /safety  - The Vigil: care-gate state + server-owned crisis copy
 GET  /state   - Current thread state (debug)
 GET  /hamartia-options - List available tragic flaws
 GET  /threads/{player_id} - Past lives for the title screen
@@ -31,6 +32,7 @@ from app.db import get_dead_threads
 from app.schemas.state import InitRequest, PlayerAction, TurnResult
 from app.services.bfl import generate_image
 from app.services.legacy import augment_thread_summary
+from app.services.welfare import CRISIS_RESOURCES, detect_crisis
 
 logger = logging.getLogger("nyx.api")
 
@@ -140,8 +142,14 @@ async def submit_action(action: PlayerAction) -> TurnResult:
     """Synchronous turn processing. Returns the full result after all
     agents resolve. Use /turn for the streaming experience."""
     kernel = _require_session(action.session_id)
+    # The Vigil: decide the care payload BEFORE the kernel runs (SAFE-C6), so the
+    # death-result model_copy below carries it. Detection runs regardless of the
+    # gate (SAFE-C2); only the displayed copy is gated (welfare_copy_reviewed).
+    update: dict = {"session_id": action.session_id}
+    if detect_crisis(action.action).flagged and settings.welfare_copy_reviewed:
+        update["crisis_resources"] = CRISIS_RESOURCES
     result = await kernel.process_turn(action.action)
-    return result.model_copy(update={"session_id": action.session_id})
+    return result.model_copy(update=update)
 
 
 # ------------------------------------------------------------------
@@ -159,8 +167,20 @@ async def stream_turn_post(action: PlayerAction, request: Request):
     BFL image generation runs post-stream if a milestone is triggered.
     """
     kernel = _require_session(action.session_id)
+    # The Vigil: decide the care frame BEFORE the stream loop (SAFE-C6). Detection
+    # runs regardless of the gate (SAFE-C2); only the emitted frame is gated.
+    crisis_flagged = detect_crisis(action.action).flagged
 
     async def event_generator():
+        # SAFE-C6/C9: the crisis frame is stream position 0 — yielded before the
+        # kernel runs, so a mid-stream exception or an early death-return cannot
+        # suppress it, and the client opens the interstitial above the death.
+        if crisis_flagged and settings.welfare_copy_reviewed:
+            yield "data: " + json.dumps({
+                "type": "crisis_resources",
+                "payload": CRISIS_RESOURCES,
+            }) + "\n\n"
+
         # Stream the 3-phase kernel pipeline
         async for chunk in kernel.process_turn_stream(action.action):
             if await request.is_disconnected():
@@ -198,6 +218,27 @@ async def stream_turn_post(action: PlayerAction, request: Request):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ------------------------------------------------------------------
+# GET /safety — The Vigil: gate state + server-owned crisis copy
+# ------------------------------------------------------------------
+
+@router.get("/safety")
+async def get_safety():
+    """Tell the client whether the duty-of-care surface is active and hand it
+    the server-owned crisis copy. 100% static — echoes nothing the player typed.
+
+    `resources` is `None` until a human reviews the words + detection and flips
+    `welfare_copy_reviewed` (SAFE-C5 gate). The client's hardcoded always-on help
+    link (SAFE-C3/C8) never depends on this call — this only ENRICHES the in-flow
+    interstitial and decides whether to arm the consent gate.
+    """
+    reviewed = settings.welfare_copy_reviewed
+    return {
+        "reviewed": reviewed,
+        "resources": CRISIS_RESOURCES if reviewed else None,
+    }
 
 
 # ------------------------------------------------------------------

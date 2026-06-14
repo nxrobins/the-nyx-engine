@@ -1222,3 +1222,238 @@ hr.nyx-divider {
 	.prose-flinch-wrap.vs-sever { animation: none !important; }
 	.epitaph-word { animation: none !important; opacity: 1 !important; transform: none !important; }
 }
+
+/* ══════════════════════════════════════════════════════ */
+/* THE VIGIL — crisis routing + consent (Player Safety P2) */
+/* ══════════════════════════════════════════════════════ */
+
+/* ── The always-on help link (SAFE-C3/C8) ────────────────
+   A small, unobtrusive corner affordance on EVERY screen. z-150 so it sits
+   above the z-100 fullscreen surfaces (title/consent/incarnation) and the
+   in-game panes; the toast lives bottom-center, so this stays bottom-left. */
+.crisis-link {
+	position: fixed;
+	bottom: 1rem;
+	left: 1rem;
+	z-index: 150;
+	background: rgba(10, 10, 10, 0.7);
+	border: 1px solid var(--nyx-border);
+	cursor: pointer;
+	padding: 0.3rem 0.7rem;
+	font-family: var(--font-mono);
+	font-size: 0.62rem;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	color: var(--nyx-text-dim);
+	opacity: 0.55;
+	transition: opacity 300ms ease, color 300ms ease, border-color 300ms ease;
+}
+.crisis-link:hover {
+	opacity: 1;
+	color: var(--nyx-oracle-gold);
+	border-color: var(--nyx-oracle-gold);
+}
+
+/* ── The crisis interstitial (SAFE-C6/C9) ────────────────
+   z-200: above DeathRite (60), the book reader (70), and every other surface.
+   No auto-dismiss — persists until the explicit "Return to the story" click. */
+.crisis-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 200;
+	background: rgba(5, 5, 5, 0.92);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 1.5rem;
+}
+
+.crisis-card {
+	max-width: 34rem;
+	width: 100%;
+	border: 1px solid var(--nyx-border);
+	background: var(--nyx-void);
+	padding: 2rem 2rem 1.5rem;
+	box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
+}
+
+.crisis-title {
+	font-family: var(--font-prose);
+	font-size: 1.3rem;
+	color: var(--nyx-text);
+	margin: 0 0 0.85rem 0;
+}
+
+.crisis-body {
+	font-family: var(--font-prose);
+	font-size: 1rem;
+	line-height: 1.7;
+	color: var(--nyx-text-dim);
+	margin: 0 0 1.25rem 0;
+}
+
+.crisis-resources {
+	list-style: none;
+	margin: 0 0 1.25rem 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.9rem;
+}
+
+.crisis-resource {
+	display: flex;
+	flex-direction: column;
+	gap: 0.2rem;
+	border-left: 2px solid var(--nyx-oracle-gold);
+	padding-left: 0.8rem;
+}
+
+.crisis-resource-label {
+	font-family: var(--font-mono);
+	font-size: 0.72rem;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--nyx-oracle-gold);
+}
+
+.crisis-resource-detail {
+	font-family: var(--font-prose);
+	font-size: 0.95rem;
+	line-height: 1.6;
+	color: var(--nyx-text);
+}
+
+.crisis-disclaimer {
+	font-family: var(--font-prose);
+	font-style: italic;
+	font-size: 0.8rem;
+	line-height: 1.6;
+	color: var(--nyx-text-dim);
+	opacity: 0.85;
+	margin: 0 0 1.5rem 0;
+}
+
+.crisis-dismiss {
+	display: block;
+	width: 100%;
+	background: transparent;
+	border: 1px solid var(--nyx-border);
+	cursor: pointer;
+	padding: 0.6rem;
+	font-family: var(--font-mono);
+	font-size: 0.72rem;
+	letter-spacing: 0.16em;
+	text-transform: uppercase;
+	color: var(--nyx-text-dim);
+	transition: color 300ms ease, border-color 300ms ease;
+}
+.crisis-dismiss:hover {
+	color: var(--nyx-text);
+	border-color: var(--nyx-text-dim);
+}
+
+/* ── The consent gate (first-run, gate-on only) ──────────
+   z-100, matching the other fullscreen vestibule surfaces. */
+.consent-gate {
+	position: fixed;
+	inset: 0;
+	z-index: 100;
+	background: var(--nyx-void);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 1.5rem;
+}
+
+.consent-card {
+	max-width: 34rem;
+	width: 100%;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	text-align: center;
+}
+
+.consent-kicker {
+	font-family: var(--font-mono);
+	font-size: 0.7rem;
+	letter-spacing: 0.22em;
+	text-transform: uppercase;
+	color: var(--nyx-text-dim);
+	margin: 0 0 1.5rem 0;
+}
+
+.consent-body {
+	font-family: var(--font-prose);
+	font-size: 1.05rem;
+	line-height: 1.8;
+	color: var(--nyx-text-dim);
+	margin: 0 0 2rem 0;
+}
+
+.consent-affirm {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	cursor: pointer;
+	font-family: var(--font-prose);
+	font-size: 1rem;
+	color: var(--nyx-text);
+}
+.consent-affirm input {
+	width: 1rem;
+	height: 1rem;
+	accent-color: var(--nyx-oracle-gold);
+	cursor: pointer;
+}
+
+.consent-note {
+	font-family: var(--font-mono);
+	font-size: 0.62rem;
+	letter-spacing: 0.06em;
+	line-height: 1.6;
+	color: var(--nyx-text-dim);
+	opacity: 0.7;
+	margin: 0.75rem 0 2rem 0;
+	max-width: 28rem;
+}
+
+.consent-proceed {
+	background: transparent;
+	border: 1px solid var(--nyx-border);
+	cursor: pointer;
+	padding: 0.7rem 2rem;
+	font-family: var(--font-mono);
+	font-size: 0.78rem;
+	letter-spacing: 0.18em;
+	text-transform: uppercase;
+	color: var(--nyx-text);
+	transition: color 300ms ease, border-color 300ms ease, opacity 300ms ease;
+}
+.consent-proceed:hover:not(:disabled) {
+	color: var(--nyx-oracle-gold);
+	border-color: var(--nyx-oracle-gold);
+}
+.consent-proceed:disabled {
+	opacity: 0.3;
+	cursor: default;
+}
+
+.consent-help {
+	background: transparent;
+	border: none;
+	cursor: pointer;
+	margin-top: 1.5rem;
+	font-family: var(--font-mono);
+	font-size: 0.65rem;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	color: var(--nyx-text-dim);
+	opacity: 0.7;
+	transition: color 300ms ease, opacity 300ms ease;
+}
+.consent-help:hover {
+	opacity: 1;
+	color: var(--nyx-oracle-gold);
+}
