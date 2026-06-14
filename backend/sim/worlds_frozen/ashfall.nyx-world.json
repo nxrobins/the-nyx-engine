@@ -1,0 +1,66 @@
+{
+  "cartridge_version": 1,
+  "world_id": "ashfall",
+  "generated_by": "builtin-conversion",
+  "source_hash": "4174c7476b13b2dd",
+  "archetypes": [
+    "stone"
+  ],
+  "settlement": "Ashfall",
+  "settlement_type": "mining camp",
+  "region": "the Northern Reaches",
+  "social_class": "ore-hauler family (lowest caste in the camp)",
+  "active_situation": "The eastern shaft collapsed last week. Three men are still buried. Your father works double shifts. The mine boss says if the shaft isn't cleared by month's end, the camp moves.",
+  "world_facts": [
+    "Ashfall is not a village but a mining camp that follows the seam",
+    "The ore is black iron, used for weapons",
+    "Ore-haulers carry rock on their backs up the shaft ladders",
+    "The mine boss is a man named Torval who answers to a lord nobody has seen",
+    "Children work the sorting piles from age six"
+  ],
+  "family": [
+    {
+      "name": "Maren",
+      "role": "mother",
+      "trait": "exhausted",
+      "trust": 1.0,
+      "fear": 0.0,
+      "obligation": 1.0,
+      "tags": [
+        "family",
+        "overworked"
+      ]
+    },
+    {
+      "name": "Kael",
+      "role": "father",
+      "trait": "hard",
+      "trust": 0.6,
+      "fear": 0.8,
+      "obligation": 1.2,
+      "tags": [
+        "family",
+        "miner"
+      ]
+    }
+  ],
+  "home_location": {
+    "id": "ashfall_hauler_shack",
+    "name": "Hauler Row shack",
+    "kind": "worker shack",
+    "condition": "Coal dust clings to every blanket, and the floorboards creak under ore sacks."
+  },
+  "faction": {
+    "id": "ashfall_mine_authority",
+    "name": "Ashfall Mine Authority",
+    "stance": "extractive",
+    "notes": "The mine boss Torval enforces quotas and punishes delay."
+  },
+  "clocks": [],
+  "scene_problem": "The camp expects labor from everyone while the shaft collapse darkens every meal.",
+  "scene_objective": "Avoid drawing Torval's attention while surviving the camp's demands.",
+  "relationship_hints": [
+    "Maren keeps the household running by sheer endurance.",
+    "Kael's hardness is part fear of Torval and part fear of poverty."
+  ]
+}

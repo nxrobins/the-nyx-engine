@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     # Mock-mode latency simulation multiplier (tests set 0 to run instantly)
     mock_latency_scale: float = 1.0
 
+    # Calibration harness (backend/sim/) — additive, read only by the
+    # offline life-simulation harness, never by the game path (CAL-E8).
+    sim_default_turn_cap: int = 40
+    sim_baseline_path: str = ""   # empty = backend/sim/baseline.friction.json
+
     # CORS — origins allowed to call the API
     cors_origins: list[str] = [
         "http://localhost:5173",
