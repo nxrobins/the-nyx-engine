@@ -1,0 +1,54 @@
+{
+  "cartridge_version": 1,
+  "world_id": "fenward",
+  "generated_by": "builtin-conversion",
+  "source_hash": "0f9fba3361e3ac09",
+  "archetypes": [
+    "shadow"
+  ],
+  "settlement": "the Fenward",
+  "settlement_type": "isolated farmstead",
+  "region": "the Eastern Bogs",
+  "social_class": "bog-farmer (subsistence, no community)",
+  "active_situation": "You live alone with your grandmother. She has not spoken in three days. The goat is sick. The nearest neighbor is a half-day's walk through the bog, and your grandmother forbids the path.",
+  "world_facts": [
+    "The Fenward is a single stone house on a rise above the bog",
+    "Your parents are never mentioned and Gran will not answer questions about them",
+    "The bog produces peat, rushes, and eels",
+    "Something lives in the deeper bog that Gran calls 'the Mire'",
+    "The nearest settlement is a village called Crosshollow"
+  ],
+  "family": [
+    {
+      "name": "Gran",
+      "role": "grandmother",
+      "trait": "silent",
+      "trust": 1.0,
+      "fear": 0.6,
+      "obligation": 1.4,
+      "tags": [
+        "family",
+        "keeper"
+      ]
+    }
+  ],
+  "home_location": {
+    "id": "fenward_stone_house",
+    "name": "The Fenward stone house",
+    "kind": "farmstead house",
+    "condition": "Peat smoke leaks from the hearth while damp reeds dry beside the wall."
+  },
+  "faction": {
+    "id": "crosshollow_neighbors",
+    "name": "Crosshollow neighbors",
+    "stance": "distant",
+    "notes": "Far enough away to be unreliable, close enough to matter in a crisis."
+  },
+  "clocks": [],
+  "scene_problem": "Isolation turns a sick goat and a silent elder into a genuine threat to survival.",
+  "scene_objective": "Read Gran's mood, keep the household functioning, and decide whether to obey her limits.",
+  "relationship_hints": [
+    "Gran protects knowledge through silence.",
+    "Isolation makes every small household problem feel enormous."
+  ]
+}

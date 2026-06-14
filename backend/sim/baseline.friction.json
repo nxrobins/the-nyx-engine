@@ -1,0 +1,171 @@
+{
+  "friction": {
+    "avg_died_turn": 8.64,
+    "death_cause_mix": {
+      "__capped__": 5,
+      "broken_oath": 2,
+      "self_destruct_keyword": 2,
+      "wounds": 2
+    },
+    "doom": {
+      "escapable_deaths": 2,
+      "escapable_escape_rate": 0.0,
+      "escapable_escapes": 0,
+      "escapable_lives": 2,
+      "inescapable_deaths": 2,
+      "inescapable_lives": 2,
+      "inescapable_smuggle": 0
+    },
+    "epochs_reached": {
+      "0": 1,
+      "1": 2,
+      "2": 2,
+      "3": 3,
+      "4": 1,
+      "5": 2
+    },
+    "exploit": {
+      "engine_positive": 10,
+      "false_negative": 8,
+      "false_positive": 0,
+      "labeled": 18,
+      "precision": 1.0,
+      "recall": 0.5556,
+      "true_positive": 10
+    },
+    "imbalance_at_death": {
+      "1.0": 1,
+      "2.5": 1,
+      "3.5": 2,
+      "4.0": 1,
+      "4.3": 1,
+      "5.0": 5
+    },
+    "n_lives": 11,
+    "oath_economy": {
+      "broken": 2,
+      "fulfilled": 0,
+      "sworn": 2
+    },
+    "promise_economy": {
+      "abandoned": 0,
+      "paid": 0,
+      "planted": 0
+    }
+  },
+  "keyword_smuggle": {
+    "by_category": {
+      "deceptive": {
+        "pairs": 4,
+        "smuggled": 4
+      },
+      "public": {
+        "pairs": 2,
+        "smuggled": 2
+      },
+      "violent": {
+        "pairs": 2,
+        "smuggled": 2
+      }
+    },
+    "detail": [
+      {
+        "category": "deceptive",
+        "label": "deception_ledger",
+        "per_axis_diff": {
+          "debt": 0.2,
+          "exploit_score": 0.8,
+          "scarcity": 0.5,
+          "suspicion": 0.6
+        },
+        "plain_harm": 1.85,
+        "smuggled_harm": -0.25,
+        "smuggled_through": true
+      },
+      {
+        "category": "deceptive",
+        "label": "deception_lock",
+        "per_axis_diff": {
+          "exploit_score": 0.8,
+          "suspicion": 0.6
+        },
+        "plain_harm": 1.15,
+        "smuggled_harm": -0.25,
+        "smuggled_through": true
+      },
+      {
+        "category": "deceptive",
+        "label": "deception_magistrate",
+        "per_axis_diff": {
+          "exploit_score": 0.8,
+          "suspicion": 0.6
+        },
+        "plain_harm": 1.15,
+        "smuggled_harm": -0.25,
+        "smuggled_through": true
+      },
+      {
+        "category": "public",
+        "label": "public_boast",
+        "per_axis_diff": {
+          "faction_heat": 0.2,
+          "suspicion": 0.4
+        },
+        "plain_harm": 0.35,
+        "smuggled_harm": -0.25,
+        "smuggled_through": true
+      },
+      {
+        "category": "public",
+        "label": "public_challenge",
+        "per_axis_diff": {
+          "faction_heat": 0.2,
+          "suspicion": 0.4
+        },
+        "plain_harm": 0.35,
+        "smuggled_harm": -0.25,
+        "smuggled_through": true
+      },
+      {
+        "category": "deceptive",
+        "label": "resource_grain",
+        "per_axis_diff": {
+          "debt": 0.2,
+          "exploit_score": 0.8,
+          "scarcity": 0.5,
+          "suspicion": 0.6
+        },
+        "plain_harm": 1.85,
+        "smuggled_harm": -0.25,
+        "smuggled_through": true
+      },
+      {
+        "category": "violent",
+        "label": "violence_guard",
+        "per_axis_diff": {
+          "faction_heat": 0.4,
+          "suspicion": 0.5,
+          "wounds": 0.7
+        },
+        "plain_harm": 1.35,
+        "smuggled_harm": -0.25,
+        "smuggled_through": true
+      },
+      {
+        "category": "violent",
+        "label": "violence_merchant",
+        "per_axis_diff": {
+          "faction_heat": 0.4,
+          "suspicion": 0.5,
+          "wounds": 0.7
+        },
+        "plain_harm": 1.35,
+        "smuggled_harm": -0.25,
+        "smuggled_through": true
+      }
+    ],
+    "pairs": 8,
+    "smuggle_rate": 1.0,
+    "smuggled_through": 8
+  }
+}
