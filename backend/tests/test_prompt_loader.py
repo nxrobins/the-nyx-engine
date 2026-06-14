@@ -13,7 +13,7 @@ from app.services.prompt_loader import _cache, load_prompt, reload_all, reload_p
 # All 6 agents load successfully
 # ---------------------------------------------------------------------------
 
-_AGENT_NAMES = ["clotho", "lachesis", "nemesis", "eris", "hypnos", "chronicler"]
+_AGENT_NAMES = ["clotho", "lachesis", "nemesis", "eris", "hypnos", "chronicler", "sophia"]
 
 
 class TestLoadAllAgents:
@@ -63,7 +63,7 @@ class TestReload:
     def test_reload_all(self):
         _cache.clear()
         reload_all()
-        assert len(_cache) == 6
+        assert len(_cache) == len(_AGENT_NAMES)   # every agent yaml loaded
         for agent in _AGENT_NAMES:
             assert agent in _cache
 

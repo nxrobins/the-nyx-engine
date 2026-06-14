@@ -45,6 +45,7 @@ from app.agents.eris import Eris
 from app.agents.hypnos import Hypnos
 from app.agents.lachesis import Lachesis
 from app.agents.momus import Momus
+from app.agents.sophia import Sophia
 from app.agents.morpheus import Morpheus
 from app.agents.nemesis import Nemesis
 from app.agents.scribe import Scribe
@@ -478,6 +479,7 @@ class NyxKernel:
         self.clotho = Clotho()
         self.hypnos = Hypnos()
         self.momus = Momus()
+        self.sophia = Sophia()
         self.chronicler = Chronicler()
         self.morpheus = Morpheus()
         self.scribe = Scribe()
@@ -1132,6 +1134,60 @@ class NyxKernel:
         return retry_prose, retry_choices or choices, retry_validation, True
 
     # ------------------------------------------------------------------
+    # Shared Pipeline: Sophia — the semantic judge tier (after Momus)
+    # ------------------------------------------------------------------
+
+    async def _judge_prose_if_needed(
+        self,
+        ctx: TurnContext,
+        action: str,
+        prose: str,
+        choices: list[str],
+    ) -> tuple[str, list[str], list[str]]:
+        """Sophia's semantic pass after Momus's factual gate.
+
+        Refuse-only (ADJ-E3): pass-as-is → else ONE targeted critique-brief
+        regenerate → if it now passes commit it, else commit the ORIGINAL
+        Momus-cleared draft and park the unresolved brief for next turn.
+        Never selects a draft by score; Sophia writes no state. Returns
+        (prose, choices, sophia_residue).
+        """
+        critique = await self.sophia.judge(prose, ctx)
+        if critique.verdict != "revise" or not critique.judged:
+            return prose, choices, []
+
+        revisions = 0
+        while revisions < settings.sophia_max_revisions:
+            revisions += 1
+            regen_prose, regen_choices = await self._request_clotho_pass(
+                ctx, action, repair_brief=critique.critique_brief
+            )
+            # Re-police the regeneration: Momus (factual) then Sophia (semantic).
+            regen_prose, regen_choices, _mv, _ = await self._repair_prose_if_needed(
+                ctx, action, regen_prose, regen_choices
+            )
+            regen_critique = await self.sophia.judge(regen_prose, ctx)
+            if regen_critique.verdict != "revise" or not regen_critique.judged:
+                return regen_prose, regen_choices or choices, []
+            critique = regen_critique
+
+        residue = [critique.critique_brief] if critique.critique_brief else []
+        logger.info("Sophia: unresolved after revision — keeping original, deferring brief.")
+        return prose, choices, residue
+
+    async def _grade_and_defer(self, ctx: TurnContext, prose: str) -> list[str]:
+        """Stream path: GRADE the already-streamed prose, never regenerate it.
+
+        The player has already read the tokens; a post-stream swap is
+        forbidden (ADJ-E4). An unresolved critique only parks its brief for
+        next turn's craft notes.
+        """
+        critique = await self.sophia.judge(prose, ctx)
+        if critique.verdict == "revise" and critique.judged and critique.critique_brief:
+            return [critique.critique_brief]
+        return []
+
+    # ------------------------------------------------------------------
     # Shared Pipeline: _finalize_turn (Step 10+)
     # ------------------------------------------------------------------
 
@@ -1141,6 +1197,7 @@ class NyxKernel:
         prose: str,
         choices: list[str],
         validation: MomusValidation | None = None,
+        sophia_residue: list[str] | None = None,
     ) -> TurnResult:
         """Step 10+: Post-prose bookkeeping. Shared by sync and streaming.
 
@@ -1158,9 +1215,13 @@ class NyxKernel:
             prose = validation.corrected_prose or prose
         if validation.law_violations:
             logger.warning(f"Momus law violations: {validation.law_violations}")
-        # Law violations become next turn's craft notes — Momus's criticism
-        # feeds Clotho's next scene instead of dying in the log.
-        outcome.state.craft_notes = list(validation.law_violations[:3])
+        # Law violations + unresolved Sophia critique briefs become next turn's
+        # craft notes — Momus's criticism and the judge's residue feed Clotho's
+        # next scene instead of dying in the log. The single, capped writer of
+        # craft_notes (ADJ-E5): merge, dedupe, slice — never clobber, never grow.
+        residue = sophia_residue or []
+        merged = list(dict.fromkeys(list(validation.law_violations) + list(residue)))
+        outcome.state.craft_notes = merged[: settings.craft_notes_max]
 
         # Milestone check (any vector == 10)
         is_milestone, milestone_vec = SoulVectorEngine.is_milestone(
@@ -1703,11 +1764,17 @@ class NyxKernel:
             prose, choices, validation, _ = await self._repair_prose_if_needed(
                 ctx, action, prose, choices
             )
+            # Sophia's semantic pass: critique-brief regeneration (refuse-only).
+            prose, choices, sophia_residue = await self._judge_prose_if_needed(
+                ctx, action, prose, choices
+            )
         except BaseException:
             self._cancel_dream_task(dream_task)
             raise
 
-        result = await self._finalize_turn(ctx, prose, choices, validation=validation)
+        result = await self._finalize_turn(
+            ctx, prose, choices, validation=validation, sophia_residue=sophia_residue
+        )
 
         # Morpheus works behind the curtain Hypnos is about to draw;
         # the Scribe writes down what the curtain just closed on.
@@ -1858,9 +1925,14 @@ class NyxKernel:
                     "text": prose,
                 }) + "\n\n"
 
+            # Sophia GRADES the streamed render but never swaps it (ADJ-E4):
+            # an unresolved critique only defers its brief to next turn.
+            sophia_residue = await self._grade_and_defer(ctx, prose)
+
             # ── PHASE 3: STATE RESOLUTION ────────────────────────
             result = await self._finalize_turn(
-                ctx, prose, choices, validation=validation
+                ctx, prose, choices, validation=validation,
+                sophia_residue=sophia_residue,
             )
             db_saved = True
 

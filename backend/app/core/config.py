@@ -75,6 +75,14 @@ class Settings(BaseSettings):
     # Below it, the deterministically corrected prose commits directly.
     momus_retry_min_issues: int = 2
 
+    # Sophia — the semantic judge tier (Generative Adjudication). A second,
+    # model-facing pass behind Momus's regex pre-filter, with ZERO state
+    # authority. The issue-count -> action enforcement thresholds belong to
+    # the Consequence Calibration axis, not here (ADJ-E6).
+    sophia_model: str = "anthropic/claude-haiku-4-5-20251001"
+    sophia_max_revisions: int = 1
+    craft_notes_max: int = 3
+
     # Mock-mode latency simulation multiplier (tests set 0 to run instantly)
     mock_latency_scale: float = 1.0
 
