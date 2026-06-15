@@ -35,7 +35,7 @@ def _builtin_cartridges() -> list[WorldCartridge]:
 class TestPlan:
     def test_every_filename_satisfies_the_consumer_law(self):
         carts = _builtin_cartridges()
-        assert len(carts) == 4  # the builtins ship as cartridges
+        assert len(carts) >= 4  # the builtins ship as cartridges; minted worlds may add more
         for cart in carts:
             for job in plan_plates(cart):
                 assert _PLATE_RE.fullmatch(job.filename), (cart.world_id, job.filename)

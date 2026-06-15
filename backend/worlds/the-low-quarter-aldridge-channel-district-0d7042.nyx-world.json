@@ -1,0 +1,113 @@
+{
+  "archetypes": [
+    "light"
+  ],
+  "settlement": "The Low Quarter, Aldridge Channel District",
+  "settlement_type": "flood-plain working neighborhood",
+  "region": "the Valley between the Ridges",
+  "social_class": "Machine-shop floor supervisor family; low-quarter homeowners above poverty, below security",
+  "active_situation": "A Calibration Office rezoning notice arrived three days ago, moving the Morrow family's block deeper into the red flood zone. Dennis has until Friday to file a formal objection or the new boundary becomes permanent, affecting their home insurance and resale value. He needs the original 1971 survey data to challenge it, but the Calibration Office says the file is unavailable for public counter access.",
+  "world_facts": [
+    "The Low Quarter sits below the official flood line; drainage channels run through it like stitching and overflow in wet years.",
+    "Class is visible in rooflines: upper-slope houses have composite shingles replaced on schedule; low-quarter roofs are patchwork records of every bad year.",
+    "The hill road to school is longer but dry; the channel path is faster but smells of wet concrete and iron in winter.",
+    "Seven machine shops operate on Aldridge Street; their workers hold the valley's unwritten knowledge of how the drainage system actually behaves.",
+    "The Calibration Office sits inside city hall behind a chest-high laminate counter; its real operational maps are not available at the public window.",
+    "Certain gray-green schist stones, palm-sized and rounded, appear on channel banks and hillsides where they were not placed; they are not native to the valley's geology.",
+    "The culverts under the main roads emit a low irregular sound the night before significant weather; low-quarter residents call it the building settling.",
+    "Storms that arrive after thorough preparation tend to be less severe than forecast; the city over-prepares for every storm because this correlation has held thirty years.",
+    "The annual Calibration Fair in September includes a ceremonial reading of flood-zone maps by the city engineer; attendance is noticed.",
+    "The technical college scholarship requires a Calibration Office recommendation; most registered employers are ridge firms.",
+    "The eastern ridge school feeds the advanced track at three times the rate of the low-quarter school; placement tests are given in second grade.",
+    "The orchard on the eastern slope belongs to an estate in probate and is not on any school map; children use it freely.",
+    "Dennis Morrow smells of machine oil and the specific soap he uses to remove it; he corrects errors by placing the broken part in front of you and waiting."
+  ],
+  "family": [
+    {
+      "name": "Cael Morrow",
+      "role": "child protagonist, age 6",
+      "trait": "watchful",
+      "trust": 6.0,
+      "fear": 2.0,
+      "obligation": 3.0,
+      "tags": [
+        "height_hunger",
+        "systems_reading_nascent",
+        "anomaly_noticed"
+      ]
+    },
+    {
+      "name": "Ruth Morrow",
+      "role": "mother, district office administrator",
+      "trait": "managing",
+      "trust": 7.0,
+      "fear": 4.0,
+      "obligation": 6.0,
+      "tags": [
+        "institutional_alignment",
+        "protective",
+        "withholds_intervention"
+      ]
+    },
+    {
+      "name": "Dennis Morrow",
+      "role": "father, machine-shop floor supervisor",
+      "trait": "precise",
+      "trust": 8.0,
+      "fear": 1.0,
+      "obligation": 5.0,
+      "tags": [
+        "craft_knowledge",
+        "low_quarter_memory",
+        "elder_knowledge_carrier"
+      ]
+    },
+    {
+      "name": "Thomas Morrow",
+      "role": "grandfather, retired drainage crew",
+      "trait": "digressive",
+      "trust": 9.0,
+      "fear": 0.0,
+      "obligation": 2.0,
+      "tags": [
+        "elder_knowledge_carrier",
+        "old_riverbed_knowledge",
+        "anomaly_tolerance_high"
+      ]
+    }
+  ],
+  "home_location": {
+    "id": "morrow_house",
+    "name": "The Morrow House on the Channel Road",
+    "kind": "narrow-lot family home",
+    "condition": "maintained but aging; back fence post heeled toward the channel; roof patched in two colors"
+  },
+  "faction": {
+    "id": "calibration_office",
+    "name": "The Calibration Office",
+    "stance": "indifferent",
+    "notes": "City department controlling flood-zone boundaries and infrastructure permits. Public counter offers simplified maps only. Founding documents are not in the public library. The office has existed since 1958 and its director has always grown up in the valley. It manages the valley's measurement anomalies rather than solving them."
+  },
+  "clocks": [
+    {
+      "label": "Objection Deadline",
+      "max_segments": 5,
+      "stakes": "If Dennis misses Friday's filing window, the red-zone reclassification becomes permanent, raising insurance costs and locking the family into the new boundary.",
+      "resolution_hint": "Find the 1971 survey data Thomas once submitted, or get a Calibration Office employee to pull the deep-access file before the counter closes.",
+      "lethal": false
+    },
+    {
+      "label": "Storm Coming",
+      "max_segments": 6,
+      "stakes": "The culverts have been making the low sound for two nights. If the channels overflow before the back fence post is braced and the supply room stocked, the yard and utility room flood.",
+      "resolution_hint": "Hear Thomas's explanation of the culvert sound, help Dennis brace the post, and convince Ruth to stock the supply shelf before the official forecast catches up.",
+      "lethal": false
+    }
+  ],
+  "scene_problem": "Dennis came home from the Calibration Office counter at noon with the rezoning notice and nothing else. The clerk said the 1971 survey file requires a deep-access request that takes six weeks. Friday is in three days. Thomas is coming to dinner and Dennis hasn't told him yet. Ruth is cleaning things that are already clean.",
+  "scene_objective": "Cael wants to show Thomas the rezoning notice before dinner so Thomas can say what he knows about the old survey, without Ruth stopping the conversation by offering food.",
+  "cartridge_version": 1,
+  "world_id": "the-low-quarter-aldridge-channel-district-0d7042",
+  "generated_by": "gen_nyx_cartridge:claude-sonnet-4-6",
+  "source_hash": "0d7042ee2308fd28808d44944d75912074e4987ddf9d5b95101b759650bddd74"
+}
