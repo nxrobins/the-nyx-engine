@@ -20,6 +20,7 @@ import random
 
 from app.agents.base import AgentBase
 from app.core.config import settings
+from app.agents._degrade import note_degraded
 from app.schemas.state import HypnosResponse, ThreadState
 from app.services import llm
 from app.services.prompt_loader import load_prompt
@@ -138,5 +139,6 @@ class Hypnos(AgentBase):
                 return random.choice(_MOCK_DREAMS)
             return dream
         except Exception as e:
+            note_degraded("hypnos", model, e)
             logger.warning(f"Hypnos dream LLM failed: {e}")
             return random.choice(_MOCK_DREAMS)

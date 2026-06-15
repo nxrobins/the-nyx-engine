@@ -30,6 +30,7 @@ import random
 
 from app.agents.base import AgentBase, mock_pause
 from app.core.config import settings
+from app.agents._degrade import note_degraded
 from app.schemas.state import ChroniclerResponse, ThreadState
 from app.services import llm
 from app.services.prompt_loader import load_prompt
@@ -186,6 +187,7 @@ class Chronicler(AgentBase):
             logger.info(f"Chronicle: {sentence}")
             return sentence
         except Exception as e:
+            note_degraded("chronicler", model, e)
             logger.error(f"Chronicler LLM failed: {e}. Using mock.")
             return random.choice(_MOCK_CHRONICLES)
 

@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 from app.agents.base import AgentBase, mock_pause
 from app.agents.clotho import _mock_repair_prose
 from app.core.config import settings
+from app.agents._degrade import note_degraded
 from app.schemas.judge import JudgeCritique, JudgeViolation
 from app.schemas.state import ThreadState
 from app.services import llm
@@ -281,6 +282,7 @@ class Sophia(AgentBase):
             return _critique_from_text(substrate, facts, include_soft=False)
 
         authored = _clotho_authored(prose)
+        last_exc: Exception | None = None
         for attempt in range(2):  # one call + one informed retry (Morpheus pattern)
             try:
                 raw = await llm.generate(
@@ -294,8 +296,11 @@ class Sophia(AgentBase):
                 if raw and raw.strip():
                     return _critique_from_payload(_parse_payload(raw))
             except Exception as exc:
+                last_exc = exc
                 logger.warning(f"Sophia judge attempt {attempt + 1} failed: {exc!r}")
         # Fail-open: an optional organ never blocks the turn (ADJ-E6).
+        if last_exc is not None:
+            note_degraded("sophia", model, last_exc)
         return JudgeCritique(verdict="pass", judged=False)
 
 

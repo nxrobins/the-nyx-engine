@@ -31,6 +31,16 @@ class Settings(BaseSettings):
     morpheus_model: str = "anthropic/claude-sonnet-4-20250514"
     scribe_model: str = "anthropic/claude-sonnet-4-20250514"
 
+    # The Throttle — reliability bounds on REAL-model calls (mock mode is
+    # unaffected: each agent returns at its `model == "mock"` guard before any
+    # acompletion). Small numbers so a brownout fails fast to the mock net
+    # rather than stacking minutes across the sequential turn stage-chain.
+    llm_request_timeout: float = 15.0   # per-call wall clock (THR-C4)
+    llm_num_retries: int = 1            # litellm-internal retries; <=2 attempts/stage (THR-C4)
+    llm_concurrency_budget: int = 32    # global in-flight real-model calls; > per-turn fan-out (THR-C5)
+    llm_acquire_timeout: float = 30.0   # max wait for a budget slot before degrading to mock (THR-C5)
+    session_count_cap: int = 256        # hard ceiling on live sessions; LRU-evict idle ones (THR-C6)
+
     # BFL (Black Forest Labs) — Image generation
     bfl_api_key: str = ""
     bfl_model: str = "flux.1-schnell"

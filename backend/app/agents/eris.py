@@ -20,6 +20,7 @@ import re
 
 from app.agents.base import AgentBase, mock_pause
 from app.core.config import settings
+from app.agents._degrade import note_degraded
 from app.schemas.state import AgentProposal, ErisResponse, ThreadState
 from app.services import llm
 from app.services.canon import render_scene_snapshot
@@ -223,5 +224,6 @@ class Eris(AgentBase):
             )
             return _attach_proposal(_parse_response(raw))
         except Exception as e:
+            note_degraded("eris", model, e)
             logger.error(f"Eris LLM failed: {e}. Falling back to mock.")
             return _attach_proposal(_mock_chaos())

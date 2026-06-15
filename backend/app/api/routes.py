@@ -22,6 +22,7 @@ import json
 import logging
 import time
 import uuid
+from contextlib import contextmanager
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -47,11 +48,12 @@ _SESSION_TTL = 3600  # 1 hour — evict idle sessions
 
 
 class _SessionEntry:
-    __slots__ = ("kernel", "last_active")
+    __slots__ = ("kernel", "last_active", "processing")
 
     def __init__(self, kernel: NyxKernel) -> None:
         self.kernel = kernel
         self.last_active = time.monotonic()
+        self.processing = 0   # in-flight turn refcount — never evicted while > 0 (THR-C6)
 
     def touch(self) -> None:
         self.last_active = time.monotonic()
@@ -73,6 +75,7 @@ def _get_or_create_session(session_id: str | None = None) -> tuple[str, NyxKerne
     sid = uuid.uuid4().hex
     entry = _SessionEntry(NyxKernel())
     _sessions[sid] = entry
+    _evict_lru_if_over_cap(keep_sid=sid)
     logger.info(f"Session created: {sid} (active={len(_sessions)})")
     return sid, entry.kernel
 
@@ -97,9 +100,14 @@ def _destroy_session(session_id: str) -> None:
 
 
 def _evict_stale() -> None:
-    """Remove sessions idle longer than _SESSION_TTL."""
+    """Remove sessions idle longer than _SESSION_TTL. Never an in-flight turn
+    (THR-C6: last_active is set once at request entry and not refreshed during a
+    multi-minute turn, so a busy session can look 'stale' — the refcount guards it)."""
     now = time.monotonic()
-    stale = [sid for sid, e in _sessions.items() if now - e.last_active > _SESSION_TTL]
+    stale = [
+        sid for sid, e in _sessions.items()
+        if now - e.last_active > _SESSION_TTL and e.processing == 0
+    ]
     for sid in stale:
         entry = _sessions.pop(sid, None)
         if entry:
@@ -108,6 +116,47 @@ def _evict_stale() -> None:
             except Exception:
                 pass
             logger.info(f"Session evicted (idle): {sid}")
+
+
+def _evict_lru_if_over_cap(keep_sid: str | None = None) -> None:
+    """THR-C6: keep the live-session count under the cap by dropping the least-
+    recently-active IDLE session. NEVER evicts an in-flight turn (processing > 0)
+    NOR the session just created (keep_sid); if the only candidate left is busy or
+    the new session (a degenerate all-busy flood), it logs and serves anyway — the
+    always-continue invariant wins, and THR-C5's budget still bounds LLM fan-out."""
+    cap = settings.session_count_cap
+    while len(_sessions) > cap:
+        idle = sorted(
+            (e.last_active, sid) for sid, e in _sessions.items()
+            if e.processing == 0 and sid != keep_sid
+        )
+        if not idle:
+            logger.warning(
+                f"Session cap {cap} exceeded but no idle evictable session; serving anyway"
+            )
+            return
+        sid = idle[0][1]
+        entry = _sessions.pop(sid, None)
+        if entry:
+            try:
+                entry.kernel.reset()
+            except Exception:
+                pass
+            logger.info(f"Session evicted (LRU over cap): {sid}")
+
+
+@contextmanager
+def _in_flight(session_id: str):
+    """Mark a session as actively processing a turn so eviction skips it (THR-C6).
+    Sync CM — it brackets the awaited kernel work without becoming part of it."""
+    entry = _sessions.get(session_id)
+    if entry is not None:
+        entry.processing += 1
+    try:
+        yield
+    finally:
+        if entry is not None:
+            entry.processing = max(0, entry.processing - 1)
 
 
 # ------------------------------------------------------------------
@@ -148,7 +197,8 @@ async def submit_action(action: PlayerAction) -> TurnResult:
     update: dict = {"session_id": action.session_id}
     if detect_crisis(action.action).flagged and settings.welfare_copy_reviewed:
         update["crisis_resources"] = CRISIS_RESOURCES
-    result = await kernel.process_turn(action.action)
+    with _in_flight(action.session_id):   # THR-C6: not evictable mid-turn
+        result = await kernel.process_turn(action.action)
     return result.model_copy(update=update)
 
 
@@ -181,12 +231,14 @@ async def stream_turn_post(action: PlayerAction, request: Request):
                 "payload": CRISIS_RESOURCES,
             }) + "\n\n"
 
-        # Stream the 3-phase kernel pipeline
-        async for chunk in kernel.process_turn_stream(action.action):
-            if await request.is_disconnected():
-                logger.info("Client disconnected during stream")
-                return
-            yield chunk
+        # Stream the 3-phase kernel pipeline (in-flight for THR-C6 — the long
+        # part of the turn; eviction skips this session while it runs).
+        with _in_flight(action.session_id):
+            async for chunk in kernel.process_turn_stream(action.action):
+                if await request.is_disconnected():
+                    logger.info("Client disconnected during stream")
+                    return
+                yield chunk
 
         # BFL image: fire after stream if milestone triggered
         if (
