@@ -118,11 +118,12 @@ class WorldCartridge(BaseModel):
     family: list[CartridgeNPC] = Field(min_length=1, max_length=12)
     home_location: HomeLocation
     faction: Faction
-    # clocks: forward slot. WorldSeed has no clocks field and world_seeds.py is
-    # frozen in P1, so bootstrap_canon still synthesizes its single clock from
-    # scene_problem/active_situation; to_world_seed does not consume these.
-    # Carried, validated, and bounded now so P2 (multi-clock canon) needs no
-    # schema bump — same pattern as `mystery`.
+    # Authored scene clocks. to_world_seed() carries these into WorldSeed.clocks,
+    # and bootstrap_canon instantiates them as live SceneClocks (the single
+    # settlement-pressure clock is synthesized only when this list is empty).
+    # Lethality is rail-guarded at the Nyx loader, never trusted from the file
+    # (see canon._instantiate_authored_clocks): the world supplies stakes + a
+    # bool; it never gains authority to sever.
     clocks: list[CartridgeClock] = Field(default_factory=list, max_length=8)
     scene_problem: str = Field(min_length=1, max_length=400)
     scene_objective: str = Field(min_length=1, max_length=400)
@@ -192,7 +193,7 @@ class WorldCartridge(BaseModel):
         Deferred import keeps the schema layer free of a load-time dependency on
         core/ (world_seeds is a pure leaf, so there is no cycle either way).
         """
-        from app.core.world_seeds import WorldNPC, WorldSeed
+        from app.core.world_seeds import SeedClock, WorldNPC, WorldSeed
 
         return WorldSeed(
             settlement=self.settlement,
@@ -224,4 +225,14 @@ class WorldCartridge(BaseModel):
             relationship_hints=list(self.relationship_hints),
             default_scene_problem=self.scene_problem,
             default_scene_objective=self.scene_objective,
+            clocks=[
+                SeedClock(
+                    label=c.label,
+                    max_segments=c.max_segments,
+                    stakes=c.stakes,
+                    resolution_hint=c.resolution_hint,
+                    lethal=c.lethal,
+                )
+                for c in self.clocks
+            ],
         )

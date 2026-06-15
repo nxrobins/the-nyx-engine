@@ -7,10 +7,11 @@ turn loop without turning Nyx into a full simulation sandbox.
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 
-from app.core.world_seeds import WorldSeed
+from app.core.world_seeds import SeedClock, WorldSeed
 from app.schemas.state import (
     CanonFaction,
     CanonLocation,
@@ -22,11 +23,60 @@ from app.schemas.state import (
     WorldCanon,
 )
 
+logger = logging.getLogger("nyx.canon")
+
+# Lethality rails for authored clocks (WB-C4). The Nyx loader — not the autonovel
+# gate — is the security boundary: backend/worlds/ accepts hand-dropped files, so
+# a world's kill switch is constrained here, at instantiation, regardless of where
+# the cartridge came from. A world supplies stakes + a bool; it never gains
+# authority to sever a thread outside the staged-doom path (WB-C2).
+_MIN_LETHAL_SEGMENTS = 4   # a lethal clock below this would be an instant adult kill
+_MAX_LETHAL_CLOCKS = 1     # at most one lethal countdown per world
+
 
 def _slug(value: str) -> str:
     """Return a stable lowercase slug for ids."""
     slug = re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
     return slug or "unknown"
+
+
+def _instantiate_authored_clocks(seed_clocks: list[SeedClock]) -> dict[str, SceneClock]:
+    """Turn a cartridge's authored clocks into live SceneClocks, enforcing the
+    lethality rails (WB-C4). Returns an id->clock dict keyed `clock_{slug(label)}`
+    (label-slug uniqueness is already guaranteed by the cartridge validator).
+
+    Rails, applied here so a hand-dropped cartridge that never saw the autonovel
+    gate is still safe:
+      * a lethal clock with `max_segments < _MIN_LETHAL_SEGMENTS` is de-lethalized
+        (it keeps its stakes; it loses only the instant-kill capability);
+      * at most `_MAX_LETHAL_CLOCKS` lethal clocks survive — the rest de-lethalize.
+    """
+    clocks: dict[str, SceneClock] = {}
+    lethal_kept = 0
+    for sc in seed_clocks:
+        lethal = sc.lethal
+        if lethal and sc.max_segments < _MIN_LETHAL_SEGMENTS:
+            logger.info(
+                f"authored clock '{sc.label}': lethal cleared "
+                f"(max_segments {sc.max_segments} < {_MIN_LETHAL_SEGMENTS})"
+            )
+            lethal = False
+        if lethal and lethal_kept >= _MAX_LETHAL_CLOCKS:
+            logger.info(f"authored clock '{sc.label}': lethal cleared (already one lethal clock)")
+            lethal = False
+        if lethal:
+            lethal_kept += 1
+        clock_id = f"clock_{_slug(sc.label)}"
+        clocks[clock_id] = SceneClock(
+            clock_id=clock_id,
+            label=sc.label,
+            progress=0,
+            max_segments=sc.max_segments,
+            stakes=sc.stakes,
+            resolution_hint=sc.resolution_hint,
+            lethal=lethal,
+        )
+    return clocks
 
 
 def _clock_label(seed: WorldSeed) -> str:
@@ -103,22 +153,29 @@ def bootstrap_canon(seed: WorldSeed, player_name: str, player_gender: str) -> Wo
             notes=seed.faction_notes,
         )
 
-    clocks = {
-        clock_id: SceneClock(
-            clock_id=clock_id,
-            label=_clock_label(seed),
-            progress=0,
-            max_segments=4,
-            stakes=seed.active_situation,
-            resolution_hint=seed.default_scene_objective,
-        )
-    }
+    # Authored clocks (cartridge worlds) keep the world's distinct pressure
+    # structure. The single settlement-pressure clock is synthesized ONLY when
+    # none are authored — so the author-vs-fallback id collision is impossible
+    # by construction, and every builtin (clocks == []) behaves byte-identically.
+    if seed.clocks:
+        clocks = _instantiate_authored_clocks(seed.clocks)
+    else:
+        clocks = {
+            clock_id: SceneClock(
+                clock_id=clock_id,
+                label=_clock_label(seed),
+                progress=0,
+                max_segments=4,
+                stakes=seed.active_situation,
+                resolution_hint=seed.default_scene_objective,
+            )
+        }
 
     current_scene = SceneState(
         scene_id="scene_turn_1_birth",
         location_id=home_id,
         present_npc_ids=present_npc_ids,
-        active_clock_ids=[clock_id],
+        active_clock_ids=list(clocks.keys()),
         immediate_problem=seed.default_scene_problem or seed.active_situation,
         scene_objective=seed.default_scene_objective,
         carryover_consequence="",

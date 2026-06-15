@@ -129,6 +129,24 @@ class TestKernelInitialize:
 class TestWorldSeedIntegration:
     """Sprint 10: World seed is injected at initialization."""
 
+    @pytest.fixture(autouse=True)
+    def _pin_builtins(self, tmp_path):
+        """WB-C5: pin the world registry to builtins so these settlement asserts
+        are independent of backend/worlds/ contents — a future minted corpus (a
+        2nd cartridge for an archetype) can never retro-break them. The singleton
+        is restored and reloaded from the real default on teardown.
+        """
+        from app.core import world_registry
+
+        original = world_registry.settings.worlds_dir
+        empty = tmp_path / "empty_worlds"
+        empty.mkdir()
+        world_registry.settings.worlds_dir = str(empty)
+        world_registry.reload_registry()
+        yield
+        world_registry.settings.worlds_dir = original
+        world_registry.reload_registry()
+
     @pytest.mark.asyncio
     async def test_light_memory_seeds_thornwell(self, kernel: NyxKernel):
         result = await kernel.initialize(
