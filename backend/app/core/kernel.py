@@ -76,6 +76,7 @@ from app.services.canon import (
     apply_environment_update,
     bootstrap_canon,
     derive_environment_string,
+    maybe_depart_npcs,
     render_scene_snapshot,
     tick_scene_clocks,
     update_npc_relations,
@@ -1028,6 +1029,13 @@ class NyxKernel:
         rel_notes = update_npc_relations(outcome.state, action, outcome)
         if rel_notes and outcome.scene_outcome is not None:
             outcome.scene_outcome.material_changes.extend(rel_notes[:2])
+
+        # Step 8d': the witnesses can LEAVE — a present NPC betrayed past returning
+        # departs the scene for good (status -> "departed"), still remembered but
+        # gone from the cast. Deterministic; runs after the betrayal just landed.
+        depart_notes = maybe_depart_npcs(outcome.state)
+        if depart_notes and outcome.scene_outcome is not None:
+            outcome.scene_outcome.material_changes.extend(depart_notes[:2])
 
         _refresh_derived_environment(outcome.state)
 

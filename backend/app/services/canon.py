@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from app.core.config import settings
 from app.core.world_seeds import WorldSeed
 from app.schemas.state import (
     CanonFaction,
@@ -610,6 +611,41 @@ def update_npc_relations(state: ThreadState, action: str, outcome) -> list[str]:
         else:
             _record_warming(npc, kind, action, turn)
 
+    return notes[:2]
+
+
+def maybe_depart_npcs(state: ThreadState) -> list[str]:
+    """A witness betrayed past returning leaves your life for good.
+
+    A present, living NPC whose betrayal_weight has crossed the no-return
+    threshold (settings.npc_depart_betrayal_weight — the same point past which
+    `_record_warming` already throttles all warmth to zero) departs: status ->
+    "departed", so `_alive_present_ids` drops them from this and every future
+    scene. They are NOT erased — they stay in canon.npcs, still remembered by the
+    ledger and the bound book (their betrayals are already in `npc.events`); the
+    relationship simply has a permanent end. Deterministic, zero LLM, idempotent
+    (a departed NPC is no longer "alive", so it is never reconsidered). Returns at
+    most 2 notes for Clotho. Soul: the witnesses remember — and they can leave.
+    """
+    canon = state.canon
+    if not canon or not canon.current_scene:
+        return []
+    threshold = settings.npc_depart_betrayal_weight
+    notes: list[str] = []
+    for npc_id in _alive_present_ids(canon, canon.current_scene.present_npc_ids):
+        npc = canon.npcs[npc_id]
+        if npc.betrayal_weight >= threshold:
+            npc.status = "departed"
+            notes.append(
+                f"{npc.name} is gone — betrayed past returning, they have left "
+                f"your life and will not be in the scene again."
+            )
+    if notes:
+        # Re-settle the live present list so the scene reads true from this turn on
+        # (render already filters, but the stored scene should match the world).
+        canon.current_scene.present_npc_ids = _alive_present_ids(
+            canon, canon.current_scene.present_npc_ids
+        )
     return notes[:2]
 
 

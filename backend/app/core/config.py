@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     chronicle_interval: int = 5
     chronicle_prose_retention: int = 2
     hypnos_fragment_delay: float = 0.6
+    # Relationship consequence: the betrayal_weight past which a witness departs
+    # your life for good (status -> "departed"). 5.0 is the "no warmth returns"
+    # point (canon._record_warming), so departure is its logical end — roughly
+    # four deliberate betrayals of the same person.
+    npc_depart_betrayal_weight: float = 5.0
 
     # Doom staging — death arrives in installments, not as a syntax error.
     # Escape thresholds are calibrated against pressure decay rates so an
