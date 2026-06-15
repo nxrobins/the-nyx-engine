@@ -27,6 +27,7 @@ import re
 
 from app.agents.base import AgentBase, mock_pause
 from app.core.config import settings
+from app.agents._degrade import note_degraded
 from app.schemas.state import AgentProposal, LachesisResponse, ThreadState
 from app.services import llm
 from app.services.canon import render_scene_snapshot
@@ -392,5 +393,6 @@ class Lachesis(AgentBase):
             return _attach_proposal(result, state)
 
         except Exception as e:
+            note_degraded("lachesis", model, e)
             logger.error(f"Lachesis LLM failed: {e}. Falling back to mock.")
             return _attach_proposal(_mock_evaluate(state, action), state)

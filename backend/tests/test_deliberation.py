@@ -83,7 +83,7 @@ class TestResolvedSceneOutcome:
         assert ctx.outcome.state.canon.current_scene.carryover_consequence == ctx.outcome.nemesis_description
 
     @pytest.mark.asyncio
-    async def test_scene_outcome_names_present_npcs(self, kernel: NyxKernel):
+    async def test_scene_outcome_names_present_npcs(self, kernel: NyxKernel, builtins_only):
         await _init(kernel)
         ctx = await kernel._resolve_turn("look around")
         assert ctx.scene_outcome is not None

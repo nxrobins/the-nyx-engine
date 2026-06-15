@@ -31,6 +31,16 @@ class Settings(BaseSettings):
     morpheus_model: str = "anthropic/claude-sonnet-4-20250514"
     scribe_model: str = "anthropic/claude-sonnet-4-20250514"
 
+    # The Throttle — reliability bounds on REAL-model calls (mock mode is
+    # unaffected: each agent returns at its `model == "mock"` guard before any
+    # acompletion). Small numbers so a brownout fails fast to the mock net
+    # rather than stacking minutes across the sequential turn stage-chain.
+    llm_request_timeout: float = 15.0   # per-call wall clock (THR-C4)
+    llm_num_retries: int = 1            # litellm-internal retries; <=2 attempts/stage (THR-C4)
+    llm_concurrency_budget: int = 32    # global in-flight real-model calls; > per-turn fan-out (THR-C5)
+    llm_acquire_timeout: float = 30.0   # max wait for a budget slot before degrading to mock (THR-C5)
+    session_count_cap: int = 256        # hard ceiling on live sessions; LRU-evict idle ones (THR-C6)
+
     # BFL (Black Forest Labs) — Image generation
     bfl_api_key: str = ""
     bfl_model: str = "flux.1-schnell"
@@ -75,6 +85,10 @@ class Settings(BaseSettings):
     wounds_doom_escape: float = 7.5      # recovery below this lifts the doom
     faction_doom_threshold: float = 9.0  # faction heat that starts the manhunt
     faction_doom_escape: float = 8.0     # heat below this lifts the doom
+    # Old age — a long, UNDOOMED thread bends toward a natural close. Below this
+    # age no old-age doom begins; past it the decline loses ~one stage per decade.
+    # A game-balance knob; the >= 18 lower bound is load-bearing (OLD-AG-1).
+    old_age_threshold: int = 60
 
     # Momus repair: hallucination count that justifies a full Clotho retry.
     # Below it, the deterministically corrected prose commits directly.

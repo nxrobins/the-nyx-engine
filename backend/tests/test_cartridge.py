@@ -196,9 +196,14 @@ class TestBuiltinEquivalence:
 
     def test_all_shipped_cartridges_are_valid(self):
         files = sorted(_WORLDS_DIR.glob("*.nyx-world.json"))
-        assert len(files) == 4
+        ids = set()
         for f in files:
-            WorldCartridge.model_validate_json(f.read_text(encoding="utf-8"))
+            cart = WorldCartridge.model_validate_json(f.read_text(encoding="utf-8"))
+            ids.add(cart.world_id)
+        # The 4 builtin-equivalents must always ship; minted/bred worlds may add
+        # more (World Breadth). The invariant is "every shipped file is valid AND
+        # the builtins are all present", not "exactly four".
+        assert {"thornwell", "ashfall", "oldgate", "fenward"} <= ids
 
 
 class TestHermeticityFirewall:

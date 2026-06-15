@@ -24,6 +24,22 @@ class WorldNPC:
     tags: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class SeedClock:
+    """An authored scene clock carried from a cartridge into the runtime.
+
+    A pure leaf that mirrors only the consumer-relevant fields of the
+    cartridge's CartridgeClock — world_seeds.py imports nothing from schemas/,
+    so the runtime stays decoupled from the contract layer. bootstrap_canon
+    turns each of these into a live SceneClock (minting clock_id + progress).
+    """
+    label: str
+    max_segments: int = 4
+    stakes: str = ""
+    resolution_hint: str = ""
+    lethal: bool = False
+
+
 @dataclass
 class WorldSeed:
     settlement: str
@@ -44,6 +60,10 @@ class WorldSeed:
     relationship_hints: list[str] = field(default_factory=list)
     default_scene_problem: str = ""
     default_scene_objective: str = ""
+    # Authored scene clocks (cartridge worlds only). Empty for every builtin, so
+    # bootstrap_canon still synthesizes its single fallback clock and the keystone
+    # equivalence (cartridge.to_world_seed() == builtin) holds by construction.
+    clocks: list[SeedClock] = field(default_factory=list)
 
 
 # ═══════════════════════════════════════════════════════════════

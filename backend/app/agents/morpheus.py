@@ -21,6 +21,7 @@ import re
 
 from app.agents.base import AgentBase, mock_pause
 from app.core.config import settings
+from app.agents._degrade import note_degraded
 from app.schemas.morpheus import (
     AuthoredBeat,
     BeatSheet,
@@ -210,6 +211,7 @@ class Morpheus(AgentBase):
             return _mock_sheet(snapshot)
 
         violations: list[str] = []
+        last_exc: Exception | None = None
         for attempt in (1, 2):  # one informed retry
             try:
                 raw = await llm.generate(
@@ -227,8 +229,11 @@ class Morpheus(AgentBase):
                 )
                 return sheet
             except Exception as exc:
+                last_exc = exc
                 violations = [f"output invalid: {exc}"]
                 logger.warning(f"Morpheus attempt {attempt} failed: {exc!r}")
 
+        if last_exc is not None:
+            note_degraded("morpheus", model, last_exc)
         logger.warning("Morpheus: both attempts failed — the floor plays.")
         return None

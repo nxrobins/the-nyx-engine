@@ -53,6 +53,43 @@ def _hermetic_settings(monkeypatch, tmp_path):
     # Verdicts likewise.
     monkeypatch.setattr(settings, "assays_dir", str(tmp_path / "assays"))
 
+    # The Throttle (THR-C7): reset module-level state so degraded-count
+    # assertions and the session cap stay order-independent across the in-process
+    # suite, and a loop-bound LLM semaphore can't leak across pytest-asyncio loops.
+    from app.agents import _degrade
+    from app.api import routes as _routes
+    import app.services.llm as _llm
+
+    def _reset_throttle_state() -> None:
+        _degrade.reset_degraded()
+        _routes._sessions.clear()
+        _llm._BUDGET = None
+
+    _reset_throttle_state()
+    yield
+    _reset_throttle_state()
+
+
+@pytest.fixture
+def builtins_only():
+    """Pin the world registry to the in-code builtins (no cartridge files) so a
+    test that inits a world by archetype and asserts builtin-specific content
+    (NPC names, settlement) is independent of backend/worlds/ — a minted corpus
+    (a 2nd cartridge for an archetype) can never retro-break it (WB-C5).
+
+    Opt-in (NOT autouse): pinning rewrites the selected world_id to `builtin-<arch>`,
+    which would break tests that assert a real cartridge world_id — only request
+    this where the test asserts world CONTENT, not the world_id.
+    """
+    import app.core.world_registry as wr
+
+    original = wr.settings.worlds_dir
+    wr.settings.worlds_dir = "/nonexistent_hermetic_worlds_xyz"  # absent → builtins only
+    wr.reload_registry()
+    yield
+    wr.settings.worlds_dir = original
+    wr.reload_registry()
+
 
 # ---------------------------------------------------------------------------
 # Soul Vectors

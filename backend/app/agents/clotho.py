@@ -22,6 +22,7 @@ from typing import AsyncGenerator
 
 from app.agents.base import AgentBase, mock_pause
 from app.core.config import settings
+from app.agents._degrade import note_degraded
 from app.schemas.state import ClothoResponse, SceneOutcome, ThreadState
 from app.services import llm
 from app.services.canon import render_scene_snapshot
@@ -499,6 +500,7 @@ class Clotho(AgentBase):
                 ui_choices=choices,
             )
         except Exception as e:
+            note_degraded("clotho", model, e)
             logger.error(f"Clotho LLM failed: {e}. Falling back to mock.")
             choices = _fallback_choices_for_state(state, epoch_phase)
             return ClothoResponse(
@@ -579,6 +581,7 @@ class Clotho(AgentBase):
             ):
                 yield token
         except Exception as e:
+            note_degraded("clotho.stream", model, e)
             logger.error(f"Clotho stream failed: {e}. Falling back to mock chunks.")
             prose = _mock_prose(state)
             words = prose.split(" ")

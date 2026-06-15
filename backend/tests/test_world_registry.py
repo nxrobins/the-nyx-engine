@@ -142,6 +142,21 @@ class TestDeterminism:
         b = reg.select("a light", player_id="abc", run_number=7)[1]
         assert a == b
 
+    def test_selection_is_name_independent(self, worlds):
+        """WB-C6: selection is keyed strictly on (archetype, player_id, run_number).
+        Player NAME is not a parameter — a name can never bias which world a life
+        lands in (legacy name-independence). Same player_id+run → identical world."""
+        import inspect
+
+        directory, reg = worlds
+        _write(directory, "bleakmoor.nyx-world.json", _adversarial_payload())
+        reg.reload()
+        w1 = reg.select("a light", player_id="orin", run_number=3)[0]
+        w2 = reg.select("a light", player_id="orin", run_number=3)[0]
+        assert w1 == w2
+        params = set(inspect.signature(reg.select).parameters)
+        assert "player_name" not in params and "name" not in params
+
     def test_different_run_may_differ(self, worlds):
         directory, reg = worlds
         _write(directory, "bleakmoor.nyx-world.json", _adversarial_payload())

@@ -86,6 +86,7 @@ from app.services.doom import (
     advance_doom,
     begin_doom,
     doom_directive,
+    maybe_begin_old_age_doom,
     maybe_begin_pressure_dooms,
 )
 from app.services.hamartia_engine import (
@@ -202,6 +203,35 @@ _TURN_BEATS: dict[int, tuple[str, str]] = {
         "Show the IMMEDIATE consequence. After this, the player wakes "
         "into adulthood and the text box opens. Childhood is over."),
 }
+
+
+# Adulthood begins at turn 10 (epoch 4, age 18 — see _get_turn_metadata). Used by
+# the lethal-clock childhood guard (WB-C1): a world's kill switch is inert until
+# the player is an adult.
+_ADULT_START_TURN = 10
+
+
+def _doom_from_lethal_clock(state, fired_clock) -> bool:
+    """A fired authored lethal clock begins an inescapable 3-stage doom — the
+    single point where a world's clock can threaten a life.
+
+    WB-C1: inert in childhood (turns 1-9) — bootstrap_canon, the only clock
+    instantiation point, is always a childhood scene, so the age rule lives here.
+    WB-C2: routes through `begin_doom` (staged; Atropos severs only at the final
+    stage, Eris-miracle valve intact) — a world NEVER sets terminal or severs
+    directly. Returns True iff a doom took hold.
+    """
+    if not fired_clock.lethal:
+        return False
+    if state.session.turn_count < _ADULT_START_TURN:
+        return False
+    return begin_doom(
+        state,
+        cause="clock",
+        description=fired_clock.stakes,
+        max_stage=3,
+        escapable=False,
+    )
 
 
 def _get_turn_metadata(turn_count: int) -> tuple[int, int, str, str, str]:
@@ -995,6 +1025,13 @@ class NyxKernel:
         if pressure_doom_note and outcome.scene_outcome is not None:
             outcome.scene_outcome.material_changes.append(pressure_doom_note)
 
+        # Step 8b': the slow doom of age — a long, UNDOOMED thread finally bends
+        # toward a natural close (OLD-C3 seam: after the pressure dooms, BEFORE the
+        # step-8c clock tick; begun at stage 1, first seen by Atropos next turn).
+        old_age_note = maybe_begin_old_age_doom(outcome.state)
+        if old_age_note and outcome.scene_outcome is not None:
+            outcome.scene_outcome.material_changes.append(old_age_note)
+
         # Step 8c: Scene clocks tick — the world's problems mature whether
         # or not the player attends them. Fired clocks become true.
         tick = tick_scene_clocks(
@@ -1008,14 +1045,10 @@ class NyxKernel:
             )
         for fired_clock in tick.fired:
             logger.info(f"CLOCK FIRED: {fired_clock.label} — {fired_clock.stakes}")
-            if fired_clock.lethal:
-                begin_doom(
-                    outcome.state,
-                    cause="clock",
-                    description=fired_clock.stakes,
-                    max_stage=3,
-                    escapable=False,
-                )
+            # WB-C1/C2: a lethal clock dooms only in adulthood, only via the
+            # staged doom (never an instant sever). The clock still fires either
+            # way — its stakes become scene truth above.
+            _doom_from_lethal_clock(outcome.state, fired_clock)
         if tick.notes and outcome.scene_outcome is not None:
             outcome.scene_outcome.material_changes.extend(tick.notes)
             outcome.scene_outcome.must_not_contradict.append(

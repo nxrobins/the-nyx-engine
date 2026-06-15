@@ -148,7 +148,10 @@
 	.loom-title {
 		font-family: var(--font-prose);
 		font-weight: 600;
-		font-size: 3rem;
+		/* clamp so the title never overflows a narrow phone (UX-C4 — MUST be in
+		   this scoped block; the global app.css .loom-title has no font-size and
+		   loses to this on Svelte-hash specificity, so an app.css edit no-ops). */
+		font-size: clamp(2rem, 8vw, 3rem);
 		color: var(--nyx-text);
 		text-transform: uppercase;
 		animation: loom-contract 6s ease-out forwards;
@@ -216,5 +219,12 @@
 
 	.library-entry:hover {
 		color: var(--nyx-oracle-gold);
+	}
+
+	/* UX-C5: scoped — a bare app.css .library-entry:focus-visible can't match
+	   this Svelte-hashed class. Keyboard focus gets the same gold hairline. */
+	.library-entry:focus-visible {
+		outline: 1px solid var(--nyx-oracle-gold);
+		outline-offset: 3px;
 	}
 </style>

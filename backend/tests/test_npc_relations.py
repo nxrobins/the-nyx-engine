@@ -259,7 +259,7 @@ class TestDeterminismAndRender:
 
 class TestKernelWiring:
     @pytest.mark.asyncio
-    async def test_betraying_a_present_npc_sours_the_bond(self):
+    async def test_betraying_a_present_npc_sours_the_bond(self, builtins_only):
         from app.core.kernel import NyxKernel
         kernel = NyxKernel()
         await kernel.initialize(

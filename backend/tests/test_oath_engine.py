@@ -4,8 +4,24 @@ Extracted from TestDetectOath in test_lachesis.py (P1-002).
 """
 
 from app.schemas.state import Oath, OathTerms, SoulLedger, ThreadState
-from app.services.oath_engine import detect_oath, verify_oaths
+from app.services.oath_engine import (
+    detect_oath,
+    oath_hypocrisy_score,
+    verify_oaths,
+)
 from app.services.oath_parser import parse_oath_text
+
+
+def _oath(oath_id: str, **term_kwargs) -> Oath:
+    """An active oath with the given terms (None to omit terms entirely)."""
+    terms = None if term_kwargs.pop("no_terms", False) else OathTerms(
+        subject="Hero", **term_kwargs
+    )
+    return Oath(oath_id=oath_id, text="...", turn_sworn=2, terms=terms)
+
+
+def _ledger(*oaths: Oath) -> ThreadState:
+    return ThreadState(soul_ledger=SoulLedger(active_oaths=list(oaths)))
 
 
 class TestDetectOath:
@@ -147,3 +163,55 @@ class TestVerifyOaths:
         assert broken == []
         assert fulfilled == []
         assert transformed == ["oath_3"]
+
+
+class TestVerifyOathsEdges:
+    """The death-critical break/skip branches the happy-path tests miss."""
+
+    def test_forbidden_action_breaks_the_oath(self):
+        # A "never X" oath is broken by doing X — the most direct path to
+        # oath-break → Nemesis lethal → death.
+        state = _ledger(_oath("o1", forbidden_action="betray the village"))
+        broken, fulfilled, transformed = verify_oaths(state, "I betray the village at dawn")
+        assert broken == ["o1"]
+        assert fulfilled == [] and transformed == []
+
+    def test_oath_with_no_terms_is_skipped_not_crashed(self):
+        # An oath whose text parsed to no structured terms must be inert in
+        # verification, never raise.
+        state = _ledger(_oath("o2", no_terms=True))
+        assert verify_oaths(state, "I attack someone") == ([], [], [])
+
+    def test_inactive_oath_is_ignored(self):
+        state = _ledger(_oath("o3", forbidden_action="betray the village"))
+        state.soul_ledger.active_oaths[0].status = "broken"
+        assert verify_oaths(state, "I betray the village") == ([], [], [])
+
+
+class TestOathHypocrisyScore:
+    """Hypocrisy is open mockery of an oath short of fully breaking it — it
+    feeds Nemesis's punishment trigger, so its scoring must stay pinned."""
+
+    def test_threatening_the_protected_target_scores(self):
+        state = _ledger(_oath("o1", promised_action="protect Mara", protected_target="Mara"))
+        assert oath_hypocrisy_score(state.soul_ledger.active_oaths, "I threaten Mara openly") == 1.0
+
+    def test_looting_while_sworn_to_protect_scores_half(self):
+        # promised "protect" + a plundering verb, with no protected_target hit.
+        state = _ledger(_oath("o2", promised_action="protect the weak"))
+        assert oath_hypocrisy_score(state.soul_ledger.active_oaths, "I steal from the poor") == 0.5
+
+    def test_lying_while_sworn_to_truth_scores(self):
+        state = _ledger(_oath("o3", promised_action="speak only the truth"))
+        assert oath_hypocrisy_score(state.soul_ledger.active_oaths, "I lie to the magistrate") == 1.0
+
+    def test_clean_action_scores_zero(self):
+        state = _ledger(_oath("o4", promised_action="protect Mara", protected_target="Mara"))
+        assert oath_hypocrisy_score(state.soul_ledger.active_oaths, "I tend the garden") == 0.0
+
+    def test_inactive_or_termless_oaths_do_not_score(self):
+        active_termless = _oath("o5", no_terms=True)
+        inactive = _oath("o6", promised_action="speak the truth")
+        inactive.status = "fulfilled"
+        score = oath_hypocrisy_score([active_termless, inactive], "I lie and threaten everyone")
+        assert score == 0.0

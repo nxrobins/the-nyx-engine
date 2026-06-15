@@ -1457,3 +1457,61 @@ hr.nyx-divider {
 	opacity: 1;
 	color: var(--nyx-oracle-gold);
 }
+
+/* ════════════════════════════════════════════════════════════════
+   THE THRESHOLD — reachability for touch / keyboard / mobile.
+   Frontend-only, diegetic. Focus rules are ENUMERATED, never universal
+   (UX-C2). No new animation ships here, so the existing reduced-motion
+   contract is untouched (UX-C1). Appended last so these win on source
+   order over the base rules they soften.
+   ════════════════════════════════════════════════════════════════ */
+
+/* HUD legibility — dim, but legible at rest on touch (was 0.5). The
+   hover→0.85 + pointer-events:auto rule stays as-is (harmless on touch). */
+.thread-hud-text { opacity: 0.8; }
+
+/* The mechanics edges are always faintly present now — the hover gate is
+   gone, so a touch player can see there is something to reach for. The
+   unseen-change pulse (edge-pulse-anim, 0.6→1) still blooms above this and
+   settles back to 0.28 — strictly an improvement, not a regression. */
+.edge-glyph { opacity: 0.28; }
+.pane-edge:hover .edge-glyph,
+.pane-edge:focus-visible .edge-glyph { opacity: 0.9; }
+
+/* Diegetic keyboard focus — a faint gold hairline, no box, no chrome.
+   ENUMERATED controls only (UX-C2): never the title click-div, the
+   prose-advance breath, or the dismiss scrim. The two text inputs and the
+   two scoped-class controls (.loom-title sibling .library-entry,
+   .incarnation-input) are handled at their components (UX-C3/C5). */
+.nyx-choice-btn:focus-visible,
+.pane-edge:focus-visible,
+.death-rite-btn:focus-visible,
+.library-spine:focus-visible,
+.library-close:focus-visible,
+.book-reader-close:focus-visible,
+.crisis-link:focus-visible,
+.crisis-dismiss:focus-visible,
+.consent-proceed:focus-visible,
+.consent-help:focus-visible,
+.diegetic-control:focus-visible {
+	outline: 1px solid var(--nyx-oracle-gold);
+	outline-offset: 3px;
+	border-radius: 1px;
+}
+
+/* Mobile reachability — changes ONLY width / wrap / font. Adds NO wrapping
+   element and NO transform/filter/overflow on any pane or Ink ancestor, so
+   the fixed z-ladder (Ink z-1, panes z-50, DeathRite z-60, crisis z-150/200)
+   is preserved on mobile (UX-C7). Pane width stays transform-based and flush
+   off-screen when closed (UX-C8). */
+@media (max-width: 640px) {
+	.pane-overlay { width: min(300px, 88vw); }
+	.thread-hud { flex-wrap: wrap; padding: 0.5rem 0.75rem; }
+	.thread-hud-text { font-size: 0.72rem; letter-spacing: 0.1em; }
+}
+
+/* Touch: widen the edge tap target toward the 44px WCAG target without
+   touching the austere 24px desktop strip (fine-pointer). Width only. */
+@media (pointer: coarse) {
+	.pane-edge { width: 44px; }
+}

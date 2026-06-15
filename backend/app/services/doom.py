@@ -150,6 +150,39 @@ def maybe_begin_pressure_dooms(state: ThreadState) -> str:
     return ""
 
 
+def maybe_begin_old_age_doom(state: ThreadState) -> str:
+    """Start the slow, inescapable doom of age — so a long, UNDOOMED thread bends
+    toward a natural close instead of climbing in years forever. Returns a note or "".
+
+    Yields to any active doom (OLD-AG-2): an acute cause — a fresh mortal wound,
+    the closing hunt — claims the old as readily as the young, and dying OF that
+    cause reads truer (and keeps its visible escape) than a silent relabel to age.
+    So this only ever begins on a long thread that has out-survived every acute end.
+
+    OLD-C2: begun at stage 1 here at step 8b, first SEEN by Atropos next turn — never
+    an instant sever, even at the max_stage=1 floor (one lived turn). Pure, no tokens.
+    """
+    if state.doom.active:
+        return ""
+    # Self-contained age (NOT coupled to _get_turn_metadata/_AGE_MAP). The childhood
+    # formula would read 18 here, but the >= threshold gate (>= 18 by OLD-AG-1) keeps
+    # that discrepancy permanently out of range.
+    age = 18 + max(0, state.session.turn_count - 10)
+    if age < settings.old_age_threshold:
+        return ""
+    # Less runway with each decade past the threshold, FLOORED at 1 so the decline
+    # is always staged, never instant (OLD-AG-3): age 60 -> 3 turns, 80+ -> 1.
+    max_stage = max(1, 3 - (age - settings.old_age_threshold) // 10)
+    begin_doom(
+        state,
+        cause="old_age",
+        description="The body has carried you a long way, and it is tiring.",
+        max_stage=max_stage,
+        escapable=False,
+    )
+    return "The long road begins to tell: age turns mortal."
+
+
 def is_doom_terminal(state: ThreadState) -> bool:
     """True when the doom has reached its final stage — Atropos may cut."""
     doom = state.doom
@@ -168,6 +201,11 @@ def doom_death_reason(state: ThreadState) -> str:
         "wounds": "The body, asked once too often, declines. The thread frays from the flesh inward.",
         "faction_heat": "The hunters close the last door. There is no crowd to vanish into this time.",
         "clock": "The reckoning you let mature collects its debt.",
+        "old_age": (
+            "The long road ends where all roads end. The body, having carried "
+            "you so far, sets its burden down, and the thread — frayed thin by "
+            "the years — finally parts."
+        ),
     }
     return f"{by_cause.get(doom.cause, base)}"
 

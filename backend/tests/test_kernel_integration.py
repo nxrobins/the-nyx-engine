@@ -126,8 +126,14 @@ class TestKernelInitialize:
         assert isinstance(result.ui_choices, list)
 
 
+@pytest.mark.usefixtures("builtins_only")
 class TestWorldSeedIntegration:
-    """Sprint 10: World seed is injected at initialization."""
+    """Sprint 10: World seed is injected at initialization.
+
+    WB-C5: pinned to builtins (via the shared `builtins_only` fixture) so these
+    settlement asserts are independent of backend/worlds/ — a minted corpus can
+    never retro-break them.
+    """
 
     @pytest.mark.asyncio
     async def test_light_memory_seeds_thornwell(self, kernel: NyxKernel):

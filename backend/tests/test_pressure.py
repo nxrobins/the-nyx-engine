@@ -8,8 +8,12 @@ from app.agents.clotho import _build_payload
 from app.agents.eris import Eris
 from app.agents.nemesis import Nemesis
 from app.core.resolver import ResolvedOutcome
-from app.schemas.state import PressureState, ThreadState
-from app.services.pressure import apply_pressure_delta, evolve_pressures
+from app.schemas.state import Oath, OathTerms, PressureState, SoulLedger, ThreadState
+from app.services.pressure import (
+    apply_pressure_delta,
+    evolve_pressures,
+    salient_pressure_prompt,
+)
 
 
 class TestPressureEvolution:
@@ -40,6 +44,67 @@ class TestPressureEvolution:
         assert "Answer suspicion" in payload
 
 
+class TestOmenRecedes:
+    """Fate Recedes — omen must be able to fall, not only ratchet up.
+
+    The player-facing layer already promises a fade ("Follow the omen before
+    it fades"); these tests pin that the deterministic math now honours it,
+    while keeping fate's forgetfulness slow enough that a single fateful event
+    still raises omen on its own turn.
+    """
+
+    def test_omen_fades_on_a_quiet_turn(self, fresh_state: ThreadState):
+        fresh_state.pressures = PressureState(omen=2.0)
+        outcome = ResolvedOutcome(state=fresh_state)
+        evolution = evolve_pressures(fresh_state, "I wait and watch the road", outcome)
+        assert evolution.stable_turn is True
+        assert evolution.delta["omen"] < 0
+        updated = apply_pressure_delta(
+            fresh_state.pressures, evolution.delta, stable_turn=evolution.stable_turn
+        )
+        assert updated.omen < 2.0
+
+    def test_omen_does_not_fade_on_a_turbulent_turn(self, fresh_state: ThreadState):
+        fresh_state.pressures = PressureState(omen=2.0)
+        outcome = ResolvedOutcome(state=fresh_state)
+        evolution = evolve_pressures(fresh_state, "I attack and shout at the crowd", outcome)
+        assert evolution.stable_turn is False
+        # No quiet-turn relief on a loud turn — fate keeps watching.
+        assert evolution.delta.get("omen", 0.0) >= 0.0
+
+    def test_a_fresh_omen_spike_still_nets_a_rise_even_when_quiet(
+        self, fresh_state: ThreadState
+    ):
+        # A Nemesis strike adds omen on the same turn the fade would apply;
+        # the spike must dominate so the warning is never silently erased.
+        fresh_state.pressures = PressureState(omen=1.0)
+        outcome = ResolvedOutcome(state=fresh_state, nemesis_struck=True)
+        evolution = evolve_pressures(fresh_state, "I wait", outcome)
+        assert evolution.delta["omen"] > 0
+
+    def test_omen_never_underflows_below_zero(self, fresh_state: ThreadState):
+        # At the floor, repeated quiet turns clamp at 0 — no negative omen.
+        fresh_state.pressures = PressureState(omen=0.0)
+        outcome = ResolvedOutcome(state=fresh_state)
+        evolution = evolve_pressures(fresh_state, "I wait and rest", outcome)
+        updated = apply_pressure_delta(
+            fresh_state.pressures, evolution.delta, stable_turn=evolution.stable_turn
+        )
+        assert updated.omen == 0.0
+
+    def test_fade_is_slow_a_single_quiet_turn_barely_dents_high_omen(
+        self, fresh_state: ThreadState
+    ):
+        # Sustained quiet, not one calm breath, earns fate's inattention.
+        fresh_state.pressures = PressureState(omen=8.0)
+        outcome = ResolvedOutcome(state=fresh_state)
+        evolution = evolve_pressures(fresh_state, "I wait quietly", outcome)
+        updated = apply_pressure_delta(
+            fresh_state.pressures, evolution.delta, stable_turn=evolution.stable_turn
+        )
+        assert 7.5 <= updated.omen < 8.0  # a dent, not a reset
+
+
 class TestPressureDrivenAgents:
     """Nemesis and Eris should react to pressure, not only raw imbalance."""
 
@@ -62,3 +127,40 @@ class TestPressureDrivenAgents:
         monkeypatch.setattr("app.agents.eris.random.random", lambda: 0.6)
         result = await Eris().evaluate(fresh_state, "wait")
         assert result.chaos_triggered is True
+
+
+class TestSalientPressurePrompt:
+    """The directive that pushes at least one generated choice to answer the
+    dominant pressure. Each branch is the contract the choice layer reads."""
+
+    @pytest.mark.parametrize("field,word", [
+        ("suspicion", "suspicion"),
+        ("wounds", "wounds"),
+        ("debt", "debt"),
+        ("scarcity", "scarcity"),
+        ("faction_heat", "faction heat"),
+        ("omen", "omen"),
+    ])
+    def test_each_pressure_above_threshold_names_its_answer(self, field, word):
+        state = ThreadState(pressures=PressureState(**{field: 1.6}))
+        assert salient_pressure_prompt(state).startswith(f"Answer {word}")
+
+    def test_suspicion_takes_priority_over_a_co_active_pressure(self):
+        # Branch order is the priority: suspicion is checked before wounds.
+        state = ThreadState(pressures=PressureState(suspicion=2.0, wounds=2.0))
+        assert salient_pressure_prompt(state).startswith("Answer suspicion")
+
+    def test_falls_through_to_active_oath_cost(self):
+        # No pressure dominates, but a priced oath is owed an accounting.
+        state = ThreadState(
+            pressures=PressureState(),
+            soul_ledger=SoulLedger(active_oaths=[
+                Oath(oath_id="o1", text="...", turn_sworn=1,
+                     terms=OathTerms(subject="Hero", promised_action="serve", price="honor")),
+            ]),
+        )
+        prompt = salient_pressure_prompt(state)
+        assert "oath cost" in prompt and "honor" in prompt
+
+    def test_quiet_state_with_no_priced_oath_is_empty(self):
+        assert salient_pressure_prompt(ThreadState(pressures=PressureState())) == ""
