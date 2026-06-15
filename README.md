@@ -8,19 +8,21 @@ The game doesn't serve you. It tests you.
 
 ## What Is This?
 
-Nyx Engine is a text-driven CYOA game where eight autonomous AI agents collaborate and conflict to shape a living narrative. Each agent has a mythological role, a competing agenda, and a voice. A central **Nyx Kernel** resolves their disputes through a strict conflict hierarchy, producing emergent stories that feel authored — not generated.
+Nyx Engine is a text-driven CYOA game where a roster of autonomous AI agents collaborate and conflict to shape a living narrative. Each agent has a mythological role, a competing agenda, and a voice. A central **Nyx Kernel** resolves their disputes through a strict conflict hierarchy, producing emergent stories that feel authored — not generated.
 
 Players make choices. The Fates judge them. A soul accumulates weight across four moral vectors. At the threshold turn, the engine assigns a tragic flaw based on a childhood of decisions. Death is permanent. Legacy echoes forward.
 
 ## Architecture
 
-### Three Layers, Eight Agents
+### Three Layers, Nine Live-Turn Agents
 
 | Layer | Role | Agents |
 |-------|------|--------|
 | **Moirai** (Determinism) | Story truth, state validity, death | **Clotho** (prose weaver), **Lachesis** (state evaluator + RAG), **Atropos** (death arbiter) |
 | **Adversaries** (Friction) | Anti-exploit karma, chaos injection | **Nemesis** (hubris punisher), **Eris** (chaos RNG) |
-| **Gatekeepers** (Interface) | Latency masking, post-death, validation | **Hypnos** (loading mask prose), **Chronicler** (memory compression), **Momus** (NER validator) |
+| **Gatekeepers** (Interface) | Latency masking, post-death, validation | **Hypnos** (loading mask prose), **Chronicler** (memory compression), **Momus** (NER validator), **Sophia** (semantic judge) |
+
+Beyond the live turn, the **Morpheus ladder** (autonovel ↔ Nyx) adds two more organs: **Morpheus** (the Re-Outliner — plants and pays narrative promises across a life) and **Scribe** (binds a finished life into a typeset book). See `backend/MORPHEUS.md`.
 
 The **Nyx Kernel** orchestrates all agents through a unified resolve pipeline and resolves conflicts via a strict priority hierarchy:
 
@@ -70,6 +72,8 @@ At a threshold turn, the dominant vector determines the player's **hamartia** (t
 | Hypnos | Claude Haiku 4.5 | Loading mask flavor text |
 | Chronicler | Claude Haiku 4.5 | Memory compression |
 
+**Atropos** and **Momus** run deterministically (Atropos uses Nemesis's model only for an optional narrative dead-end check); **Sophia**, **Morpheus**, and **Scribe** each have their own configurable model — see `backend/app/core/config.py`.
+
 All agents support a `mock` mode for development — no API keys required to run the full game loop.
 
 ## Getting Started
@@ -117,7 +121,7 @@ cd backend
 pytest
 ```
 
-523 tests across 24 test files covering all agents, the kernel resolve pipeline, conflict resolution, math services, oath detection, hamartia assignment, doom staging, scene clocks, the adult director, memory compression, and the epoch state machine.
+The backend test suite covers every agent, the kernel resolve pipeline, conflict resolution, math services, oath detection, hamartia assignment, doom staging, scene clocks, the adult director, memory compression, the epoch state machine, the Morpheus ladder (promises, beats, the Scribe, the Assayer), the visual-plate rails, and the player-safety floor.
 
 The suite is hermetic: every agent is forced into mock mode with zero simulated latency, so tests run offline, deterministically, and in well under a minute — regardless of what models and keys are configured in `.env`.
 
@@ -126,13 +130,13 @@ The suite is hermetic: every agent is forced into mock mode with zero simulated 
 ```
 backend/
   app/
-    agents/        # 8 agent implementations (mock + LLM modes)
+    agents/        # agent implementations (mock + LLM modes)
     api/           # FastAPI routes (SSE streaming, REST)
     core/          # Nyx Kernel, conflict resolver, config, prompt templates
     db/            # PostgreSQL persistence (optional)
     schemas/       # Pydantic v2 models (ThreadState, agent responses)
     services/      # Game math, oath engine, hamartia engine, chronicler
-  tests/           # 15 test modules, 322 tests
+  tests/           # hermetic pytest suite (mock mode, offline)
   prompts/         # Externalized agent prompt templates
 
 frontend/

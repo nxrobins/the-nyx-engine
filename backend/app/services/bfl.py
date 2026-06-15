@@ -112,6 +112,16 @@ async def generate_image(
                     logger.error(f"BFL terminal status {status!r}: {data}")
                     return ""
                 # Otherwise keep polling ("Pending", "Processing")
+            except httpx.HTTPStatusError as e:
+                # A permanent client error (bad/expired key authorizing POST but
+                # not GET, or a vanished task) will NEVER resolve — fail fast
+                # instead of looping once/sec to the 30s timeout (audit M2).
+                # 429 (rate-limit) and 5xx are transient: keep polling those.
+                code = e.response.status_code
+                if 400 <= code < 500 and code != 429:
+                    logger.error(f"BFL poll: permanent HTTP {code}, abandoning: {e}")
+                    return ""
+                logger.warning(f"BFL poll: transient HTTP {code}, retrying: {e}")
             except Exception as e:
                 logger.warning(f"BFL poll error: {e}")
 
