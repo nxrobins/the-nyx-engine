@@ -269,7 +269,7 @@
 					<!-- More paragraphs to read — show advance button -->
 					<button
 						onclick={advanceText}
-						class="animate-pulse text-[var(--nyx-text-dim)] hover:text-[var(--nyx-text)] transition-colors text-lg"
+						class="diegetic-control animate-pulse text-[var(--nyx-text-dim)] hover:text-[var(--nyx-text)] transition-colors text-lg"
 						style="font-family: var(--font-prose);"
 					>
 						▼
@@ -330,7 +330,7 @@
 				{/if}
 				<button
 					onclick={dismissDream}
-					class="text-[var(--nyx-text-dim)] hover:text-[var(--nyx-text)] transition-colors"
+					class="diegetic-control text-[var(--nyx-text-dim)] hover:text-[var(--nyx-text)] transition-colors"
 					style="font-family: var(--font-prose); font-size: 0.875rem; letter-spacing: 0.1em;"
 				>
 					[ Awaken ]
