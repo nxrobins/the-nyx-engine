@@ -8,8 +8,12 @@ from app.agents.clotho import _build_payload
 from app.agents.eris import Eris
 from app.agents.nemesis import Nemesis
 from app.core.resolver import ResolvedOutcome
-from app.schemas.state import PressureState, ThreadState
-from app.services.pressure import apply_pressure_delta, evolve_pressures
+from app.schemas.state import Oath, OathTerms, PressureState, SoulLedger, ThreadState
+from app.services.pressure import (
+    apply_pressure_delta,
+    evolve_pressures,
+    salient_pressure_prompt,
+)
 
 
 class TestPressureEvolution:
@@ -123,3 +127,40 @@ class TestPressureDrivenAgents:
         monkeypatch.setattr("app.agents.eris.random.random", lambda: 0.6)
         result = await Eris().evaluate(fresh_state, "wait")
         assert result.chaos_triggered is True
+
+
+class TestSalientPressurePrompt:
+    """The directive that pushes at least one generated choice to answer the
+    dominant pressure. Each branch is the contract the choice layer reads."""
+
+    @pytest.mark.parametrize("field,word", [
+        ("suspicion", "suspicion"),
+        ("wounds", "wounds"),
+        ("debt", "debt"),
+        ("scarcity", "scarcity"),
+        ("faction_heat", "faction heat"),
+        ("omen", "omen"),
+    ])
+    def test_each_pressure_above_threshold_names_its_answer(self, field, word):
+        state = ThreadState(pressures=PressureState(**{field: 1.6}))
+        assert salient_pressure_prompt(state).startswith(f"Answer {word}")
+
+    def test_suspicion_takes_priority_over_a_co_active_pressure(self):
+        # Branch order is the priority: suspicion is checked before wounds.
+        state = ThreadState(pressures=PressureState(suspicion=2.0, wounds=2.0))
+        assert salient_pressure_prompt(state).startswith("Answer suspicion")
+
+    def test_falls_through_to_active_oath_cost(self):
+        # No pressure dominates, but a priced oath is owed an accounting.
+        state = ThreadState(
+            pressures=PressureState(),
+            soul_ledger=SoulLedger(active_oaths=[
+                Oath(oath_id="o1", text="...", turn_sworn=1,
+                     terms=OathTerms(subject="Hero", promised_action="serve", price="honor")),
+            ]),
+        )
+        prompt = salient_pressure_prompt(state)
+        assert "oath cost" in prompt and "honor" in prompt
+
+    def test_quiet_state_with_no_priced_oath_is_empty(self):
+        assert salient_pressure_prompt(ThreadState(pressures=PressureState())) == ""
