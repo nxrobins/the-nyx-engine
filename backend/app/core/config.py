@@ -70,6 +70,10 @@ class Settings(BaseSettings):
     wounds_doom_escape: float = 7.5      # recovery below this lifts the doom
     faction_doom_threshold: float = 9.0  # faction heat that starts the manhunt
     faction_doom_escape: float = 8.0     # heat below this lifts the doom
+    # Old age — a long, UNDOOMED thread bends toward a natural close. Below this
+    # age no old-age doom begins; past it the decline loses ~one stage per decade.
+    # A game-balance knob; the >= 18 lower bound is load-bearing (OLD-AG-1).
+    old_age_threshold: int = 60
 
     # Momus repair: hallucination count that justifies a full Clotho retry.
     # Below it, the deterministically corrected prose commits directly.
