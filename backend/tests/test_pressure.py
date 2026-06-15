@@ -40,6 +40,67 @@ class TestPressureEvolution:
         assert "Answer suspicion" in payload
 
 
+class TestOmenRecedes:
+    """Fate Recedes — omen must be able to fall, not only ratchet up.
+
+    The player-facing layer already promises a fade ("Follow the omen before
+    it fades"); these tests pin that the deterministic math now honours it,
+    while keeping fate's forgetfulness slow enough that a single fateful event
+    still raises omen on its own turn.
+    """
+
+    def test_omen_fades_on_a_quiet_turn(self, fresh_state: ThreadState):
+        fresh_state.pressures = PressureState(omen=2.0)
+        outcome = ResolvedOutcome(state=fresh_state)
+        evolution = evolve_pressures(fresh_state, "I wait and watch the road", outcome)
+        assert evolution.stable_turn is True
+        assert evolution.delta["omen"] < 0
+        updated = apply_pressure_delta(
+            fresh_state.pressures, evolution.delta, stable_turn=evolution.stable_turn
+        )
+        assert updated.omen < 2.0
+
+    def test_omen_does_not_fade_on_a_turbulent_turn(self, fresh_state: ThreadState):
+        fresh_state.pressures = PressureState(omen=2.0)
+        outcome = ResolvedOutcome(state=fresh_state)
+        evolution = evolve_pressures(fresh_state, "I attack and shout at the crowd", outcome)
+        assert evolution.stable_turn is False
+        # No quiet-turn relief on a loud turn — fate keeps watching.
+        assert evolution.delta.get("omen", 0.0) >= 0.0
+
+    def test_a_fresh_omen_spike_still_nets_a_rise_even_when_quiet(
+        self, fresh_state: ThreadState
+    ):
+        # A Nemesis strike adds omen on the same turn the fade would apply;
+        # the spike must dominate so the warning is never silently erased.
+        fresh_state.pressures = PressureState(omen=1.0)
+        outcome = ResolvedOutcome(state=fresh_state, nemesis_struck=True)
+        evolution = evolve_pressures(fresh_state, "I wait", outcome)
+        assert evolution.delta["omen"] > 0
+
+    def test_omen_never_underflows_below_zero(self, fresh_state: ThreadState):
+        # At the floor, repeated quiet turns clamp at 0 — no negative omen.
+        fresh_state.pressures = PressureState(omen=0.0)
+        outcome = ResolvedOutcome(state=fresh_state)
+        evolution = evolve_pressures(fresh_state, "I wait and rest", outcome)
+        updated = apply_pressure_delta(
+            fresh_state.pressures, evolution.delta, stable_turn=evolution.stable_turn
+        )
+        assert updated.omen == 0.0
+
+    def test_fade_is_slow_a_single_quiet_turn_barely_dents_high_omen(
+        self, fresh_state: ThreadState
+    ):
+        # Sustained quiet, not one calm breath, earns fate's inattention.
+        fresh_state.pressures = PressureState(omen=8.0)
+        outcome = ResolvedOutcome(state=fresh_state)
+        evolution = evolve_pressures(fresh_state, "I wait quietly", outcome)
+        updated = apply_pressure_delta(
+            fresh_state.pressures, evolution.delta, stable_turn=evolution.stable_turn
+        )
+        assert 7.5 <= updated.omen < 8.0  # a dent, not a reset
+
+
 class TestPressureDrivenAgents:
     """Nemesis and Eris should react to pressure, not only raw imbalance."""
 
