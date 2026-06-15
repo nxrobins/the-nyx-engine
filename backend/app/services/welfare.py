@@ -35,9 +35,13 @@ from app.schemas.welfare import CrisisSignal
 # What replaces a flagged action everywhere it would otherwise be persisted.
 REDACTION_TOKEN = "[redacted: welfare-flagged input]"
 
-# Cap the scanned action (the phrases are short; a megabyte action can't DoS
-# the regex, and a leading phrase can't hide past 4096 chars).
-_SCAN_CAP = 4096
+# Cap the scanned action purely as a DoS ceiling. It is deliberately generous:
+# the old 4 KB cap let a genuine ideation phrase TRAILING a long benign entry
+# escape BOTH the crisis card and durable-store redaction (a simultaneous
+# care-hole and privacy leak — audit M3). 64 KB covers any realistic action,
+# while the substring + non-backtracking regex scans stay linear, so there is
+# no DoS risk in scanning the whole thing up to this bound.
+_SCAN_CAP = 65536
 
 # The real-world-framed subset of atropos_death_keywords. A merge-blocking test
 # asserts each of these is in settings.atropos_death_keywords (the superset

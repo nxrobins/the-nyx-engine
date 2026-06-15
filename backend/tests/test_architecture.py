@@ -42,6 +42,12 @@ MODEL_FREE_MODULES = [
     "services/canon.py",
     "services/promise_engine.py",
     "services/beat_gate.py",
+    # The Vigil's per-turn crisis detector: the highest-stakes safety decision
+    # in the engine and deterministic by design. Pinned model-free so no future
+    # "LLM classifier" can be wired into detect_crisis via the sanctioned
+    # app.services.llm wrapper (which the single-choke-point test misses, since
+    # it only forbids a DIRECT litellm import). (audit M4)
+    "services/welfare.py",
 ]
 
 
@@ -86,7 +92,7 @@ class TestDeterminismGradient:
     def test_guarded_set_exists_and_is_not_silently_shrunk(self):
         # A renamed/deleted module would make its parametrized case vanish; pin
         # the floor so the guard can't be hollowed out unnoticed.
-        assert len(MODEL_FREE_MODULES) >= 9
+        assert len(MODEL_FREE_MODULES) >= 10
         for rel in MODEL_FREE_MODULES:
             assert (_APP / rel).exists(), f"guarded module moved or renamed: {rel}"
 

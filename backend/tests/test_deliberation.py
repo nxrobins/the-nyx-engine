@@ -66,7 +66,12 @@ class TestResolvedSceneOutcome:
     async def test_nemesis_updates_scene_carryover(self, kernel: NyxKernel, monkeypatch):
         from app.core.config import settings
 
+        # eris_chaos_probability=0.0 does NOT silence Eris (0.02 chance-floor +
+        # unseeded RNG) — pin the RNG, the canonical guard, so this assertion on
+        # the winner_order can't go flaky on a chaos roll (audit M1).
         monkeypatch.setattr(settings, "eris_chaos_probability", 0.0)
+        import app.agents.eris as eris_module
+        monkeypatch.setattr(eris_module.random, "random", lambda: 0.999)
         await _init(kernel)
         kernel.state.soul_ledger.vectors = SoulVectors(
             metis=1.0, bia=9.0, kleos=1.0, aidos=1.0
