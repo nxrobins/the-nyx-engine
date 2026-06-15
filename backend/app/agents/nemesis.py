@@ -23,6 +23,7 @@ import re
 
 from app.agents.base import AgentBase, mock_pause
 from app.core.config import settings
+from app.agents._degrade import note_degraded
 from app.schemas.state import AgentProposal, NemesisResponse, ThreadState
 from app.services import llm
 from app.services.canon import render_scene_snapshot
@@ -373,6 +374,7 @@ class Nemesis(AgentBase):
         # LLM generation (with retry on empty response)
         user_message = _build_payload(state, action, oath_broken)
         max_attempts = 2
+        last_exc: Exception | None = None
         for attempt in range(max_attempts):
             try:
                 raw = await llm.generate(
@@ -415,11 +417,14 @@ class Nemesis(AgentBase):
                     result.intervention_type = "lethal_punishment"
                 return result
             except Exception as e:
+                last_exc = e
                 logger.error(f"Nemesis LLM failed (attempt {attempt+1}): {e}")
                 if attempt < max_attempts - 1:
                     continue
 
         # All attempts failed
+        if last_exc is not None:
+            note_degraded("nemesis", model, last_exc)
         logger.error("Nemesis: All LLM attempts failed. Using mock.")
         if force_type == "lethal_punishment":
             return _mock_lethal()

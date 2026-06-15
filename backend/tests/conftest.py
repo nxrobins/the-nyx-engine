@@ -53,6 +53,22 @@ def _hermetic_settings(monkeypatch, tmp_path):
     # Verdicts likewise.
     monkeypatch.setattr(settings, "assays_dir", str(tmp_path / "assays"))
 
+    # The Throttle (THR-C7): reset module-level state so degraded-count
+    # assertions and the session cap stay order-independent across the in-process
+    # suite, and a loop-bound LLM semaphore can't leak across pytest-asyncio loops.
+    from app.agents import _degrade
+    from app.api import routes as _routes
+    import app.services.llm as _llm
+
+    def _reset_throttle_state() -> None:
+        _degrade.reset_degraded()
+        _routes._sessions.clear()
+        _llm._BUDGET = None
+
+    _reset_throttle_state()
+    yield
+    _reset_throttle_state()
+
 
 @pytest.fixture
 def builtins_only():

@@ -20,6 +20,7 @@ import logging
 
 from app.agents.base import AgentBase, mock_pause
 from app.core.config import settings
+from app.agents._degrade import note_degraded
 from app.schemas.book import Chapter, ScribeSnapshot
 from app.services import llm
 from app.services.scribe_gate import gate_chapter
@@ -147,6 +148,7 @@ class Scribe(AgentBase):
             )
 
         violations: list[str] = []
+        last_exc: Exception | None = None
         for attempt in (1, 2):  # one informed retry
             try:
                 prose = await llm.generate(
@@ -176,9 +178,12 @@ class Scribe(AgentBase):
                     based_on_turn=snapshot.boundary_turn,
                 )
             except Exception as exc:
+                last_exc = exc
                 violations = [f"draft failed: {exc}"]
                 logger.warning(f"Scribe attempt {attempt} error: {exc!r}")
 
+        if last_exc is not None:
+            note_degraded("scribe", model, last_exc)
         logger.warning(
             f"Scribe: chapter {snapshot.epoch_index} unwritten — the book is shorter."
         )

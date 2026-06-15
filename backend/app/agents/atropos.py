@@ -20,6 +20,7 @@ import logging
 
 from app.agents.base import AgentBase
 from app.core.config import settings
+from app.agents._degrade import note_degraded
 from app.schemas.state import AgentProposal, AtroposResponse, ThreadState
 from app.services import llm
 from app.services.doom import doom_death_reason, is_doom_terminal
@@ -176,5 +177,6 @@ class Atropos(AgentBase):
             )
             return raw.strip().lower() == "true"
         except Exception as e:
+            note_degraded("atropos.deadend", model, e)
             logger.warning(f"Atropos dead-end check failed: {e}")
             return False
