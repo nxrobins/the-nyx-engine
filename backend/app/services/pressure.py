@@ -231,9 +231,23 @@ def evolve_pressures(
     # The world forgets, slowly: quiet turns bleed off attention pressures.
     # Applied after the stability verdict so decay can't flip the judgment
     # it depends on.
+    #
+    # Omen joins this sentence deliberately. The player-facing layer already
+    # promises fate recedes — the Clotho choice label reads "Follow the omen
+    # before it fades" and salient_pressure_prompt offers to "heed, ward, or
+    # interpret the sign" — yet every omen mutation in the engine is an
+    # increment, so before this it could only ratchet up. That is exactly the
+    # prose-vs-truth drift Momus exists to forbid, pointed the wrong way: the
+    # UI narrated a fade the math never delivered. The fade is gentler than the
+    # smallest omen spike (abandonment +0.3), so any single fateful event still
+    # nets a rise on its own turn; fate's grip only loosens through SUSTAINED
+    # quiet living — never a single deflecting action — which keeps the doom
+    # economy (Nemesis fires on omen >= 1.5) honest while letting a genuinely
+    # calmed life slowly earn back fate's inattention.
     if stable_turn:
         delta["suspicion"] -= 0.1
         delta["faction_heat"] -= 0.1
+        delta["omen"] -= 0.1
 
     delta = {
         key: round(value, 2)
