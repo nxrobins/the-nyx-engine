@@ -76,6 +76,10 @@ export interface CanonNPC {
 	obligation: number;
 	tags: string[];
 	last_seen_turn: number;
+	// Depth (Sprint D): the populated mind — surfaced by The Witnesses panel.
+	want?: string;
+	bond?: number;
+	betrayal_count?: number;
 }
 
 export interface CanonLocation {
