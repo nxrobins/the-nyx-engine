@@ -76,6 +76,10 @@ class CartridgeClock(BaseModel):
     stakes: str = Field(min_length=1, max_length=400)
     resolution_hint: str = Field(default="", max_length=400)
     lethal: bool = False
+    # The World Takes: name a family member this clock claims when it fires. May be
+    # the NPC's name or its npc_id; validated to resolve to exactly one family NPC and
+    # NEVER combined with lethal (see _claims_resolve_and_exclusive). Default "" = none.
+    claims_npc_id: str = Field(default="", max_length=80)
 
 
 class HomeLocation(BaseModel):
@@ -185,6 +189,39 @@ class WorldCartridge(BaseModel):
             raise ValueError("home_location.id and faction.id must differ")
         return self
 
+    @model_validator(mode="after")
+    def _claims_resolve_and_exclusive(self) -> WorldCartridge:
+        """The World Takes (NC-6/NC-7): a clock's claims_npc_id must resolve to
+        exactly one family NPC, and a clock may NEVER be both lethal and claiming.
+
+        Authors may write the NPC's name ("Maren") or its id ("npc_maren"); both
+        normalize to the canonical runtime id `npc_{slug(name)}` so _claim_npc does an
+        id lookup, never a name match. A dangling claim would mean the author's
+        tragedy silently never fires — so reject the whole cartridge (fail-loud-skip
+        at the loader), exactly as a slug collision does.
+        """
+        family_by_slug = {slugify(npc.name): npc for npc in self.family}
+        for c in self.clocks:
+            raw = c.claims_npc_id.strip()
+            if not raw:
+                continue
+            if c.lethal:
+                raise ValueError(
+                    f"clock '{c.label}': a clock may not be both lethal and claim an "
+                    f"NPC (claims_npc_id='{raw}') — choose to threaten the player OR "
+                    f"take someone, never both from one tick"
+                )
+            direct = slugify(raw)
+            stripped = slugify(raw[4:]) if raw.lower().startswith("npc_") else direct
+            key = direct if direct in family_by_slug else stripped
+            if key not in family_by_slug:
+                raise ValueError(
+                    f"clock '{c.label}': claims_npc_id '{raw}' resolves to no family "
+                    f"NPC (known: {sorted(family_by_slug)})"
+                )
+            c.claims_npc_id = f"npc_{key}"
+        return self
+
     # ── Adapter to the runtime dataclass ──────────────────────────
 
     def to_world_seed(self) -> WorldSeed:
@@ -232,6 +269,7 @@ class WorldCartridge(BaseModel):
                     stakes=c.stakes,
                     resolution_hint=c.resolution_hint,
                     lethal=c.lethal,
+                    claims_npc_id=c.claims_npc_id,
                 )
                 for c in self.clocks
             ],
