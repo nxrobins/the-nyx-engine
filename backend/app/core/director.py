@@ -10,14 +10,14 @@ and time skips keep working. Content: the directive's dramatic driver is
 selected by priority from what the engine already knows —
 
     doom > maturing clock > active oath > loudest pressure
-         > hamartia temptation > the world itself
+         > charged relationship > hamartia temptation > the world itself
 
 Zero LLM tokens. Pure string assembly from state.
 """
 
 from __future__ import annotations
 
-from app.schemas.state import SceneClock, ThreadState
+from app.schemas.state import CanonNPC, SceneClock, ThreadState
 
 ADULT_CADENCE: tuple[str, str, str] = ("SETUP", "COMPLICATION", "RESOLUTION")
 
@@ -106,6 +106,52 @@ def _loudest_pressure(state: ThreadState) -> tuple[str, float] | None:
     return name, value
 
 
+# A present bond this charged — by warmth, estrangement, or a pattern of betrayal —
+# is dramatic enough to drive a quiet chapter on its own.
+_RELATIONSHIP_DRIVER_CHARGE = 3.0
+
+
+def _charged_relationship(state: ThreadState) -> CanonNPC | None:
+    """The most charged present, living witness — if any bond is dramatic enough.
+
+    Charge = max(|bond|, betrayal_count * 2): a deep tie, a deep estrangement, or a
+    pattern of betrayal all qualify. Deterministic, reads only the merged Sprint-D
+    relationship state, no model. Returns None when no present bond is charged
+    enough, so the existing hamartia/world fallback still drives the quiet chapter.
+    """
+    canon = state.canon
+    if not canon or not canon.current_scene:
+        return None
+    best: CanonNPC | None = None
+    best_charge = 0.0
+    for npc_id in canon.current_scene.present_npc_ids:
+        npc = canon.npcs.get(npc_id)
+        if npc is None or npc.status != "alive":
+            continue
+        charge = max(abs(npc.bond), npc.betrayal_count * 2.0)
+        if charge >= _RELATIONSHIP_DRIVER_CHARGE and charge > best_charge:
+            best = npc
+            best_charge = charge
+    return best
+
+
+def _relationship_driver(npc: CanonNPC) -> str:
+    """Aim a quiet chapter at a charged bond — a rift to widen or a tie to test."""
+    if npc.bond <= -2.0 or npc.betrayal_count >= 1:
+        return (
+            f"THE DRIVER — THE WITNESS: {npc.name} ({npc.role}) and the player have "
+            f"reached a breaking point. Stage a scene that forces the rift between them "
+            f"into the open — a confrontation, a demand, a choice that deepens the wound "
+            f"or begins to mend it. The bond was real; so is the damage."
+        )
+    want = f" They want {npc.want}." if npc.want else ""
+    return (
+        f"THE DRIVER — THE WITNESS: {npc.name} ({npc.role}) matters to the player.{want} "
+        f"Stage a scene that puts this bond under real strain — a need, a cost, or a "
+        f"conflict between what they want and what the player is willing to give."
+    )
+
+
 def _select_driver(state: ThreadState, turn: int) -> str:
     """Pick the dramatic driver for this scene, highest priority first."""
     # 1. An active doom outranks everything. The full escalation text
@@ -149,7 +195,15 @@ def _select_driver(state: ThreadState, turn: int) -> str:
         name, value = loudest
         return _PRESSURE_DRIVERS[name].format(value=value)
 
-    # 5. The hamartia tempts. Alternate aim with the world fallback so
+    # 5. A charged bond among the present cast drives the quiet chapter — the
+    #    people, not just the flaw or the world. Earned: only a genuinely charged
+    #    relationship (a deep tie, estrangement, or brewing betrayal) qualifies;
+    #    otherwise this is silent and the chain falls through unchanged.
+    witness = _charged_relationship(state)
+    if witness is not None:
+        return _relationship_driver(witness)
+
+    # 6. The hamartia tempts. Alternate aim with the world fallback so
     #    consecutive quiet chapters don't repeat one note.
     profile = state.soul_ledger.hamartia_profile
     chapter = (turn - 10) // 3
@@ -160,7 +214,7 @@ def _select_driver(state: ThreadState, turn: int) -> str:
             "yielding look easy and attractive; make restraint cost."
         )
 
-    # 6. The world itself. Rotate through canon facts so the settlement
+    # 7. The world itself. Rotate through canon facts so the settlement
     #    keeps producing texture instead of repeating its loudest fact.
     canon = state.canon
     if canon is not None:

@@ -105,3 +105,57 @@ class TestDriverPriority:
         bare = ThreadState()
         _, directive = select_adult_beat(bare, 10)
         assert "THE DRIVER" in directive
+
+
+class TestRelationshipDriver:
+    """A charged bond among the present cast drives a quiet chapter — the people,
+    not just the flaw or the world. Slots in below the acute forces (doom/clock/
+    oath/pressure), above hamartia/world."""
+
+    def _present_npc(self, state):
+        return state.canon.npcs[state.canon.current_scene.present_npc_ids[0]]
+
+    def test_estranged_bond_drives_a_quiet_chapter(self, state):
+        npc = self._present_npc(state)
+        npc.bond = -4.0   # charged estrangement, no acute force present
+        _, directive = select_adult_beat(state, 10)
+        assert "THE WITNESS" in directive
+        assert npc.name in directive
+        assert "breaking point" in directive   # the rift framing
+
+    def test_deep_positive_bond_drives_with_want(self, state):
+        npc = self._present_npc(state)
+        npc.bond = 5.0
+        npc.want = "to keep the household whole"
+        _, directive = select_adult_beat(state, 10)
+        assert "THE WITNESS" in directive
+        assert npc.name in directive
+        assert "to keep the household whole" in directive
+
+    def test_betrayal_pattern_charges_a_neutral_bond(self, state):
+        npc = self._present_npc(state)
+        npc.bond = 0.0
+        npc.betrayal_count = 2   # charge = 4 >= threshold even with a neutral bond
+        _, directive = select_adult_beat(state, 10)
+        assert "THE WITNESS" in directive
+        assert "breaking point" in directive
+
+    def test_neutral_bonds_fall_through(self, state):
+        # All bonds 0 (bootstrap default) → no witness drives; the world does.
+        _, directive = select_adult_beat(state, 10)
+        assert "THE WITNESS" not in directive
+
+    def test_loud_pressure_outranks_a_charged_bond(self, state):
+        npc = self._present_npc(state)
+        npc.bond = -5.0
+        state.pressures.suspicion = 3.0   # an acute external force still wins
+        _, directive = select_adult_beat(state, 10)
+        assert "SUSPICION" in directive
+        assert "THE WITNESS" not in directive
+
+    def test_a_dead_witness_does_not_drive(self, state):
+        npc = self._present_npc(state)
+        npc.bond = -6.0
+        npc.status = "dead"   # the lost do not stage scenes
+        _, directive = select_adult_beat(state, 10)
+        assert "THE WITNESS" not in directive
