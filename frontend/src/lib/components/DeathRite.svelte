@@ -1,7 +1,7 @@
 <!--
   The Death Rite — the most important screen in a permadeath game.
   Click-paced stages: severance → the carved epitaph → the soul at the
-  severing → the binding (open the book) → return to the Tapestry.
+  severing → the witnesses you leave → the binding (open the book) → Tapestry.
   Death stops being a failure state and becomes authorship.
 -->
 <script lang="ts">
@@ -14,12 +14,16 @@
 		resetGame,
 	} from '$lib/stores/engine';
 	import BookReader from './BookReader.svelte';
+	import { deriveFarewell } from '$lib/utils/farewell';
 
 	let stage = $state(0);
 	let readerOpen = $state(false);
 	let returning = $state(false);
 
-	const STAGES = 3; // 0 severance, 1 epitaph, 2 soul, 3 binding (final)
+	const STAGES = 4; // 0 severance, 1 epitaph, 2 soul, 3 witnesses, 4 binding (final)
+
+	/** The Farewell: who the life lost, and who outlives it. */
+	let farewell = $derived(deriveFarewell($gameState));
 
 	function advance() {
 		if (stage < STAGES) stage++;
@@ -69,7 +73,7 @@
 								style="--d: {Math.round(i * epitaphStep)}ms">{word}</span>{' '}{/each}
 					</blockquote>
 				</div>
-			{:else}
+			{:else if stage === 2}
 				<div class="death-rite-content" in:fade={{ duration: 700 }}>
 					<p class="death-rite-kicker">THE SOUL AT THE SEVERING</p>
 					{#if hamartia}
@@ -87,6 +91,27 @@
 					{/if}
 					{#if lifeVoice}
 						<p class="death-rite-voice">Written in this voice: {lifeVoice}</p>
+					{/if}
+				</div>
+			{:else}
+				<div class="death-rite-content" in:fade={{ duration: 700 }}>
+					<p class="death-rite-kicker">THE WITNESSES YOU LEAVE</p>
+					{#if farewell.remaining.length > 0}
+						<p class="death-rite-voice">They outlive you:</p>
+						{#each farewell.remaining as s}
+							<p class="death-rite-flaw">{s.name}<span class="death-rite-vector-label"> · {s.role}</span></p>
+						{/each}
+					{/if}
+					{#if farewell.lost.length > 0}
+						<p class="death-rite-voice">Lost before the end:</p>
+						{#each farewell.lost as d}
+							<p class="death-rite-body death-rite-body-dim">{d.name} — {d.fate}</p>
+						{/each}
+					{/if}
+					{#if farewell.remaining.length === 0 && farewell.lost.length === 0}
+						<p class="death-rite-body death-rite-body-dim">
+							No one remained to see the thread cut. You faced the end alone.
+						</p>
 					{/if}
 				</div>
 			{/if}
