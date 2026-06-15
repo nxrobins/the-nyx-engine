@@ -4,7 +4,7 @@
   Center-only layout with collapsible side pane overlays.
 -->
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import TitleScreen from '$lib/components/TitleScreen.svelte';
 	import ConsentGate from '$lib/components/ConsentGate.svelte';
 	import Incarnation from '$lib/components/Incarnation.svelte';
@@ -25,9 +25,44 @@
 	let leftOpen = $state(false);
 	let rightOpen = $state(false);
 
+	// UX-C9: keyboard reachability for the mechanics panes. Opening moves focus
+	// INTO the pane (otherwise the edge is discoverable but the pane is a
+	// keyboard dead-end); Escape closes; closing returns focus to the opener.
+	let leftPaneEl: HTMLDivElement | null = $state(null);
+	let rightPaneEl: HTMLDivElement | null = $state(null);
+	let leftEdgeEl: HTMLButtonElement | null = $state(null);
+	let rightEdgeEl: HTMLButtonElement | null = $state(null);
+	let lastOpener: HTMLElement | null = null;
+
+	async function openLeft() {
+		leftOpen = true;
+		lastOpener = leftEdgeEl;
+		await tick();
+		leftPaneEl?.focus();
+	}
+
+	async function openRight() {
+		rightOpen = true;
+		lastOpener = rightEdgeEl;
+		await tick();
+		rightPaneEl?.focus();
+	}
+
 	function dismissPanes() {
+		const wasOpen = leftOpen || rightOpen;
 		leftOpen = false;
 		rightOpen = false;
+		if (wasOpen) {
+			lastOpener?.focus();
+			lastOpener = null;
+		}
+	}
+
+	function handlePaneKeydown(e: KeyboardEvent) {
+		if (e.key === 'Escape' && (leftOpen || rightOpen)) {
+			e.preventDefault();
+			dismissPanes();
+		}
 	}
 
 	/** The Witness: doom dread on the HUD */
@@ -53,6 +88,9 @@
 		}
 	});
 </script>
+
+<!-- UX-C9: Escape closes an open mechanics pane (guarded to playing state). -->
+<svelte:window onkeydown={handlePaneKeydown} />
 
 {#if $vestibuleState === 'title'}
 	<TitleScreen />
@@ -83,19 +121,21 @@
 	<!-- Edge triggers (always visible) -->
 	<button
 		type="button"
+		bind:this={leftEdgeEl}
 		class="pane-edge pane-edge-left"
 		class:edge-pulse={leftPulse}
 		aria-label="Open soul ledger"
-		onclick={() => leftOpen = true}
+		onclick={openLeft}
 	>
 		<span class="edge-glyph" aria-hidden="true">‹</span>
 	</button>
 	<button
 		type="button"
+		bind:this={rightEdgeEl}
 		class="pane-edge pane-edge-right"
 		class:edge-pulse={rightPulse}
 		aria-label="Open oracle"
-		onclick={() => rightOpen = true}
+		onclick={openRight}
 	>
 		<span class="edge-glyph" aria-hidden="true">›</span>
 	</button>
@@ -111,10 +151,20 @@
 	{/if}
 
 	<!-- Side pane overlays -->
-	<div class="pane-overlay pane-overlay-left" class:open={leftOpen}>
+	<div
+		bind:this={leftPaneEl}
+		class="pane-overlay pane-overlay-left"
+		class:open={leftOpen}
+		tabindex="-1"
+	>
 		<SoulLedger />
 	</div>
-	<div class="pane-overlay pane-overlay-right" class:open={rightOpen}>
+	<div
+		bind:this={rightPaneEl}
+		class="pane-overlay pane-overlay-right"
+		class:open={rightOpen}
+		tabindex="-1"
+	>
 		<TheOracle />
 	</div>
 

@@ -46,7 +46,7 @@
 				placeholder={$isProcessing ? 'The Fates deliberate...' : 'What do you do?'}
 				class="flex-1 bg-transparent border-b border-[var(--nyx-border)] px-2 py-2
 					text-[var(--nyx-text)] placeholder:text-[var(--nyx-text-dim)]/50
-					focus:outline-none focus:border-[var(--nyx-text-dim)]
+					focus:outline-none focus-visible:border-[var(--nyx-oracle-gold)]
 					disabled:opacity-30 transition-colors"
 				style="font-family: var(--font-prose); font-size: 1rem;"
 			/>
@@ -55,6 +55,8 @@
 				disabled={$isProcessing || !inputText.trim()}
 				class="text-xs uppercase tracking-[0.15em] px-3 py-2
 					text-[var(--nyx-text-dim)] hover:text-[var(--nyx-text)]
+					focus:outline-none focus-visible:text-[var(--nyx-text)]
+					focus-visible:underline underline-offset-4
 					disabled:opacity-20 transition-colors"
 				style="font-family: var(--font-mono);"
 			>
