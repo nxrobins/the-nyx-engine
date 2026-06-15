@@ -343,10 +343,13 @@ class ConflictResolver:
             imbalance = SoulVectorEngine.imbalance_score(
                 working_state.soul_ledger.vectors
             )
-            # Eris miracle: chaos triggered + balanced soul = saved
+            # Eris miracle: chaos triggered + balanced soul = saved.
+            # The Vigil: a self-destruction-keyword death is NEVER miracled —
+            # a real-world self-harm input must not be rewarded with survival.
             eris_miracle = (
                 eris.chaos_triggered
                 and imbalance < settings.nemesis_imbalance_threshold
+                and not atropos.self_destruction_origin
             )
             if not eris_miracle:
                 return _finalize_outcome(ResolvedOutcome(

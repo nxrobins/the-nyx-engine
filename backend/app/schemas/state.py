@@ -327,6 +327,11 @@ class AtroposResponse(BaseModel):
     Triggers: oath_broken, narrative_dead_end, self_destruction, dead_soul."""
     terminal_state: bool = False
     death_reason: str = ""
+    # The Vigil: a death that originated from a self-destruction keyword is
+    # exempt from the Eris miracle — a vulnerable player who types real-world
+    # self-harm framing must never get a "the dice saved you" reprieve. The
+    # fiction stays cruel to the character; this only hardens permanence.
+    self_destruction_origin: bool = False
     proposal: AgentProposal | None = None
 
 
