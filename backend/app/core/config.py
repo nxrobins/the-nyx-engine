@@ -3,6 +3,7 @@
 v2.0: LiteLLM model strings replace per-agent provider+model pairs.
 """
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -89,6 +90,21 @@ class Settings(BaseSettings):
     # age no old-age doom begins; past it the decline loses ~one stage per decade.
     # A game-balance knob; the >= 18 lower bound is load-bearing (OLD-AG-1).
     old_age_threshold: int = 60
+
+    @field_validator("old_age_threshold")
+    @classmethod
+    def _old_age_stays_adult(cls, v: int) -> int:
+        # OLD-AG-1, now ENFORCED (not just asserted in a test): below 18 the
+        # self-contained adult age formula (18 + max(0, turn - 10)) would diverge
+        # from the childhood _AGE_MAP, re-enabling old-age death in the childhood
+        # range. An env override (OLD_AGE_THRESHOLD=10) must fail closed, not
+        # silently corrupt mortality.
+        if v < 18:
+            raise ValueError(
+                f"old_age_threshold must be >= 18 (adult), got {v} — below 18 the "
+                f"age formula diverges from the childhood map (OLD-AG-1)"
+            )
+        return v
 
     # Momus repair: hallucination count that justifies a full Clotho retry.
     # Below it, the deterministically corrected prose commits directly.
