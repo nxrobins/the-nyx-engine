@@ -218,6 +218,21 @@ export interface ThreadState {
 	legacy_echoes: LegacyEcho[];
 }
 
+/** The Vigil: static crisis copy. Carries only server-owned/hardcoded text and
+    a coarse class — NEVER anything the player typed (SAFE-C1 / AG-C1). */
+export interface CrisisResource {
+	label: string;
+	detail: string;
+}
+
+export interface CrisisResources {
+	title: string;
+	body: string;
+	resources: CrisisResource[];
+	disclaimer: string;
+	draft?: boolean;
+}
+
 export interface TurnResult {
 	session_id: string;
 	prose: string;
@@ -231,6 +246,7 @@ export interface TurnResult {
 	ui_choices: string[];
 	book_id: string; // Scribe P3: set on death when the life was bound
 	epitaph: string; // The Witness: the carved line for the Death Rite
+	crisis_resources?: CrisisResources | null; // The Vigil: present on a flagged turn (gated)
 }
 
 /** Scribe P3: a bound life on the library shelf (GET /library) */

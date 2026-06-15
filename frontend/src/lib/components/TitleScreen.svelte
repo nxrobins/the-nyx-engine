@@ -4,7 +4,14 @@
   Click anywhere to proceed to Incarnation.
 -->
 <script lang="ts">
-	import { vestibuleState, pastThreads, fetchPastThreads } from '$lib/stores/vestibule';
+	import { get } from 'svelte/store';
+	import {
+		vestibuleState,
+		pastThreads,
+		fetchPastThreads,
+		safetyReviewed,
+		hasCurrentConsent
+	} from '$lib/stores/vestibule';
 	import { libraryBooks, fetchLibrary } from '$lib/stores/library';
 	import Library from './Library.svelte';
 	import type { PastThread } from '$lib/types/vestibule';
@@ -39,7 +46,13 @@
 
 	function handleClick() {
 		if (libraryOpen) return; // the Library owns the screen while open
-		vestibuleState.set('incarnation');
+		// The Vigil: first-run consent gate, but ONLY when the care surface is
+		// reviewed (gate-on). While off (the default), this is today's behavior.
+		if (get(safetyReviewed) && !hasCurrentConsent()) {
+			vestibuleState.set('consent');
+		} else {
+			vestibuleState.set('incarnation');
+		}
 	}
 
 	function openLibrary(e: MouseEvent) {

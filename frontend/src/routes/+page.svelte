@@ -4,14 +4,23 @@
   Center-only layout with collapsible side pane overlays.
 -->
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import TitleScreen from '$lib/components/TitleScreen.svelte';
+	import ConsentGate from '$lib/components/ConsentGate.svelte';
 	import Incarnation from '$lib/components/Incarnation.svelte';
 	import SoulLedger from '$lib/components/SoulLedger.svelte';
 	import TheThread from '$lib/components/TheThread.svelte';
 	import TheOracle from '$lib/components/TheOracle.svelte';
 	import InkWeather from '$lib/components/InkWeather.svelte';
-	import { vestibuleState } from '$lib/stores/vestibule';
+	import CrisisLink from '$lib/components/CrisisLink.svelte';
+	import CrisisInterstitial from '$lib/components/CrisisInterstitial.svelte';
+	import { vestibuleState, loadSafety } from '$lib/stores/vestibule';
 	import { gameState, mechanicToast } from '$lib/stores/engine';
+
+	// The Vigil: hydrate the care gate once on boot (fail-closed → off).
+	onMount(() => {
+		loadSafety();
+	});
 
 	let leftOpen = $state(false);
 	let rightOpen = $state(false);
@@ -47,6 +56,8 @@
 
 {#if $vestibuleState === 'title'}
 	<TitleScreen />
+{:else if $vestibuleState === 'consent'}
+	<ConsentGate />
 {:else if $vestibuleState === 'incarnation'}
 	<Incarnation />
 {:else}
@@ -142,3 +153,10 @@
 		</div>
 	{/if}
 {/if}
+
+<!-- The Vigil: always-on, gate-independent affordances. Mounted at the top level
+     (outside the phase ladder) so the link is on EVERY screen (SAFE-C8) and the
+     interstitial SURVIVES DeathRite, which lives inside the playing branch — it
+     renders above all surfaces and persists until an explicit dismissal (C9). -->
+<CrisisLink />
+<CrisisInterstitial />

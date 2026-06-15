@@ -399,6 +399,7 @@ class PlayerAction(BaseModel):
     action: str
     session_id: str = ""     # required for session isolation
     player_id: str = "usr_001"
+    content_prefs: dict | None = None   # The Vigil: self-asserted consent (carried, not yet acted on)
 
 
 class InitRequest(BaseModel):
@@ -408,6 +409,7 @@ class InitRequest(BaseModel):
     name: str = "Stranger"
     gender: str = "unknown"
     first_memory: str = ""
+    content_prefs: dict | None = None   # The Vigil: self-asserted consent (carried, not yet acted on)
 
 
 class TurnResult(BaseModel):
@@ -424,3 +426,4 @@ class TurnResult(BaseModel):
     ui_choices: list[str] = Field(default_factory=list)
     book_id: str = ""      # Scribe P3: set on death when the life was bound
     epitaph: str = ""      # The Witness: the carved line, shown in the Death Rite
+    crisis_resources: dict | None = None  # The Vigil: static care payload on a flagged turn (gated)

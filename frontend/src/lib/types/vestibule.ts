@@ -1,6 +1,6 @@
 /** Vestibule types — Title Screen + Incarnation flow */
 
-export type VestibulePhase = 'title' | 'incarnation' | 'playing';
+export type VestibulePhase = 'title' | 'consent' | 'incarnation' | 'playing';
 
 export interface PastThread {
 	thread_id: number;

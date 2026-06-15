@@ -68,8 +68,17 @@ class TestMiracleExemption:
 
 class TestSensitiveInput:
     def test_flags_self_destruction_framing(self):
-        assert flags_sensitive_input("I embrace the void forever")
+        # Phase 2: the redaction key is now the unified crisis set — the
+        # real-world-framed death phrases, NOT the purely-poetic ones.
+        assert flags_sensitive_input("I will drink the poison tonight")
         assert flags_sensitive_input("i want to JUMP OFF the bridge")
+
+    def test_does_not_flag_poetic_game_vocab(self):
+        # "embrace the void" / "welcome oblivion" still END THE THREAD in the
+        # fiction (atropos.py, unchanged) but are NOT real-world disclosures —
+        # so they neither raise the care card nor are treated as sensitive.
+        assert not flags_sensitive_input("I embrace the void forever")
+        assert not flags_sensitive_input("I welcome oblivion")
 
     def test_does_not_flag_ordinary_play(self):
         assert not flags_sensitive_input("I help Sera with the harvest")
@@ -106,7 +115,9 @@ class TestRedaction:
         captured.clear()
         rag_actions.clear()
 
-        phrase = "embrace the void"
+        # A real-world-framed death phrase: BOTH a fiction death-trigger AND a
+        # genuine disclosure, so it both severs the thread AND is redacted.
+        phrase = "drink the poison"
         with caplog.at_level(logging.INFO):
             result = await kernel.process_turn(f"I {phrase} and end it all")
 
