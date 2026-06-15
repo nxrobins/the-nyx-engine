@@ -78,6 +78,7 @@ from app.services.canon import (
     derive_environment_string,
     render_scene_snapshot,
     tick_scene_clocks,
+    update_npc_relations,
 )
 from app.services.doom import (
     advance_doom,
@@ -1005,6 +1006,14 @@ class NyxKernel:
             outcome.scene_outcome.must_not_contradict.append(
                 "A clock has run out: its stakes are now true and cannot be walked back."
             )
+
+        # Step 8d: the present cast remembers what the player did to them —
+        # deterministic, friction-weighted, read-only to Clotho (Depth). Runs on
+        # outcome.state (commits in _finalize_turn); the invalid path returned
+        # before step-8, so only committed actions reach here.
+        rel_notes = update_npc_relations(outcome.state, action, outcome)
+        if rel_notes and outcome.scene_outcome is not None:
+            outcome.scene_outcome.material_changes.extend(rel_notes[:2])
 
         _refresh_derived_environment(outcome.state)
 
