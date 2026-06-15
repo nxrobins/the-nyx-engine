@@ -92,11 +92,16 @@ class TestKernelOrdering:
         # turn_count — keeping the Scribe death-book's epoch_index (turn//3) well
         # under its schema cap; the real game crosses age slowly over many turns.
         monkeypatch.setattr(settings, "old_age_threshold", 20)
-        # Pin Eris off: a balanced soul + a chaos roll can MIRACLE the sever for one
-        # turn (the Eris valve — OLD-AG-4). That is correct soul behaviour, but it
-        # makes the exact death turn nondeterministic; this test asserts the sever
-        # itself, so silence the valve. (A separate concern from old-age mortality.)
-        monkeypatch.setattr(settings, "eris_chaos_probability", 0.0)
+        # Pin Eris's chaos roll OFF deterministically. A balanced soul + a chaos
+        # roll can MIRACLE the sever for one turn (the Eris valve — OLD-AG-4):
+        # correct soul behaviour, but it makes the exact death turn
+        # nondeterministic, and this test asserts the sever itself. NOTE:
+        # eris_chaos_probability=0.0 does NOT silence the valve — eris.py floors
+        # the effective chance at 0.02 and the suite never seeds `random`, so the
+        # roll can still fire under test reordering. Pin the module RNG high
+        # instead, the same guard test_doom/test_legacy use for exactly this.
+        import app.agents.eris as eris_module
+        monkeypatch.setattr(eris_module.random, "random", lambda: 0.999)
         k = NyxKernel()
         await k.initialize(
             hamartia="Unformed", player_id="road", name="Methuselah", gender="boy",
