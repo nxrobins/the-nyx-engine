@@ -6,6 +6,12 @@ __pycache__/
 venv/
 .env
 
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
 # Node
 node_modules/
 .svelte-kit/
