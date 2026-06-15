@@ -312,8 +312,10 @@ export async function submitAction(action: string): Promise<void> {
 
 /**
  * Route a parsed SSE event to the appropriate store update.
+ * Exported for unit testing the per-event-type store contracts (notably the
+ * Vigil's SAFE-C9 invariant: a crisis_resources frame must not touch game state).
  */
-function handleStreamEvent(data: Record<string, unknown>): void {
+export function handleStreamEvent(data: Record<string, unknown>): void {
 	switch (data.type) {
 		case 'mechanic': {
 			const payload = data.payload as MechanicEvent;
