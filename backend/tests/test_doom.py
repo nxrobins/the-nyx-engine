@@ -84,6 +84,18 @@ class TestAdvanceDoom:
         assert state.doom.active
         assert state.doom.stage == 2
 
+    def test_faction_heat_doom_lifts_when_the_player_lies_low(self, state):
+        # The manhunt's escape branch in _escape_met — symmetric to wounds,
+        # but exercised by lying low rather than recovering.
+        state.pressures.faction_heat = settings.faction_doom_threshold
+        maybe_begin_pressure_dooms(state)
+        assert state.doom.active and state.doom.cause == "faction_heat"
+
+        state.pressures.faction_heat = settings.faction_doom_escape - 0.1
+        note = advance_doom(state)
+        assert "lifts" in note
+        assert not state.doom.active
+
 
 class TestPressureDooms:
     def test_wounds_threshold_starts_doom(self, state):
