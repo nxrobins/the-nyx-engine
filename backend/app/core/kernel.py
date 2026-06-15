@@ -85,6 +85,7 @@ from app.services.doom import (
     advance_doom,
     begin_doom,
     doom_directive,
+    maybe_begin_old_age_doom,
     maybe_begin_pressure_dooms,
 )
 from app.services.hamartia_engine import (
@@ -1022,6 +1023,13 @@ class NyxKernel:
         pressure_doom_note = maybe_begin_pressure_dooms(outcome.state)
         if pressure_doom_note and outcome.scene_outcome is not None:
             outcome.scene_outcome.material_changes.append(pressure_doom_note)
+
+        # Step 8b': the slow doom of age — a long, UNDOOMED thread finally bends
+        # toward a natural close (OLD-C3 seam: after the pressure dooms, BEFORE the
+        # step-8c clock tick; begun at stage 1, first seen by Atropos next turn).
+        old_age_note = maybe_begin_old_age_doom(outcome.state)
+        if old_age_note and outcome.scene_outcome is not None:
+            outcome.scene_outcome.material_changes.append(old_age_note)
 
         # Step 8c: Scene clocks tick — the world's problems mature whether
         # or not the player attends them. Fired clocks become true.
