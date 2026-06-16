@@ -58,14 +58,61 @@ def _shares_terms(action: str, clause: str) -> bool:
     return bool(action_tokens & clause_tokens)
 
 
+# Harm verbs that can break a protect-oath, and protective verbs that signal the
+# action GUARDS the target rather than harming it. A protect-oath breaks only when
+# a harm verb directly governs the protected target as its object — never when the
+# target is merely named while something else is struck. This mirrors the S2
+# hardening of _does_forbidden: better to miss an oblique break than to route a
+# defensive act ("strike the bandit threatening Sera") to a permanent broken-oath
+# doom for protecting the very person the oath was sworn to protect.
+_HARM_VERBS: frozenset[str] = frozenset(
+    {"attack", "stab", "kill", "strike", "hurt", "betray", "abandon"}
+)
+_PROTECTIVE_VERBS: frozenset[str] = frozenset(
+    {"protect", "defend", "save", "guard", "shield", "rescue"}
+)
+# Verbs that constitute openly mocking a protected target (hypocrisy, not a break).
+_HYPOCRISY_VERBS: frozenset[str] = frozenset({"threaten", "strike", "mock", "abandon"})
+
+# How many tokens after a verb the target may appear and still count as its object.
+# "attack the gate" (distance 2) binds; "strike the bandit threatening Sera"
+# (distance 4) does not — there the verb governs "bandit", not the bystander "Sera".
+_TARGET_GOVERN_WINDOW = 3
+
+
+def _verb_governs_target(
+    tokens: list[str], target_tokens: list[str], verbs: frozenset[str]
+) -> bool:
+    """True when one of ``verbs`` directly governs the target.
+
+    A target token must appear within a short window AFTER the verb — i.e. as the
+    verb's object — so a bystander named elsewhere in the sentence is never
+    mistaken for the victim.
+    """
+    for i, tok in enumerate(tokens):
+        if tok in verbs:
+            window = tokens[i + 1 : i + 1 + _TARGET_GOVERN_WINDOW]
+            if any(tt in window for tt in target_tokens):
+                return True
+    return False
+
+
 def _target_harmed(action: str, target: str) -> bool:
-    lowered = _normalize(action)
-    if _normalize(target) not in lowered:
+    """True only when the action attacks the protected target directly.
+
+    Requires (1) the target to be named, (2) NO protective verb present — a
+    defensive act guards the target and never breaks the oath — and (3) a harm
+    verb to directly govern the target as its object. So "I strike the bandit
+    threatening Sera" and "I kill the dragon to save Sera" keep the oath, while
+    "I attack Sera" still breaks it.
+    """
+    tokens = _normalize(action).split()
+    target_tokens = [t for t in _normalize(target).split() if t not in _OATH_STOPWORDS]
+    if not target_tokens or not all(t in tokens for t in target_tokens):
         return False
-    return any(
-        verb in lowered.split()
-        for verb in ("attack", "stab", "kill", "strike", "hurt", "betray", "abandon")
-    )
+    if any(v in tokens for v in _PROTECTIVE_VERBS):
+        return False
+    return _verb_governs_target(tokens, target_tokens, _HARM_VERBS)
 
 
 # Action/harm verbs that can constitute "doing the forbidden thing". A forbidden
@@ -157,8 +204,20 @@ def oath_hypocrisy_score(oaths: list[Oath], action: str) -> float:
         if not terms:
             continue
 
-        if terms.protected_target and _normalize(terms.protected_target) in lowered:
-            if any(word in lowered.split() for word in ("threaten", "strike", "mock", "abandon")):
+        if terms.protected_target:
+            tokens = lowered.split()
+            target_tokens = [
+                t for t in _normalize(terms.protected_target).split()
+                if t not in _OATH_STOPWORDS
+            ]
+            # Same object-binding as _target_harmed: striking a bystander who
+            # merely stands near the protected target is not mockery of the oath.
+            if (
+                target_tokens
+                and all(t in tokens for t in target_tokens)
+                and not any(v in tokens for v in _PROTECTIVE_VERBS)
+                and _verb_governs_target(tokens, target_tokens, _HYPOCRISY_VERBS)
+            ):
                 score += 1.0
         if "protect" in _normalize(terms.promised_action) and any(
             word in lowered.split() for word in ("loot", "steal", "burn")

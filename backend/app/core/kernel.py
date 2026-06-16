@@ -77,6 +77,7 @@ from app.services.canon import (
     bootstrap_canon,
     client_safe_state,
     derive_environment_string,
+    maybe_arrive_npcs,
     maybe_depart_npcs,
     relieve_clock,
     render_scene_snapshot,
@@ -1087,6 +1088,22 @@ class NyxKernel:
         if depart_notes and outcome.scene_outcome is not None:
             outcome.scene_outcome.material_changes.extend(depart_notes[:2])
 
+        # Step 8d'': the witnesses can ARRIVE — a latent NPC enters when its
+        # earned condition is met. Last in the lifecycle block so it reads the
+        # turn's fully settled cast. Suppressed on a LOSS turn (a fresh grave or a
+        # slammed door is never stepped over by a newcomer in the same beat,
+        # ARR-C6); an active doom suppresses it inside the function (ARR-C5).
+        loss_turn = bool(tick.claimed) or bool(depart_notes)
+        if not loss_turn:
+            arrival = maybe_arrive_npcs(outcome.state)
+            if arrival.arrived_id and outcome.scene_outcome is not None:
+                outcome.scene_outcome.material_changes.extend(arrival.notes[:1])
+                arrived = outcome.state.canon.npcs[arrival.arrived_id]
+                outcome.scene_outcome.must_not_contradict.append(
+                    f"{arrived.name} has just arrived and is present in the scene; "
+                    "they may appear and act."
+                )
+
         _refresh_derived_environment(outcome.state)
 
         # Set last_outcome for Clotho's context
@@ -2051,8 +2068,13 @@ class NyxKernel:
         finally:
             # Never leak an unconsumed dream task on disconnect/error
             self._cancel_dream_task(dream_task)
-            # Guarantee DB persistence even on disconnect
-            if not db_saved and self._thread_id and ctx is not None:
+            # Guarantee DB persistence even on disconnect — but ONLY for a valid,
+            # turn-consuming action. A rejected action rolls back turn_count and
+            # returns early without db_saved; emergency-persisting it would write a
+            # phantom turn at the rolled-back number (mislabeled with the prior
+            # outcome), which the next valid turn then duplicates. The sync path
+            # never persists a rejected action; this keeps the stream symmetric.
+            if not db_saved and self._thread_id and ctx is not None and ctx.outcome.action_valid:
                 try:
                     await create_turn(
                         thread_id=self._thread_id,

@@ -38,7 +38,10 @@ def _book_id(state: ThreadState) -> str:
     name = slugify(state.session.player_name).replace("_", "-")
     pid = slugify(state.session.player_id).replace("_", "-")
     raw = f"{name}-{pid}-r{state.session.run_number}"
-    return raw.strip("-")[:80]
+    # Strip AFTER truncating: slicing to 80 can land on a separator and
+    # re-introduce a trailing "-", which load_book_markdown's guard
+    # (slugify strips it) would then reject — a bound book that lists but 404s.
+    return raw[:80].strip("-")
 
 
 def _title(state: ThreadState) -> str:

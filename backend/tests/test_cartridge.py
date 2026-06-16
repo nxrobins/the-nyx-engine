@@ -223,3 +223,70 @@ class TestHermeticityFirewall:
                     if needle in line and "forbidden" not in line and "needle" not in line:
                         offenders.append(f"{py.name}: {line.strip()}")
         assert not offenders, f"autonovel reached from Nyx tests: {offenders}"
+
+
+# ── The Witnesses Arrive: cartridge-JSON latent authoring ────────────────────
+def _latent(name="Kael", **arrival):
+    return {"name": name, "role": "ally", "trait": "steady",
+            "arrival": arrival or {"min_turn": 12}}
+
+
+class TestLatentAuthoring:
+    def test_valid_latent_round_trips_to_seed(self):
+        cart = WorldCartridge.model_validate(_valid_payload(latent_family=[_latent(min_turn=12)]))
+        seed = cart.to_world_seed()
+        assert len(seed.latent) == 1
+        assert seed.latent[0].name == "Kael"
+        assert seed.latent[0].arrival.min_turn == 12
+
+    def test_no_latent_family_keeps_keystone(self):
+        assert WorldCartridge.model_validate(_valid_payload()).to_world_seed().latent == []
+
+    def test_vacuous_arrival_rejected(self):
+        with pytest.raises(ValidationError):
+            WorldCartridge.model_validate(_valid_payload(latent_family=[
+                {"name": "Kael", "role": "ally", "trait": "steady", "arrival": {}}]))
+
+    def test_bond_anchor_resolves_to_family_npc_id(self):
+        cart = WorldCartridge.model_validate(_valid_payload(latent_family=[
+            _latent(requires_bond_with="Mara", requires_bond_at_least=5.0)]))
+        assert cart.to_world_seed().latent[0].arrival.requires_bond_npc_id == "npc_mara"
+
+    def test_dangling_bond_anchor_rejected(self):
+        with pytest.raises(ValidationError):
+            WorldCartridge.model_validate(_valid_payload(latent_family=[
+                _latent(requires_bond_with="Ghost")]))
+
+    def test_bond_anchor_may_not_be_a_latent(self):
+        # A latent cannot earn its arrival via a bond with another not-yet-formed latent.
+        with pytest.raises(ValidationError):
+            WorldCartridge.model_validate(_valid_payload(latent_family=[
+                _latent("Kael", min_turn=12),
+                _latent("Bryn", requires_bond_with="Kael")]))
+
+    def test_clock_gate_resolves_to_authored_clock_id(self):
+        cart = WorldCartridge.model_validate(_valid_payload(
+            clocks=[{"label": "The Thaw", "stakes": "the river breaks open"}],
+            latent_family=[_latent(on_clock_resolved="The Thaw")]))
+        assert cart.to_world_seed().latent[0].arrival.on_clock_resolved == "clock_the_thaw"
+
+    def test_dangling_clock_gate_rejected(self):
+        with pytest.raises(ValidationError):
+            WorldCartridge.model_validate(_valid_payload(latent_family=[
+                _latent(on_clock_resolved="Nonexistent")]))
+
+    def test_claiming_clock_may_not_summon_an_arrival(self):
+        with pytest.raises(ValidationError):
+            WorldCartridge.model_validate(_valid_payload(
+                clocks=[{"label": "Fever", "stakes": "the sickness takes her", "claims_npc_id": "Mara"}],
+                latent_family=[_latent(on_clock_resolved="Fever")]))
+
+    def test_latent_slug_collision_with_family_rejected(self):
+        with pytest.raises(ValidationError):
+            WorldCartridge.model_validate(_valid_payload(latent_family=[_latent("Mara", min_turn=12)]))
+
+    def test_combined_cast_over_twelve_rejected(self):
+        family = [{"name": f"Fam{i}", "role": "kin", "trait": "x"} for i in range(10)]
+        latent = [_latent(f"Late{i}", min_turn=12) for i in range(3)]   # 10 + 3 = 13
+        with pytest.raises(ValidationError):
+            WorldCartridge.model_validate(_valid_payload(family=family, latent_family=latent))
