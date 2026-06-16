@@ -878,8 +878,6 @@ def _departed_state(*, turn_count: int, departed_turn: int) -> ThreadState:
     )
 
 
-# A strong-participation goodbye ("says") naming the departing NPC, then a
-# pronoun-only sentence the presence check never touches.
 _GOODBYE = (
     "Sera says nothing more. She turns and walks out the door, "
     "and you know she will never return."
@@ -889,8 +887,6 @@ _GOODBYE = (
 class TestDepartingWitnessGoodbye:
     @pytest.mark.asyncio
     async def test_named_goodbye_survives_on_the_departure_turn(self, momus):
-        # departed_turn == turn_count: the leaving prose naming Sera with a
-        # strong marker must NOT be redacted — the one turn it matters most.
         state = _departed_state(turn_count=5, departed_turn=5)
         result = await momus.validate_prose(_GOODBYE, state)
         assert not any("Sera" in h for h in result.hallucinations), result.hallucinations
@@ -898,8 +894,6 @@ class TestDepartingWitnessGoodbye:
 
     @pytest.mark.asyncio
     async def test_named_presence_is_flagged_after_the_departure_turn(self, momus):
-        # departed_turn < turn_count: from the next turn on she is gone, and
-        # naming her as present again IS drift and is flagged/redacted as before.
         state = _departed_state(turn_count=6, departed_turn=5)
         result = await momus.validate_prose(_GOODBYE, state)
         assert any("Sera" in item for item in result.hallucinations), result.hallucinations
@@ -907,9 +901,65 @@ class TestDepartingWitnessGoodbye:
 
     @pytest.mark.asyncio
     async def test_default_departed_turn_does_not_collide_with_turn_zero(self, momus):
-        # A departed NPC with the never-stamped default (departed_turn=0) at an
-        # uninitialized turn 0 must STILL be flagged — the > 0 guard prevents the
-        # 0 == 0 collision from wrongly granting grace.
         state = _departed_state(turn_count=0, departed_turn=0)
         result = await momus.validate_prose(_GOODBYE, state)
         assert any("Sera" in item for item in result.hallucinations), result.hallucinations
+
+
+# ===========================================================================
+# The claimed witness's death (#34 "The World Takes" interaction): on the turn
+# a clock takes an NPC, the death narration may name them one last time; from
+# the next turn on, the dead may not act and naming them is drift again.
+# ===========================================================================
+
+def _dead_state(*, turn_count: int, died_turn: int) -> ThreadState:
+    """A scene whose only named NPC, Maren, was CLAIMED by a clock (status
+    'dead', already removed from present_npc_ids) on `died_turn`, with the turn
+    clock now at `turn_count`."""
+    return ThreadState(
+        session=SessionData(
+            turn_count=turn_count,
+            current_environment="Thornwell (hill village). A hard winter presses on the roofs.",
+        ),
+        canon=WorldCanon(
+            locations={
+                "thornwell": CanonLocation(
+                    location_id="thornwell", name="Thornwell",
+                    region="Ashlands", kind="hill village",
+                ),
+            },
+            npcs={
+                "maren": CanonNPC(
+                    npc_id="maren", name="Maren", role="aunt",
+                    home_location_id="thornwell", current_location_id="thornwell",
+                    status="dead", died_turn=died_turn, last_seen_turn=died_turn,
+                ),
+            },
+            current_scene=SceneState(
+                scene_id="scene_1", location_id="thornwell",
+                present_npc_ids=[],   # the clock has just taken her
+            ),
+        ),
+    )
+
+
+_DEATH = (
+    "Maren says your name one last time. The beam falls, and she is gone, "
+    "and the world does not give her back."
+)
+
+
+class TestClaimedDeathNarration:
+    @pytest.mark.asyncio
+    async def test_named_death_survives_on_the_claim_turn(self, momus):
+        state = _dead_state(turn_count=12, died_turn=12)
+        result = await momus.validate_prose(_DEATH, state)
+        assert not any("Maren" in h for h in result.hallucinations), result.hallucinations
+        assert "Maren says your name one last time." in result.corrected_prose
+
+    @pytest.mark.asyncio
+    async def test_named_presence_is_flagged_after_the_claim_turn(self, momus):
+        state = _dead_state(turn_count=13, died_turn=12)
+        result = await momus.validate_prose(_DEATH, state)
+        assert any("Maren" in item for item in result.hallucinations), result.hallucinations
+        assert "Maren says your name one last time." not in result.corrected_prose

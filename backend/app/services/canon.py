@@ -459,6 +459,7 @@ def _claim_npc(state: ThreadState, clock: SceneClock) -> str | None:
 
     npc.status = "dead"
     turn = state.session.turn_count
+    npc.died_turn = turn
     npc.events.append(NPCEvent(
         turn=turn, kind="lost", valence=-2.0, note=f"taken — {clock.stakes}"[:80],
     ))

@@ -142,6 +142,10 @@ class CanonNPC(BaseModel):
     # Lets Momus grant a departing witness their named goodbye on the leaving
     # turn while still flagging them as absent on every turn after.
     departed_turn: int = 0
+    # The turn a clock CLAIMED this NPC (status -> "dead", see _claim_npc), or 0
+    # if they were never claimed. Same one-turn grace as departed_turn, for the
+    # death narration's named farewell.
+    died_turn: int = 0
     # Depth: the populated mind — authored want + a friction-weighted memory.
     want: str = ""                                   # standing desire, authored, immutable at runtime
     bond: float = Field(default=0.0, ge=-10.0, le=10.0)   # trajectory; sours fast, warms slow
