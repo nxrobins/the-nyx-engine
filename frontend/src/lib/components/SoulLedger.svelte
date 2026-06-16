@@ -5,12 +5,17 @@
 <script lang="ts">
 	import { gameState } from '$lib/stores/engine';
 	import type { LegacyEcho, Oath, PressureState, Promise as NyxPromise, SoulVectors } from '$lib/types/engine';
+	import { deriveWitnesses } from '$lib/utils/witnesses';
 
 	let vectors = $derived<SoulVectors | null>($gameState?.soul_ledger.vectors ?? null);
 	let hamartia = $derived<string>($gameState?.soul_ledger.hamartia ?? '');
 	let oaths = $derived<Oath[]>($gameState?.soul_ledger.active_oaths ?? []);
 	let pressures = $derived<PressureState | null>($gameState?.pressures ?? null);
 	let legacyEchoes = $derived<LegacyEcho[]>($gameState?.legacy_echoes ?? []);
+
+	/** The Witnesses — the cast of this life: the living (bond + want) and the
+	 *  lost (taken / departed / missing), remembered and never erased. */
+	let witnesses = $derived(deriveWitnesses($gameState));
 
 	/** The Witness: active narrative debts (Morpheus P2), due-soonest first */
 	let promises = $derived<NyxPromise[]>(
@@ -180,6 +185,30 @@
 					No worldly force dominates the scene yet.
 				</p>
 			{/if}
+		</div>
+	{/if}
+
+	{#if witnesses.living.length > 0 || witnesses.lost.length > 0}
+		<div class="flex flex-col gap-3">
+			<p class="text-[10px] uppercase tracking-[0.25em]" style="color: var(--nyx-text-dim);">
+				The Witnesses
+			</p>
+			{#each witnesses.living as w (w.id)}
+				<div class="text-sm leading-relaxed">
+					<span class="text-[var(--nyx-text)]">{w.name}</span>
+					<span class="text-xs" style="color: var(--nyx-text-dim);"> · {w.role}</span>
+					<span class="text-xs italic" style="color: var(--nyx-text-dim);"> — {w.bondLabel}</span>
+					{#if w.want}
+						<p class="text-[10px] mt-0.5" style="color: var(--nyx-text-dim);">wants {w.want}</p>
+					{/if}
+				</div>
+			{/each}
+			{#each witnesses.lost as w (w.id)}
+				<div class="text-sm leading-relaxed opacity-50">
+					<span class="line-through" style="color: var(--nyx-text-dim);">{w.name}</span>
+					<span class="text-xs italic" style="color: var(--nyx-text-dim);"> — {w.fate}</span>
+				</div>
+			{/each}
 		</div>
 	{/if}
 
