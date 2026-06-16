@@ -9,8 +9,10 @@ no-leak strip land in the next slice. Hermetic, keyless — no model, no RNG.
 from __future__ import annotations
 
 import copy
+import dataclasses
 
 from app.core.config import settings
+from app.core.world_seeds import WORLD_SEEDS, SeedArrival, SeedLatentNPC
 from app.schemas.state import (
     ArrivalCondition,
     CanonNPC,
@@ -20,7 +22,7 @@ from app.schemas.state import (
     ThreadState,
     WorldCanon,
 )
-from app.services.canon import _arrival_eligible, maybe_arrive_npcs
+from app.services.canon import _arrival_eligible, bootstrap_canon, maybe_arrive_npcs
 
 
 def _npc(npc_id, name, *, status="latent", cond=None, bond=0.0, role="stranger"):
@@ -159,3 +161,44 @@ class TestArrivalMechanism:
         assert st.soul_ledger == soul_before
         assert st.pressures == pressures_before
         assert st.doom == doom_before
+
+
+class TestBootstrapAuthoring:
+    """A seed may carry latent NPCs; bootstrap mints them as status='latent'
+    (absent at birth), and they arrive end-to-end through maybe_arrive_npcs."""
+
+    def test_bootstrap_mints_a_latent_npc(self):
+        seed = dataclasses.replace(WORLD_SEEDS["light"], latent=[
+            SeedLatentNPC(name="Kael", role="ally", arrival=SeedArrival(min_turn=12)),
+        ])
+        canon = bootstrap_canon(seed, "Orin", "unknown")
+        kael = canon.npcs["npc_kael"]
+        assert kael.status == "latent"
+        assert kael.arrival_condition is not None and kael.arrival_condition.min_turn == 12
+        assert "npc_kael" not in canon.current_scene.present_npc_ids   # absent at birth
+        assert canon.current_scene.present_npc_ids                     # family still present
+
+    def test_builtins_mint_no_latent(self):
+        for key in WORLD_SEEDS:
+            canon = bootstrap_canon(WORLD_SEEDS[key], "Orin", "unknown")
+            assert not any(n.status == "latent" for n in canon.npcs.values()), key
+
+    def test_seeded_latent_arrives_end_to_end(self):
+        seed = dataclasses.replace(WORLD_SEEDS["light"], latent=[
+            SeedLatentNPC(name="Kael", role="ally", arrival=SeedArrival(min_turn=12)),
+        ])
+        canon = bootstrap_canon(seed, "Orin", "unknown")
+        st = ThreadState(session=SessionData(turn_count=12), canon=canon)
+        res = maybe_arrive_npcs(st)
+        assert res.arrived_id == "npc_kael"
+        assert canon.npcs["npc_kael"].status == "alive"
+        assert "npc_kael" in canon.current_scene.present_npc_ids
+
+    def test_latent_id_collision_is_skipped(self):
+        # A latent NPC whose slug collides with a family member is skipped, never
+        # overwriting the living one.
+        seed = dataclasses.replace(WORLD_SEEDS["light"], latent=[
+            SeedLatentNPC(name="Sera", role="stranger", arrival=SeedArrival(min_turn=12)),
+        ])
+        canon = bootstrap_canon(seed, "Orin", "unknown")
+        assert canon.npcs["npc_sera"].status == "alive"   # the family Sera, untouched
