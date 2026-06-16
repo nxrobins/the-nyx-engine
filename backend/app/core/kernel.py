@@ -76,6 +76,7 @@ from app.services.canon import (
     apply_environment_update,
     bootstrap_canon,
     derive_environment_string,
+    maybe_arrive_npcs,
     maybe_depart_npcs,
     relieve_clock,
     render_scene_snapshot,
@@ -1085,6 +1086,22 @@ class NyxKernel:
         depart_notes = maybe_depart_npcs(outcome.state)
         if depart_notes and outcome.scene_outcome is not None:
             outcome.scene_outcome.material_changes.extend(depart_notes[:2])
+
+        # Step 8d'': the witnesses can ARRIVE — a latent NPC enters when its
+        # earned condition is met. Last in the lifecycle block so it reads the
+        # turn's fully settled cast. Suppressed on a LOSS turn (a fresh grave or a
+        # slammed door is never stepped over by a newcomer in the same beat,
+        # ARR-C6); an active doom suppresses it inside the function (ARR-C5).
+        loss_turn = bool(tick.claimed) or bool(depart_notes)
+        if not loss_turn:
+            arrival = maybe_arrive_npcs(outcome.state)
+            if arrival.arrived_id and outcome.scene_outcome is not None:
+                outcome.scene_outcome.material_changes.extend(arrival.notes[:1])
+                arrived = outcome.state.canon.npcs[arrival.arrived_id]
+                outcome.scene_outcome.must_not_contradict.append(
+                    f"{arrived.name} has just arrived and is present in the scene; "
+                    "they may appear and act."
+                )
 
         _refresh_derived_environment(outcome.state)
 

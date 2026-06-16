@@ -11,6 +11,8 @@ from __future__ import annotations
 import copy
 import dataclasses
 
+import pytest
+
 from app.core.config import settings
 from app.core.world_seeds import WORLD_SEEDS, SeedArrival, SeedLatentNPC
 from app.schemas.state import (
@@ -202,3 +204,68 @@ class TestBootstrapAuthoring:
         ])
         canon = bootstrap_canon(seed, "Orin", "unknown")
         assert canon.npcs["npc_sera"].status == "alive"   # the family Sera, untouched
+
+
+class TestKernelArrival:
+    """The kernel 8d'' hook: a latent NPC arrives through a real turn, and a
+    loss-turn (a clock claim or a departure) suppresses it (ARR-C6)."""
+
+    @pytest.mark.asyncio
+    async def test_latent_arrives_through_a_real_turn(self, monkeypatch):
+        import app.agents.eris as eris_module
+        monkeypatch.setattr(eris_module.random, "random", lambda: 0.999)  # no chaos noise
+        from app.core.kernel import NyxKernel
+
+        k = NyxKernel()
+        await k.initialize(
+            hamartia="Hubris of the Intellect", player_id="arrive",
+            name="Orin", gender="boy",
+            first_memory="A light in the distance I could not reach.",
+        )
+        # A latent NPC eligible from turn 10. A benign action means no claim and
+        # no departure, so the loss-turn guard does not fire.
+        k.state.canon.npcs["npc_kael"] = CanonNPC(
+            npc_id="npc_kael", name="Kael", role="ally",
+            home_location_id="home", current_location_id="home",
+            status="latent", arrival_condition=ArrivalCondition(min_turn=10),
+        )
+        k.state.session.turn_count = 14
+        result = await k.process_turn("I tend the cooling candles in silence")
+        assert not result.terminal
+        assert k.state.canon.npcs["npc_kael"].status == "alive"
+        assert "npc_kael" in k.state.canon.current_scene.present_npc_ids
+
+    @pytest.mark.asyncio
+    async def test_a_loss_turn_suppresses_arrival(self, monkeypatch):
+        import app.agents.eris as eris_module
+        monkeypatch.setattr(eris_module.random, "random", lambda: 0.999)
+        from app.core.kernel import NyxKernel
+
+        k = NyxKernel()
+        await k.initialize(
+            hamartia="Hubris of the Intellect", player_id="arrive2",
+            name="Orin", gender="boy",
+            first_memory="A light in the distance I could not reach.",
+        )
+        # An eligible latent...
+        k.state.canon.npcs["npc_kael"] = CanonNPC(
+            npc_id="npc_kael", name="Kael", role="ally",
+            home_location_id="home", current_location_id="home",
+            status="latent", arrival_condition=ArrivalCondition(min_turn=10),
+        )
+        # ...but a clock claims someone THIS turn (a loss turn).
+        k.state.canon.npcs["npc_sera"] = CanonNPC(
+            npc_id="npc_sera", name="Sera", role="friend",
+            home_location_id="home", current_location_id="home", last_seen_turn=1,
+        )
+        k.state.canon.current_scene.present_npc_ids.append("npc_sera")
+        k.state.canon.clocks["clock_fever"] = SceneClock(
+            clock_id="clock_fever", label="Fever", progress=3, max_segments=4,
+            claims_npc_id="npc_sera",
+        )
+        k.state.canon.current_scene.active_clock_ids.append("clock_fever")
+        k.state.session.turn_count = 15
+        k.state.pressures.exploit_score = 3.0   # provoke → the claiming clock fires
+        await k.process_turn("I work the same swindle on the magistrate again")
+        assert k.state.canon.npcs["npc_sera"].status == "dead"     # the loss landed
+        assert k.state.canon.npcs["npc_kael"].status == "latent"   # arrival suppressed
