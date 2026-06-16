@@ -4,10 +4,14 @@
 -->
 <script lang="ts">
 	import { deliberationTrace, gameState } from '$lib/stores/engine';
+	import { deriveActiveClocks } from '$lib/utils/clocks';
 
 	let prophecy = $derived<string>(
 		$gameState?.the_loom.current_prophecy ?? ''
 	);
+
+	/** What closes in — the scene's countdowns, most imminent first. */
+	let clocks = $derived(deriveActiveClocks($gameState));
 
 	let milestoneReached = $derived<boolean>(
 		$gameState?.the_loom.milestone_reached ?? false
@@ -149,6 +153,37 @@
 					>
 						{mark.body}
 					</p>
+				</div>
+			{/each}
+		</div>
+	{/if}
+
+	{#if clocks.length > 0}
+		<div class="flex flex-col gap-3 mt-6">
+			<p class="text-[10px] uppercase tracking-[0.25em] text-right" style="color: var(--nyx-text-dim);">
+				What Closes In
+			</p>
+			{#each clocks as c (c.id)}
+				<div class="text-right">
+					<p
+						class="text-xs leading-snug"
+						style="color: {c.lethal ? 'var(--nyx-nemesis)' : 'var(--nyx-text)'};"
+					>
+						{c.label}
+					</p>
+					<p
+						class="text-[11px] tracking-[0.25em] mt-0.5"
+						style="font-family: var(--font-mono); color: {c.remaining <= 1
+							? 'var(--nyx-oracle-gold)'
+							: 'var(--nyx-text-dim)'};"
+					>
+						{'●'.repeat(c.progress)}{'○'.repeat(c.remaining)}
+					</p>
+					{#if c.remaining <= 1 && c.stakes}
+						<p class="text-[10px] italic mt-0.5" style="color: var(--nyx-text-dim);">
+							{c.stakes}
+						</p>
+					{/if}
 				</div>
 			{/each}
 		</div>
