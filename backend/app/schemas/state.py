@@ -448,7 +448,12 @@ class InitRequest(BaseModel):
     """Session initialization — choose your tragic flaw."""
     hamartia: str
     player_id: str = "usr_001"
-    name: str = "Stranger"
+    # Capped to match the downstream sinks: BookManifest.player_name and
+    # PlayVerdict.player_name are max_length=80. Without this cap a longer name
+    # passed validation here but raised ValidationError when the book/verdict
+    # were bound at death (caught + logged), so the player's life was silently
+    # never recorded. Reject over-long names fast at the request boundary.
+    name: str = Field(default="Stranger", max_length=80)
     gender: str = "unknown"
     first_memory: str = ""
     content_prefs: dict | None = None   # The Vigil: self-asserted consent (carried, not yet acted on)
