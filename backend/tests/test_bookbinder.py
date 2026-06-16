@@ -82,6 +82,22 @@ class TestLibrary:
         md = load_book_markdown("orin-p-r1")
         assert md is not None and "The Wrath of Orin" in md
 
+    def test_long_name_book_id_truncates_without_a_trailing_dash(self):
+        # A long multi-word name whose slug + suffix exceeds 80 chars used to
+        # truncate ONTO a separator, leaving a trailing "-" that
+        # load_book_markdown's guard (slugify strips it) then rejected — the
+        # bound book listed on the shelf but 404'd on open. The id must round-trip.
+        state = _state()
+        state.session.player_name = " ".join(["aa"] * 26)  # forces the 80-char boundary
+        manifest = bind_book(
+            state, [_chapter()], epitaph="Here lies a long-named soul.", death_reason="x"
+        )
+        assert not manifest.book_id.endswith("-")
+        assert len(manifest.book_id) <= 80
+        write_book(manifest)
+        assert manifest.book_id in [b.book_id for b in list_books()]
+        assert load_book_markdown(manifest.book_id) is not None  # opens, not a 404
+
     def test_bad_manifest_skipped_on_shelf(self):
         manifest = bind_book(
             _state(), [_chapter()], epitaph="Here lies Orin.", death_reason="x"
