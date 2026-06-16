@@ -820,6 +820,107 @@ def maybe_depart_npcs(state: ThreadState) -> list[str]:
     return notes[:2]
 
 
+# The Witnesses Arrive: a life can GAIN a witness, not only lose one. A world may
+# author LATENT NPCs (status="latent", absent at birth) that ENTER when an earned,
+# machine-checkable condition is met. Deterministic, model-free, canon-ONLY — it
+# never touches soul/pressures/doom/terminal. Childhood is sealed.
+_ARRIVAL_ADULT_TURN = 10   # LOCAL floor; no procedural stranger enters a child's home
+
+
+@dataclass
+class ArrivalResult:
+    """The outcome of an arrival check — the kernel reads arrived_id to license
+    the newcomer in the scene (mirrors ClockTickResult)."""
+    notes: list[str] = field(default_factory=list)
+    arrived_id: str | None = None
+
+
+def _arrival_eligible(state: ThreadState, npc: CanonNPC) -> bool:
+    """Deterministic, canon+turn-ONLY predicate. A vacuous (all-default)
+    condition never fires (friction must be earned); childhood is sealed."""
+    cond = npc.arrival_condition
+    if cond is None:
+        return False
+    canon = state.canon
+    turn = state.session.turn_count
+    if turn < _ARRIVAL_ADULT_TURN:
+        return False
+    gates_present = False
+    if cond.min_turn > 0:
+        gates_present = True
+        if turn < cond.min_turn:
+            return False
+    if cond.requires_bond_npc_id:
+        gates_present = True
+        anchor = canon.npcs.get(cond.requires_bond_npc_id) if canon else None
+        if anchor is None or anchor.status != "alive" or anchor.bond < cond.requires_bond_at_least:
+            return False
+    if cond.on_clock_resolved:
+        gates_present = True
+        clock = canon.clocks.get(cond.on_clock_resolved) if canon else None
+        # A CLAIMING clock (one that takes a life) may not summon an arrival —
+        # no death-triggered replacement, even via the clock (ARR-C7).
+        if clock is None or clock.claims_npc_id:
+            return False
+        if clock.progress < clock.max_segments:
+            return False
+    return gates_present
+
+
+def _arrival_trigger_phrase(npc: CanonNPC) -> str:
+    """A deterministic, authored-shaped note for Clotho — never a model write."""
+    cond = npc.arrival_condition
+    if cond and cond.on_clock_resolved:
+        return f"{npc.name} arrives in the wake of what just ran its course."
+    if cond and cond.requires_bond_npc_id:
+        return f"{npc.name} is drawn into your life by the ties you have kept."
+    return f"In time, {npc.name} comes into your life."
+
+
+def maybe_arrive_npcs(state: ThreadState) -> ArrivalResult:
+    """Promote AT MOST ONE eligible latent NPC to present+alive this turn.
+
+    Runs late in the lifecycle (beside maybe_depart_npcs) so it reads the turn's
+    settled cast. Canon-ONLY: never touches soul/pressures/doom/terminal. A doom
+    suppresses it — a thread the math has committed to ending admits no newcomer.
+    """
+    canon = state.canon
+    if not canon or not canon.current_scene:
+        return ArrivalResult()
+    if state.doom.active:
+        return ArrivalResult()
+    scene = canon.current_scene
+    present_alive = _alive_present_ids(canon, scene.present_npc_ids)
+    if len(present_alive) >= settings.arrival_present_cap:
+        return ArrivalResult()
+    turn = state.session.turn_count
+    # Stable, author-influenced order: priority then npc_id (never dict order).
+    latents = sorted(
+        (npc for npc in canon.npcs.values() if npc.status == "latent"),
+        key=lambda n: (
+            n.arrival_condition.arrival_priority if n.arrival_condition else 0,
+            n.npc_id,
+        ),
+    )
+    for npc in latents:
+        if not _arrival_eligible(state, npc):
+            continue
+        trigger = _arrival_trigger_phrase(npc)
+        npc.status = "alive"
+        npc.arrived_turn = turn
+        npc.last_seen_turn = turn
+        npc.current_location_id = scene.location_id
+        npc.events.append(NPCEvent(
+            turn=turn, kind="arrived", valence=0.0, note=f"arrived: {trigger}"[:80],
+        ))
+        npc.events = _compact_events(npc.events)
+        # THE load-bearing line: present_npc_ids only ever SHRINKS elsewhere
+        # (advance_scene is test-only) — arrival is the one sanctioned addition.
+        scene.present_npc_ids.append(npc.npc_id)
+        return ArrivalResult(notes=[trigger], arrived_id=npc.npc_id)
+    return ArrivalResult()
+
+
 _BOND_BANDS = (
     (-6.0, "will not forgive you"),
     (-2.0, "wary, souring"),
