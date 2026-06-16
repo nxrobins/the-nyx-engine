@@ -81,6 +81,21 @@ class TestConfig:
         # the childhood _AGE_MAP; the gate must keep that out of range.
         assert settings.old_age_threshold >= 18
 
+    def test_sub_adult_threshold_is_rejected_at_load(self):
+        # OLD-AG-1 is now ENFORCED, not just asserted: an env/init override below
+        # 18 fails closed instead of silently re-enabling childhood old-age death.
+        from pydantic import ValidationError
+
+        from app.core.config import Settings
+
+        with pytest.raises(ValidationError):
+            Settings(old_age_threshold=10)
+
+    def test_adult_threshold_is_accepted(self):
+        from app.core.config import Settings
+
+        assert Settings(old_age_threshold=18).old_age_threshold == 18
+
 
 class TestKernelOrdering:
     @pytest.mark.asyncio
