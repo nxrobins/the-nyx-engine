@@ -838,3 +838,68 @@ class TestAgentIdentity:
     def test_agent_name(self):
         m = Momus()
         assert m.name == "momus"
+
+
+# ===========================================================================
+# The claimed witness's death (#34 "The World Takes" interaction): on the turn
+# a clock takes an NPC, the death narration may name them one last time; from
+# the next turn on, the dead may not act and naming them is drift again.
+# ===========================================================================
+
+def _dead_state(*, turn_count: int, died_turn: int) -> ThreadState:
+    """A scene whose only named NPC, Maren, was CLAIMED by a clock (status
+    'dead', already removed from present_npc_ids) on `died_turn`, with the turn
+    clock now at `turn_count`."""
+    return ThreadState(
+        session=SessionData(
+            turn_count=turn_count,
+            current_environment="Thornwell (hill village). A hard winter presses on the roofs.",
+        ),
+        canon=WorldCanon(
+            locations={
+                "thornwell": CanonLocation(
+                    location_id="thornwell", name="Thornwell",
+                    region="Ashlands", kind="hill village",
+                ),
+            },
+            npcs={
+                "maren": CanonNPC(
+                    npc_id="maren", name="Maren", role="aunt",
+                    home_location_id="thornwell", current_location_id="thornwell",
+                    status="dead", died_turn=died_turn, last_seen_turn=died_turn,
+                ),
+            },
+            current_scene=SceneState(
+                scene_id="scene_1", location_id="thornwell",
+                present_npc_ids=[],   # the clock has just taken her
+            ),
+        ),
+    )
+
+
+# A strong-participation death naming the claimed NPC (her last words), then a
+# pronoun-only sentence the presence check never touches.
+_DEATH = (
+    "Maren says your name one last time. The beam falls, and she is gone, "
+    "and the world does not give her back."
+)
+
+
+class TestClaimedDeathNarration:
+    @pytest.mark.asyncio
+    async def test_named_death_survives_on_the_claim_turn(self, momus):
+        # died_turn == turn_count: the death prose naming Maren with a strong
+        # marker must NOT be redacted — the one turn the world takes her.
+        state = _dead_state(turn_count=12, died_turn=12)
+        result = await momus.validate_prose(_DEATH, state)
+        assert not any("Maren" in h for h in result.hallucinations), result.hallucinations
+        assert "Maren says your name one last time." in result.corrected_prose
+
+    @pytest.mark.asyncio
+    async def test_named_presence_is_flagged_after_the_claim_turn(self, momus):
+        # died_turn < turn_count: from the next turn on the dead may not act, and
+        # naming her as present again IS drift, flagged/redacted as before.
+        state = _dead_state(turn_count=13, died_turn=12)
+        result = await momus.validate_prose(_DEATH, state)
+        assert any("Maren" in item for item in result.hallucinations), result.hallucinations
+        assert "Maren says your name one last time." not in result.corrected_prose

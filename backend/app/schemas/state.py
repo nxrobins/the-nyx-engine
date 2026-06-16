@@ -122,6 +122,10 @@ class CanonNPC(BaseModel):
     obligation: float = 0.0
     tags: list[str] = Field(default_factory=list)
     last_seen_turn: int = 0
+    # The turn a clock CLAIMED this NPC (status -> "dead", see _claim_npc), or 0
+    # if they were never claimed. Lets Momus grant the death narration its named
+    # farewell on the dying turn while still flagging the dead as absent after.
+    died_turn: int = 0
     # Depth: the populated mind — authored want + a friction-weighted memory.
     want: str = ""                                   # standing desire, authored, immutable at runtime
     bond: float = Field(default=0.0, ge=-10.0, le=10.0)   # trajectory; sours fast, warms slow

@@ -535,11 +535,20 @@ def _check_canon_drift(
         # Dead NPCs may not act at all — the dead don't watch from doorways.
         # But recollections (memory-guarded sentences) never count.
         if npc.status == "dead" and ("strong" in strengths or "weak" in strengths):
-            hallucinations.append(
-                f"Prose treats {npc.name} as present, but canon marks them dead."
-            )
-            repair_notes.append(f"Do not place {npc.name} in the scene; they are dead in canon.")
-            unsafe_fragments.append(npc.name)
+            # The claimed witness's death: on the turn a clock takes an NPC (#34
+            # "The World Takes", see _claim_npc), the death narration must be
+            # allowed to name them one last time — last words, the moment they
+            # fall. From the next turn on the dead may not act, so naming them is
+            # drift again; the grace is keyed strictly to died_turn == this turn.
+            # died_turn > 0 guards the never-claimed default (0) from colliding
+            # with an uninitialized turn 0.
+            died_this_turn = npc.died_turn > 0 and npc.died_turn == state.session.turn_count
+            if not died_this_turn:
+                hallucinations.append(
+                    f"Prose treats {npc.name} as present, but canon marks them dead."
+                )
+                repair_notes.append(f"Do not place {npc.name} in the scene; they are dead in canon.")
+                unsafe_fragments.append(npc.name)
         # Absent-but-alive NPCs are flagged only on STRONG evidence:
         # a glimpse at a distance or a mention in passing is legitimate.
         elif npc.npc_id not in present_ids and "strong" in strengths:
