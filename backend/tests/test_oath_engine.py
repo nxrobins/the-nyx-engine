@@ -92,6 +92,133 @@ class TestParseOathText:
         assert terms.forbidden_action is not None
         assert "betray the village" in terms.forbidden_action.lower()
 
+    # ── Empty / non-oath input ────────────────────────────────────────────
+
+    def test_empty_string_returns_none(self):
+        assert parse_oath_text("") is None
+
+    def test_whitespace_only_returns_none(self):
+        assert parse_oath_text("   \t\n  ") is None
+
+    def test_no_recognized_opening_keeps_whole_text_as_promised(self):
+        # When no oath-opening phrase is present, the whole (stripped) text is the
+        # promised action — the parser never drops the deed on the floor.
+        terms = parse_oath_text("Glory shall be mine")
+        assert terms is not None
+        assert terms.promised_action == "Glory shall be mine"
+
+    def test_subject_is_passed_through(self):
+        terms = parse_oath_text("I swear to win", subject="Hero")
+        assert terms is not None
+        assert terms.subject == "Hero"
+
+    # ── promised_action: every opening is stripped to the bare deed ───────
+
+    def test_all_openings_strip_to_bare_promised_action(self):
+        # Downstream verification compares deeds against the deed, not the vow
+        # grammar, so every recognized opening must reduce to the action alone.
+        cases = {
+            "I swear to avenge my father": "avenge my father",
+            "I promise to return home": "return home",
+            "I vow to slay the beast": "slay the beast",
+            "I pledge to serve the crown": "serve the crown",
+            "My oath is to find her": "find her",
+            "On my honor, I will act": "act",
+            "On my blood, I will act": "act",
+            "On my life, I will act": "act",
+            "I will burn it all down": "burn it all down",
+        }
+        for text, expected in cases.items():
+            terms = parse_oath_text(text)
+            assert terms is not None, text
+            assert terms.promised_action == expected, text
+
+    # ── price: honor | blood | life, resolved in priority order ───────────
+
+    def test_price_honor_blood_life(self):
+        assert parse_oath_text("On my honor, I will act").price == "honor"
+        assert parse_oath_text("On my blood, I will act").price == "blood"
+        assert parse_oath_text("On my life, I will act").price == "life"
+
+    def test_price_resolves_in_priority_order_when_multiple(self):
+        # honor is tested before blood before life; the first hit wins, never both.
+        terms = parse_oath_text("On my honor and on my blood, I will act")
+        assert terms is not None
+        assert terms.price == "honor"
+
+    def test_no_price_when_unsworn(self):
+        assert parse_oath_text("I swear to act").price is None
+
+    # ── deadline ──────────────────────────────────────────────────────────
+
+    def test_fixed_deadline_phrases(self):
+        for phrase in (
+            "before dawn", "before nightfall", "before sunrise",
+            "before sunset", "tomorrow", "tonight",
+        ):
+            terms = parse_oath_text(f"I swear to act {phrase}")
+            assert terms is not None, phrase
+            assert terms.deadline == phrase, phrase
+
+    def test_open_ended_deadline_by_and_until(self):
+        assert parse_oath_text("I swear to act by the next moon").deadline == "by the next moon"
+        assert parse_oath_text("I swear to act until the war ends").deadline == "until the war ends"
+
+    def test_no_deadline_when_absent(self):
+        assert parse_oath_text("I swear to act").deadline is None
+
+    # ── protected_target: lookahead stops at the next clause ──────────────
+
+    def test_protected_target_stops_before_deadline_clause(self):
+        terms = parse_oath_text("On my honor, I will protect Sera before dawn")
+        assert terms is not None
+        assert terms.protected_target == "Sera"
+        assert terms.deadline == "before dawn"
+
+    def test_protected_target_stops_before_price_clause(self):
+        terms = parse_oath_text("I swear to keep safe my brother on my life")
+        assert terms is not None
+        assert terms.protected_target == "my brother"
+        assert terms.price == "life"
+
+    def test_guard_and_defend_are_protect_verbs(self):
+        assert parse_oath_text("On my life, I will guard the gate").protected_target == "the gate"
+        assert (
+            parse_oath_text("I swear to defend the orphans until the spring").protected_target
+            == "the orphans"
+        )
+
+    # ── forbidden_action: never | not ─────────────────────────────────────
+
+    def test_forbidden_action_from_never(self):
+        terms = parse_oath_text("I vow to never betray the village")
+        assert terms is not None
+        assert terms.forbidden_action == "betray the village"
+
+    def test_forbidden_action_from_not(self):
+        terms = parse_oath_text("I will not abandon the keep")
+        assert terms is not None
+        assert terms.forbidden_action == "abandon the keep"
+
+    # ── witness: a capitalized name after 'before' or 'to' ────────────────
+
+    def test_witness_after_before_keyword(self):
+        terms = parse_oath_text("I swear to kneel before Marn")
+        assert terms is not None
+        assert terms.witness == "Marn"
+
+    def test_witness_after_to_keyword(self):
+        terms = parse_oath_text("I promise to Sera that I will stay")
+        assert terms is not None
+        assert terms.witness == "Sera"
+
+    def test_witness_requires_a_capitalized_name(self):
+        # 'to protect' is lowercase — not a witness; the target extractor owns it.
+        terms = parse_oath_text("I swear to protect the village")
+        assert terms is not None
+        assert terms.witness is None
+        assert terms.protected_target == "the village"
+
 
 class TestVerifyOaths:
     """Active oaths can be broken, fulfilled, or transformed."""
