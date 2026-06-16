@@ -12,8 +12,9 @@ import re
 from dataclasses import dataclass, field
 
 from app.core.config import settings
-from app.core.world_seeds import SeedClock, WorldSeed
+from app.core.world_seeds import SeedArrival, SeedClock, WorldSeed
 from app.schemas.state import (
+    ArrivalCondition,
     CanonFaction,
     CanonLocation,
     CanonNPC,
@@ -110,6 +111,17 @@ def _alive_present_ids(canon: WorldCanon, npc_ids: list[str]) -> list[str]:
     return alive_ids
 
 
+def _seed_arrival_to_model(arrival: SeedArrival) -> ArrivalCondition:
+    """Pure converter from the runtime seed leaf to the schema ArrivalCondition."""
+    return ArrivalCondition(
+        min_turn=arrival.min_turn,
+        requires_bond_npc_id=arrival.requires_bond_npc_id,
+        requires_bond_at_least=arrival.requires_bond_at_least,
+        on_clock_resolved=arrival.on_clock_resolved,
+        arrival_priority=arrival.arrival_priority,
+    )
+
+
 def bootstrap_canon(seed: WorldSeed, player_name: str, player_gender: str) -> WorldCanon:
     """Build the initial canonical world state from a world seed."""
     settlement_id = f"settlement_{_slug(seed.settlement)}"
@@ -153,6 +165,31 @@ def bootstrap_canon(seed: WorldSeed, player_name: str, player_gender: str) -> Wo
             want=npc_want(npc.name),
         )
         present_npc_ids.append(npc_id)
+
+    # The Witnesses Arrive: authored LATENT NPCs — absent at birth, minted with
+    # status="latent" + their arrival predicate. NOT added to present_npc_ids;
+    # maybe_arrive_npcs promotes one when its condition is met. Empty for every
+    # builtin, so this is a pure no-op there.
+    for lat in seed.latent:
+        latent_id = f"npc_{_slug(lat.name)}"
+        if latent_id in npcs:
+            logger.info(f"latent NPC '{lat.name}': id {latent_id} already exists — skipped")
+            continue
+        npcs[latent_id] = CanonNPC(
+            npc_id=latent_id,
+            name=lat.name,
+            role=lat.role,
+            home_location_id=home_id,
+            current_location_id=home_id,
+            status="latent",
+            trust=lat.trust,
+            fear=lat.fear,
+            obligation=lat.obligation,
+            tags=list(lat.tags),
+            last_seen_turn=0,
+            want=npc_want(lat.name),
+            arrival_condition=_seed_arrival_to_model(lat.arrival),
+        )
 
     factions: dict[str, CanonFaction] = {}
     if seed.faction_id and seed.faction_name:
