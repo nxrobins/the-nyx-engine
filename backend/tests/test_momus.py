@@ -963,3 +963,46 @@ class TestClaimedDeathNarration:
         result = await momus.validate_prose(_DEATH, state)
         assert any("Maren" in item for item in result.hallucinations), result.hallucinations
         assert "Maren says your name one last time." not in result.corrected_prose
+
+
+# ===========================================================================
+# Memory-guard precision (bug-hunt): the recollection token "once" must mean
+# FORMERLY, not the present-tense intensifiers "at once" / "once more" /
+# "once again". Otherwise a dead (or absent) NPC performing a strong action in
+# such a sentence silently escapes canon-drift — the dead would act in-scene.
+# ===========================================================================
+
+class TestMemoryGuardOnceToken:
+    @pytest.mark.asyncio
+    async def test_dead_npc_acting_with_at_once_is_flagged(self, momus):
+        # well past the death-turn grace, so naming Maren acting is drift again
+        state = _dead_state(turn_count=20, died_turn=5)
+        result = await momus.validate_prose(
+            "Maren grabs your wrist at once and says your name.", state
+        )
+        assert any("Maren" in h for h in result.hallucinations), result.hallucinations
+
+    @pytest.mark.asyncio
+    async def test_dead_npc_acting_with_once_more_is_flagged(self, momus):
+        state = _dead_state(turn_count=20, died_turn=5)
+        result = await momus.validate_prose(
+            "Maren grips your hand once more and says your name.", state
+        )
+        assert any("Maren" in h for h in result.hallucinations), result.hallucinations
+
+    @pytest.mark.asyncio
+    async def test_dead_npc_acting_with_once_again_is_flagged(self, momus):
+        state = _dead_state(turn_count=20, died_turn=5)
+        result = await momus.validate_prose(
+            "Maren steps toward you once again and grasps your arm.", state
+        )
+        assert any("Maren" in h for h in result.hallucinations), result.hallucinations
+
+    @pytest.mark.asyncio
+    async def test_genuine_recollection_of_the_dead_is_still_spared(self, momus):
+        # "Once" in the FORMERLY sense is grief, not a hallucination — unflagged.
+        state = _dead_state(turn_count=20, died_turn=5)
+        result = await momus.validate_prose(
+            "Once, Maren held this very cup by the fire.", state
+        )
+        assert not any("Maren" in h for h in result.hallucinations), result.hallucinations

@@ -253,8 +253,15 @@ _WEAK_PRESENCE_MARKERS = (
 
 # Sentences that are recollection, not scene action. A memory of the dead
 # is grief, not a hallucination — Momus must not redact it.
+#
+# NOTE on `once`: only the FORMERLY sense ("Once, he stood here", "she loved him
+# once") is recollection. The present-tense intensifiers "at once" (immediately)
+# and "once more"/"once again" (repetition) are live scene action, so they are
+# excluded — otherwise a dead or absent NPC performing a strong action in such a
+# sentence would silently escape canon-drift (the dead must not act in-scene).
 _MEMORY_GUARD_PATTERN: re.Pattern[str] = re.compile(
-    r"\b(?:remember(?:s|ed)?|memor(?:y|ies)|once|used to|years ago|"
+    r"\b(?:remember(?:s|ed)?|memor(?:y|ies)|(?<!at )once(?!\s+(?:more|again))|"
+    r"used to|years ago|"
     r"had been|that day|back then|long ago|dream(?:s|ed|t)?|"
     r"would (?:always|often|never)|before (?:he|she|they) died)\b",
     re.IGNORECASE,
