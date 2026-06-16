@@ -159,6 +159,10 @@ class SceneClock(BaseModel):
     stakes: str = ""
     resolution_hint: str = ""
     lethal: bool = False   # a fired lethal clock starts a doom sequence
+    # The World Takes: a fired clock with a named target claims that NPC's life
+    # (canonical npc_id, e.g. "npc_maren"). Authored + immutable after bootstrap;
+    # default "" is a pure no-op. NEVER both lethal and claiming (cartridge rejects).
+    claims_npc_id: str = ""
 
 
 class SceneState(BaseModel):

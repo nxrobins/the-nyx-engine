@@ -32,6 +32,12 @@
           "default": false,
           "title": "Lethal",
           "type": "boolean"
+        },
+        "claims_npc_id": {
+          "default": "",
+          "maxLength": 80,
+          "title": "Claims Npc Id",
+          "type": "string"
         }
       },
       "required": [

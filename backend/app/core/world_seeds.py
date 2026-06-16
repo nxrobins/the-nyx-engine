@@ -38,6 +38,7 @@ class SeedClock:
     stakes: str = ""
     resolution_hint: str = ""
     lethal: bool = False
+    claims_npc_id: str = ""   # The World Takes: a fired clock claims this NPC's life
 
 
 @dataclass

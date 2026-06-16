@@ -67,6 +67,16 @@ def _instantiate_authored_clocks(seed_clocks: list[SeedClock]) -> dict[str, Scen
             lethal = False
         if lethal:
             lethal_kept += 1
+        # The World Takes: a claiming clock inherits the lethal rail — below the
+        # minimum-segment floor it loses only its claim (keeps its stakes), so an
+        # under-built world can never instant-kill a named NPC (NC-5a).
+        claims = sc.claims_npc_id
+        if claims and sc.max_segments < _MIN_LETHAL_SEGMENTS:
+            logger.info(
+                f"authored clock '{sc.label}': claim on '{claims}' cleared "
+                f"(max_segments {sc.max_segments} < {_MIN_LETHAL_SEGMENTS})"
+            )
+            claims = ""
         clock_id = f"clock_{_slug(sc.label)}"
         clocks[clock_id] = SceneClock(
             clock_id=clock_id,
@@ -76,6 +86,7 @@ def _instantiate_authored_clocks(seed_clocks: list[SeedClock]) -> dict[str, Scen
             stakes=sc.stakes,
             resolution_hint=sc.resolution_hint,
             lethal=lethal,
+            claims_npc_id=claims,
         )
     return clocks
 
@@ -338,6 +349,13 @@ class ClockTickResult:
     fired: list[SceneClock] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     pressure_spike: dict[str, float] = field(default_factory=dict)
+    claimed: list[str] = field(default_factory=list)   # names of NPCs the world took
+
+
+# The World Takes: turn_count below which a claim is inert (childhood is spared,
+# NC-5b), and the protecting interaction kinds that buy a target more time.
+_ADULT_TURN = 10
+_CLAIM_RELIEF_KINDS = frozenset({"protected", "aided", "honored"})
 
 
 def advance_clock(state: ThreadState, clock_id: str, amount: int = 1) -> SceneClock | None:
@@ -368,6 +386,55 @@ def _fire_clock(state: ThreadState, clock: SceneClock) -> str:
     return note
 
 
+def _claim_npc(state: ThreadState, clock: SceneClock) -> str | None:
+    """The World Takes: a fired claiming clock takes its named NPC's life.
+
+    Pure consequence (model-free, mirrors maybe_depart_npcs but status -> "dead").
+    Guarded so the loss is always EARNED and meaningful:
+      * the target must exist and be currently alive (NC-13 — never re-kill);
+      * the player must have actually met them (last_seen_turn > 0, NC-8 — a death
+        with no grief is cheap, not tragic);
+      * never in childhood (turn_count >= _ADULT_TURN, NC-5b);
+      * never the last living NPC (NC-9 — the cast is never emptied).
+    On a claim: status -> "dead", an NPCEvent(kind="lost") scar is appended so the
+    ledger and the bound book remember them as taken, never erased (NC-10), and the
+    scene's present list is re-settled (NC-4). Returns the death note, or None on a
+    guarded no-op (logged). NEVER touches terminal/doom/Atropos (NC-2).
+    """
+    canon = state.canon
+    target = clock.claims_npc_id
+    if not canon or not canon.current_scene or not target:
+        return None
+    npc = canon.npcs.get(target)
+    if npc is None or npc.status != "alive":
+        logger.info(f"claim suppressed: '{target}' is not an alive NPC")
+        return None
+    if npc.last_seen_turn <= 0:
+        logger.info(f"claim suppressed: '{npc.name}' was never met")
+        return None
+    if state.session.turn_count < _ADULT_TURN:
+        logger.info(f"claim suppressed: childhood spared (turn {state.session.turn_count})")
+        return None
+    alive = [n for n in canon.npcs.values() if n.status == "alive"]
+    if len(alive) <= 1:
+        logger.info(f"claim suppressed: '{npc.name}' is the last living soul")
+        return None
+
+    npc.status = "dead"
+    turn = state.session.turn_count
+    npc.events.append(NPCEvent(
+        turn=turn, kind="lost", valence=-2.0, note=f"taken — {clock.stakes}"[:80],
+    ))
+    npc.events = _compact_events(npc.events)
+    canon.current_scene.present_npc_ids = _alive_present_ids(
+        canon, canon.current_scene.present_npc_ids
+    )
+    return (
+        f"{npc.name} is gone — {clock.stakes} took them. You could not stop it, "
+        f"and the world does not give them back."
+    )
+
+
 def tick_scene_clocks(
     state: ThreadState,
     *,
@@ -391,27 +458,74 @@ def tick_scene_clocks(
     if not canon or not canon.current_scene:
         return result
 
-    amount = 0
+    base_amount = 0
     if intervention_struck:
-        amount += 1
+        base_amount += 1
     if resolution_beat:
-        amount += 1
+        base_amount += 1
     if state.pressures.stability_streak >= 3:
-        amount += 1
-    amount = min(amount, 2)
-    if amount == 0:
+        base_amount += 1
+    base_amount = min(base_amount, 2)
+    # The World Takes: a CLAIMING clock advances ONLY on a player-coupled tick (the
+    # player provoked the Fates). The scheduler-only ticks — a RESOLUTION beat or
+    # coasting — never advance a claim by themselves, so a named NPC's death always
+    # traces to a choice (NC-5c). base_amount == 0 implies intervention_struck is
+    # false, so claim_amount is 0 too — the early return below is safe for claims.
+    claim_amount = 1 if intervention_struck else 0
+    if base_amount == 0:
         return result
 
     for clock_id in list(canon.current_scene.active_clock_ids):
+        clock = canon.clocks.get(clock_id)
+        if clock is None:
+            continue
+        amount = claim_amount if clock.claims_npc_id else base_amount
+        if amount <= 0:
+            continue
         fired = advance_clock(state, clock_id, amount)
         if fired is not None:
             result.fired.append(fired)
             result.notes.append(_fire_clock(state, fired))
+            if fired.claims_npc_id:
+                claimed_npc = canon.npcs.get(fired.claims_npc_id)
+                claim_note = _claim_npc(state, fired)
+                if claim_note:
+                    result.notes.append(claim_note)
+                    if claimed_npc is not None:
+                        result.claimed.append(claimed_npc.name)
 
     if result.fired:
         result.pressure_spike = {"omen": 0.6, "scarcity": 0.3}
 
     return result
+
+
+def relieve_clock(state: ThreadState, action: str) -> list[str]:
+    """The World Takes — AGENCY: shielding a claiming clock's named target buys them
+    time. When a committed action both names the target AND classifies as a
+    protecting interaction (protected/aided/honored), the clock's progress falls by
+    one (floored at 0). The kernel runs this BEFORE tick_scene_clocks, so a turn
+    spent protecting the target can net zero — the affordance that makes the claim a
+    consequence the player can answer rather than a cutscene (NC-5d). Pure, model-free.
+    """
+    canon = state.canon
+    if not canon or not canon.current_scene:
+        return []
+    kind, _ = classify_interaction(action)
+    if kind not in _CLAIM_RELIEF_KINDS:
+        return []
+    lowered = " ".join(_tokens(action))
+    notes: list[str] = []
+    for clock_id in canon.current_scene.active_clock_ids:
+        clock = canon.clocks.get(clock_id)
+        if clock is None or not clock.claims_npc_id or clock.progress <= 0:
+            continue
+        npc = canon.npcs.get(clock.claims_npc_id)
+        if npc is None or npc.status != "alive" or not _names_npc(lowered, npc):
+            continue
+        clock.progress = max(0, clock.progress - 1)
+        notes.append(f"You stood between {npc.name} and what is coming — bought them time.")
+    return notes[:2]
 
 
 # ---------------------------------------------------------------------------

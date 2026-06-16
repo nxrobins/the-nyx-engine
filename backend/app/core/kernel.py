@@ -77,6 +77,7 @@ from app.services.canon import (
     bootstrap_canon,
     derive_environment_string,
     maybe_depart_npcs,
+    relieve_clock,
     render_scene_snapshot,
     tick_scene_clocks,
     update_npc_relations,
@@ -1032,6 +1033,13 @@ class NyxKernel:
         if old_age_note and outcome.scene_outcome is not None:
             outcome.scene_outcome.material_changes.append(old_age_note)
 
+        # Step 8c (agency, BEFORE the tick): shielding a claiming clock's named
+        # target buys them time — a protective turn can net the claim back toward
+        # zero before it advances (The World Takes, NC-5d).
+        relief_notes = relieve_clock(outcome.state, action)
+        if relief_notes and outcome.scene_outcome is not None:
+            outcome.scene_outcome.material_changes.extend(relief_notes[:2])
+
         # Step 8c: Scene clocks tick — the world's problems mature whether
         # or not the player attends them. Fired clocks become true.
         tick = tick_scene_clocks(
@@ -1054,6 +1062,14 @@ class NyxKernel:
             outcome.scene_outcome.must_not_contradict.append(
                 "A clock has run out: its stakes are now true and cannot be walked back."
             )
+        # The World Takes: a clock claimed a named NPC this turn. They are dead in
+        # canon (status -> "dead", already dropped from the present cast and guarded
+        # by Momus), and the prose may not soften it (NC-3).
+        if tick.claimed and outcome.scene_outcome is not None:
+            for name in tick.claimed:
+                outcome.scene_outcome.must_not_contradict.append(
+                    f"{name} died this turn — they cannot appear unharmed, relieved, or safe."
+                )
 
         # Step 8d: the present cast remembers what the player did to them —
         # deterministic, friction-weighted, read-only to Clotho (Depth). Runs on
