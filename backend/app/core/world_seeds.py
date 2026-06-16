@@ -41,6 +41,36 @@ class SeedClock:
     claims_npc_id: str = ""   # The World Takes: a fired clock claims this NPC's life
 
 
+@dataclass(frozen=True)
+class SeedArrival:
+    """An authored arrival predicate carried from a cartridge into the runtime.
+
+    A pure leaf (no schemas/ import). bootstrap_canon turns it into the schema
+    ArrivalCondition. Ids are already normalized to runtime form (npc_{slug} /
+    clock_{slug}) by to_world_seed before they reach here.
+    """
+    min_turn: int = 0
+    requires_bond_npc_id: str = ""
+    requires_bond_at_least: float = 0.0
+    on_clock_resolved: str = ""
+    arrival_priority: int = 0
+
+
+@dataclass(frozen=True)
+class SeedLatentNPC:
+    """An authored NPC absent at birth — it ENTERS the life when its arrival
+    predicate is met (The Witnesses Arrive). Mirrors WorldNPC's shape plus the
+    arrival predicate; bootstrap_canon mints it as a status='latent' CanonNPC."""
+    name: str
+    role: str
+    trait: str = ""
+    trust: float = 0.0
+    fear: float = 0.0
+    obligation: float = 0.0
+    tags: tuple[str, ...] = ()
+    arrival: SeedArrival = field(default_factory=SeedArrival)
+
+
 @dataclass
 class WorldSeed:
     settlement: str
@@ -65,6 +95,10 @@ class WorldSeed:
     # bootstrap_canon still synthesizes its single fallback clock and the keystone
     # equivalence (cartridge.to_world_seed() == builtin) holds by construction.
     clocks: list[SeedClock] = field(default_factory=list)
+    # Authored latent NPCs (cartridge worlds only). Empty for every builtin, so
+    # bootstrap adds none and the keystone equivalence (cartridge.to_world_seed()
+    # == builtin) still holds by construction.
+    latent: list[SeedLatentNPC] = field(default_factory=list)
 
 
 # ═══════════════════════════════════════════════════════════════

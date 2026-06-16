@@ -109,6 +109,22 @@ class NPCEvent(BaseModel):
     note: str = ""          # <= 80 chars; deterministic template, never a model write
 
 
+class ArrivalCondition(BaseModel):
+    """A machine-checkable predicate for when a LATENT NPC enters the life.
+
+    Conjunctive over the NON-DEFAULT gates: every gate that is set must hold,
+    and at least one must be set (an all-default condition is vacuous and never
+    fires — friction must be earned). The gates read ONLY canon + turn, never
+    soul/pressures/doom, so arrival stays a pure function of canon. Authored,
+    never model-invented (The Witnesses Arrive).
+    """
+    min_turn: int = Field(default=0, ge=0, le=200)
+    requires_bond_npc_id: str = Field(default="", max_length=80)
+    requires_bond_at_least: float = Field(default=0.0, ge=-10.0, le=10.0)
+    on_clock_resolved: str = Field(default="", max_length=80)
+    arrival_priority: int = Field(default=0, ge=0, le=99)  # author tiebreak; lower arrives first
+
+
 class CanonNPC(BaseModel):
     """A named person in the world canon."""
     npc_id: str
@@ -116,15 +132,19 @@ class CanonNPC(BaseModel):
     role: str
     home_location_id: str
     current_location_id: str
-    status: str = "alive"  # alive | dead | missing | departed
+    status: str = "alive"  # alive | dead | missing | departed | latent
     trust: float = 0.0
     fear: float = 0.0
     obligation: float = 0.0
     tags: list[str] = Field(default_factory=list)
     last_seen_turn: int = 0
+    # The turn this NPC departed (status -> "departed"), or 0 if they never have.
+    # Lets Momus grant a departing witness their named goodbye on the leaving
+    # turn while still flagging them as absent on every turn after.
+    departed_turn: int = 0
     # The turn a clock CLAIMED this NPC (status -> "dead", see _claim_npc), or 0
-    # if they were never claimed. Lets Momus grant the death narration its named
-    # farewell on the dying turn while still flagging the dead as absent after.
+    # if they were never claimed. Same one-turn grace as departed_turn, for the
+    # death narration's named farewell.
     died_turn: int = 0
     # Depth: the populated mind — authored want + a friction-weighted memory.
     want: str = ""                                   # standing desire, authored, immutable at runtime
@@ -132,6 +152,12 @@ class CanonNPC(BaseModel):
     betrayal_weight: float = Field(default=0.0, ge=0.0, le=10.0)  # monotone; never decremented
     betrayal_count: int = Field(default=0, ge=0, le=99)          # monotone tally; compounding reads THIS
     events: list[NPCEvent] = Field(default_factory=list)         # bounded ring (EVENT_CAP)
+    # The Witnesses Arrive: a "latent" NPC is authored but NOT present at birth;
+    # it enters the life when its arrival_condition is met (see maybe_arrive_npcs).
+    # arrived_turn stamps the entry (0 = never arrived). Both default so every
+    # pre-existing NPC and serialized thread round-trips unchanged.
+    arrival_condition: ArrivalCondition | None = None
+    arrived_turn: int = 0
 
 
 class CanonLocation(BaseModel):
@@ -402,9 +428,17 @@ class HypnosResponse(BaseModel):
 # Kernel I/O
 # ---------------------------------------------------------------------------
 
+# The largest action the request layer accepts. Kept equal to welfare._SCAN_CAP
+# (the crisis detector canonicalizes + scans at most this many chars): rejecting
+# anything longer HERE means genuine ideation can never ride in past the scan
+# window into a durable store unredacted (audit M3 follow-up). A literal, not an
+# import, so the schema layer stays free of the services layer.
+MAX_ACTION_CHARS = 65_536
+
+
 class PlayerAction(BaseModel):
     """Incoming player action."""
-    action: str
+    action: str = Field(max_length=MAX_ACTION_CHARS)
     session_id: str = ""     # required for session isolation
     player_id: str = "usr_001"
     content_prefs: dict | None = None   # The Vigil: self-asserted consent (carried, not yet acted on)
