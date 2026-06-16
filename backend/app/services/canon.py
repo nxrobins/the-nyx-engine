@@ -111,6 +111,25 @@ def _alive_present_ids(canon: WorldCanon, npc_ids: list[str]) -> list[str]:
     return alive_ids
 
 
+def client_safe_state(state: ThreadState) -> ThreadState:
+    """A client-facing view of the thread with LATENT (not-yet-arrived) NPCs
+    stripped, so the unsprung cast — names, roles, arrival predicates — never
+    leaks over the wire (The Witnesses Arrive, ARR-C14). The REAL state keeps
+    them (they must persist to arrive). Fast-path: returns the state unchanged
+    when nothing is latent (the universal case for builtins), so there is no
+    copy cost on the hot path."""
+    canon = state.canon
+    if not canon or not canon.npcs:
+        return state
+    if not any(npc.status == "latent" for npc in canon.npcs.values()):
+        return state
+    shaped = state.model_copy(deep=True)
+    shaped.canon.npcs = {
+        nid: npc for nid, npc in shaped.canon.npcs.items() if npc.status != "latent"
+    }
+    return shaped
+
+
 def _seed_arrival_to_model(arrival: SeedArrival) -> ArrivalCondition:
     """Pure converter from the runtime seed leaf to the schema ArrivalCondition."""
     return ArrivalCondition(
