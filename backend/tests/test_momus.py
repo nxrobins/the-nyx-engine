@@ -904,3 +904,12 @@ class TestDepartingWitnessGoodbye:
         result = await momus.validate_prose(_GOODBYE, state)
         assert any("Sera" in item for item in result.hallucinations), result.hallucinations
         assert "Sera says nothing more." not in result.corrected_prose
+
+    @pytest.mark.asyncio
+    async def test_default_departed_turn_does_not_collide_with_turn_zero(self, momus):
+        # A departed NPC with the never-stamped default (departed_turn=0) at an
+        # uninitialized turn 0 must STILL be flagged — the > 0 guard prevents the
+        # 0 == 0 collision from wrongly granting grace.
+        state = _departed_state(turn_count=0, departed_turn=0)
+        result = await momus.validate_prose(_GOODBYE, state)
+        assert any("Sera" in item for item in result.hallucinations), result.hallucinations

@@ -549,8 +549,11 @@ def _check_canon_drift(
             # matters most. From the next turn on they are gone, and naming them
             # as present IS drift, so the grace is keyed strictly to
             # departed_turn == this turn.
+            # departed_turn > 0 guards the never-departed default (0) from
+            # colliding with an uninitialized turn 0 (mirrors the dead-guard).
             departed_this_turn = (
                 npc.status == "departed"
+                and npc.departed_turn > 0
                 and npc.departed_turn == state.session.turn_count
             )
             if not departed_this_turn:
