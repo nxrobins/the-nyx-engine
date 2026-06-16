@@ -338,6 +338,53 @@ class TestVerifyOathsEdges:
         assert verify_oaths(state, "I betray the village") == ([], [], [])
 
 
+class TestProtectOathDefensiveActions:
+    """A protect-oath must break only on a DIRECT attack on the target, never on
+    a defensive act that names the target while harming something else.
+
+    The forbidden-action branch was hardened for this exact false-positive class
+    in audit S2; the protected_target branch is its symmetric twin. A false break
+    here seals an UNESCAPABLE broken-oath doom (begin_doom escapable=False), so the
+    player is killed two turns later for KEEPING the oath — the engine punishing
+    fidelity. These pin the asymmetry closed.
+    """
+
+    @staticmethod
+    def _protect(oath_id="o1"):
+        return _ledger(_oath(oath_id, promised_action="protect Sera", protected_target="Sera"))
+
+    def test_defending_the_target_does_not_break(self):
+        # The blow lands on the bandit/dragon/wolves, not on Sera; the oath holds.
+        for action in (
+            "I strike the bandit threatening Sera",
+            "I kill the dragon to save Sera",
+            "I attack the wolves circling Sera to protect her",
+        ):
+            broken, _, _ = verify_oaths(self._protect(), action)
+            assert broken == [], action
+
+    def test_a_direct_attack_on_the_target_still_breaks(self):
+        # Regression guard: the genuine betrayal must still seal the doom.
+        for action in ("I attack Sera with my knife", "I strike Sera", "I kill Sera"):
+            broken, _, _ = verify_oaths(self._protect(), action)
+            assert broken == ["o1"], action
+
+    def test_naming_the_target_without_a_harm_verb_does_not_break(self):
+        broken, _, _ = verify_oaths(self._protect(), "I walk beside Sera through the market")
+        assert broken == []
+
+    def test_a_protective_verb_spares_the_oath(self):
+        broken, _, _ = verify_oaths(self._protect(), "I guard Sera from the raiders")
+        assert broken == []
+
+    def test_a_far_off_harm_verb_does_not_reach_the_target(self):
+        # The harm verb governs a different object several tokens away.
+        broken, _, _ = verify_oaths(
+            self._protect(), "I stab the cutpurse who once tried to rob Sera"
+        )
+        assert broken == []
+
+
 class TestOathHypocrisyScore:
     """Hypocrisy is open mockery of an oath short of fully breaking it — it
     feeds Nemesis's punishment trigger, so its scoring must stay pinned."""
@@ -358,6 +405,14 @@ class TestOathHypocrisyScore:
     def test_clean_action_scores_zero(self):
         state = _ledger(_oath("o4", promised_action="protect Mara", protected_target="Mara"))
         assert oath_hypocrisy_score(state.soul_ledger.active_oaths, "I tend the garden") == 0.0
+
+    def test_striking_a_bystander_near_the_target_is_not_hypocrisy(self):
+        # The protected target is named but the blow lands on someone else —
+        # defending Mara is not mockery of the oath to protect her (mirrors the
+        # protected_target object-binding fix in verify_oaths).
+        state = _ledger(_oath("o7", promised_action="protect Mara", protected_target="Mara"))
+        score = oath_hypocrisy_score(state.soul_ledger.active_oaths, "I strike the thug menacing Mara")
+        assert score == 0.0
 
     def test_inactive_or_termless_oaths_do_not_score(self):
         active_termless = _oath("o5", no_terms=True)
