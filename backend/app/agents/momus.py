@@ -543,13 +543,27 @@ def _check_canon_drift(
         # Absent-but-alive NPCs are flagged only on STRONG evidence:
         # a glimpse at a distance or a mention in passing is legitimate.
         elif npc.npc_id not in present_ids and "strong" in strengths:
-            hallucinations.append(
-                f"Prose puts {npc.name} in the current scene, but they are not present."
+            # The departing witness's goodbye: on the turn an NPC leaves for
+            # good ("departed" set THIS turn, see maybe_depart_npcs), the leaving
+            # prose must be allowed to name them one last time — the one turn it
+            # matters most. From the next turn on they are gone, and naming them
+            # as present IS drift, so the grace is keyed strictly to
+            # departed_turn == this turn.
+            # departed_turn > 0 guards the never-departed default (0) from
+            # colliding with an uninitialized turn 0 (mirrors the dead-guard).
+            departed_this_turn = (
+                npc.status == "departed"
+                and npc.departed_turn > 0
+                and npc.departed_turn == state.session.turn_count
             )
-            repair_notes.append(
-                f"Only the scene's present NPCs may participate directly; remove {npc.name} from the scene."
-            )
-            unsafe_fragments.append(npc.name)
+            if not departed_this_turn:
+                hallucinations.append(
+                    f"Prose puts {npc.name} in the current scene, but they are not present."
+                )
+                repair_notes.append(
+                    f"Only the scene's present NPCs may participate directly; remove {npc.name} from the scene."
+                )
+                unsafe_fragments.append(npc.name)
 
     return hallucinations, repair_notes, unsafe_fragments
 
