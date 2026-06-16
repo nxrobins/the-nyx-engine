@@ -2050,8 +2050,13 @@ class NyxKernel:
         finally:
             # Never leak an unconsumed dream task on disconnect/error
             self._cancel_dream_task(dream_task)
-            # Guarantee DB persistence even on disconnect
-            if not db_saved and self._thread_id and ctx is not None:
+            # Guarantee DB persistence even on disconnect — but ONLY for a valid,
+            # turn-consuming action. A rejected action rolls back turn_count and
+            # returns early without db_saved; emergency-persisting it would write a
+            # phantom turn at the rolled-back number (mislabeled with the prior
+            # outcome), which the next valid turn then duplicates. The sync path
+            # never persists a rejected action; this keeps the stream symmetric.
+            if not db_saved and self._thread_id and ctx is not None and ctx.outcome.action_valid:
                 try:
                     await create_turn(
                         thread_id=self._thread_id,
