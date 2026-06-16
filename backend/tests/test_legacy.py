@@ -215,3 +215,56 @@ class TestAugmentThreadSummary:
         summary = augment_thread_summary({})
         assert summary["legacy_mark"] == ""
         assert summary["legacy_effect"] == ""
+
+
+class TestStreamRejectedActionPersistence:
+    """A deterministically-rejected streamed action must NOT be persisted.
+
+    process_turn_stream's finally-block emergency-persists on disconnect, but a
+    rejected action rolls back turn_count and returns early without db_saved.
+    Persisting it wrote a phantom turn at the rolled-back number (mislabeled with
+    the prior outcome) that the next valid turn then duplicated. The sync path
+    never persisted a rejected action; the stream must match.
+    """
+
+    @pytest.mark.asyncio
+    async def test_rejected_streamed_action_writes_no_phantom_turn(
+        self, configured_store, mock_models, monkeypatch
+    ):
+        import sqlite3
+
+        import app.agents.eris as eris_module
+        from app.core.config import settings
+
+        # Pin chaos off so an Eris miracle can't perturb the turn accounting.
+        monkeypatch.setattr(eris_module.random, "random", lambda: 0.999)
+
+        kernel = NyxKernel()
+        await kernel.initialize(
+            hamartia="Unformed",
+            player_id="reject_player",
+            name="Hero",
+            gender="boy",
+            first_memory="A light I could not reach.",
+        )
+        # "fly" is rejected by the Lachesis mock; "look around" is valid.
+        async for _ in kernel.process_turn_stream("I fly into the sky"):
+            pass
+        async for _ in kernel.process_turn_stream("look around"):
+            pass
+
+        conn = sqlite3.connect(settings.sqlite_store_path)
+        try:
+            rows = conn.execute(
+                "SELECT turn_number, action FROM turns WHERE thread_id=? ORDER BY turn_id",
+                (kernel._thread_id,),
+            ).fetchall()
+        finally:
+            conn.close()
+
+        turn_numbers = [r[0] for r in rows]
+        actions = [r[1].lower() for r in rows]
+        # The rejected action never reaches the turns table...
+        assert not any("fly" in a for a in actions), rows
+        # ...and turn numbers stay unique — no phantom row at a rolled-back number.
+        assert len(turn_numbers) == len(set(turn_numbers)), turn_numbers
