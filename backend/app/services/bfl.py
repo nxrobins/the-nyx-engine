@@ -25,6 +25,10 @@ logger = logging.getLogger("nyx.bfl")
 _BFL_BASE_URL = "https://api.bfl.ai/v1"  # api.bfl.ml was retired
 _POLL_INTERVAL = 1.0  # seconds
 _POLL_TIMEOUT = 30.0  # seconds
+# Hard iteration cap, independent of the time bound — so a zero poll interval
+# (tests monkeypatch _POLL_INTERVAL=0.0) or a non-advancing clock can never spin
+# the loop forever. Real use hits the 30s time bound first (~30 polls at 1.0s).
+_MAX_POLLS = 120
 
 # AT-E1: terminal non-Ready statuses — fail fast, never poll one to the timeout.
 _TERMINAL_FAILURES = frozenset(
@@ -90,9 +94,11 @@ async def generate_image(
 
         # Step 2: Poll for result
         elapsed = 0.0
-        while elapsed < _POLL_TIMEOUT:
+        polls = 0
+        while elapsed < _POLL_TIMEOUT and polls < _MAX_POLLS:
             await asyncio.sleep(_POLL_INTERVAL)
             elapsed += _POLL_INTERVAL
+            polls += 1
 
             try:
                 poll_resp = await client.get(

@@ -63,3 +63,24 @@ async def test_poll_retries_transient_then_succeeds(monkeypatch):
     url = await bfl.generate_image("a quiet harbor", api_key="ok-key")
     assert url == "https://img/x.jpg"
     assert calls["get"] == 2  # retried the transient 503, then got Ready
+
+
+async def test_persistently_transient_poll_is_bounded(monkeypatch):
+    """A poll endpoint that NEVER resolves (always 503) must not spin forever when
+    the interval is 0.0 — the iteration cap returns "" rather than hanging CI."""
+    calls = {"get": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(
+                200, json={"id": "t3", "polling_url": "https://api.bfl.ai/v1/get_result?id=t3"}
+            )
+        calls["get"] += 1
+        return httpx.Response(503, json={"error": "always busy"})  # never resolves
+
+    monkeypatch.setattr(bfl.httpx, "AsyncClient", _factory_with(httpx.MockTransport(handler)))
+    monkeypatch.setattr(bfl, "_POLL_INTERVAL", 0.0)
+
+    url = await bfl.generate_image("a quiet harbor", api_key="ok-key")
+    assert url == ""
+    assert calls["get"] == bfl._MAX_POLLS  # bounded by the iteration cap, not hung
