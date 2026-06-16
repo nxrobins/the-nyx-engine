@@ -7,8 +7,11 @@ from app.schemas.state import SoulVectors, ThreadState
 from app.services.hamartia_engine import (
     HAMARTIA_PROFILES,
     VECTOR_HAMARTIA_MAP,
+    _VOICE_BY_FLAW,
+    _VOICE_GARNISH,
     determine_hamartia,
     get_hamartia_profile,
+    get_life_voice,
 )
 
 
@@ -86,3 +89,54 @@ class TestHamartiaProfiles:
 
     def test_profiles_cover_core_hamartiai(self):
         assert {"hubris", "wrath", "vainglory", "cowardice"} <= set(HAMARTIA_PROFILES.keys())
+
+
+class TestGetLifeVoice:
+    """get_life_voice() derives the Scribe's narrative register: a flaw-keyed
+    base + a dominant-vector garnish, discovered once at the Fork. Pure and
+    deterministic — these lock the mapping so a copy edit can't silently
+    rewrite an incarnation's voice, and a tie can't drift.
+    """
+
+    @staticmethod
+    def _state(metis=0.0, bia=0.0, kleos=0.0, aidos=0.0) -> ThreadState:
+        state = ThreadState()
+        state.soul_ledger.vectors = SoulVectors(metis=metis, bia=bia, kleos=kleos, aidos=aidos)
+        return state
+
+    def test_each_flaw_selects_its_registered_base(self):
+        # The flaw picks the register; substring match, case-insensitive.
+        for flaw in ("hubris", "wrath", "vainglory", "cowardice"):
+            voice = get_life_voice(flaw.upper(), self._state(metis=1.0))
+            assert voice.startswith(_VOICE_BY_FLAW[flaw]), flaw
+
+    def test_flaw_matches_as_a_substring_of_a_verbose_label(self):
+        # Real labels are verbose ("Cowardice Veiled as Wisdom"); the key still hits.
+        voice = get_life_voice("Cowardice Veiled as Wisdom", self._state(metis=1.0))
+        assert voice.startswith(_VOICE_BY_FLAW["cowardice"])
+
+    def test_unknown_flaw_falls_back_to_the_plain_voice(self):
+        voice = get_life_voice("Serenity", self._state(kleos=1.0))
+        assert voice.startswith("Plain, weathered, declarative")
+
+    def test_each_dominant_vector_appends_its_garnish(self):
+        for vec in ("metis", "bia", "kleos", "aidos"):
+            voice = get_life_voice("wrath", self._state(**{vec: 9.0}))
+            assert voice.endswith(_VOICE_GARNISH[vec]), vec
+
+    def test_a_tie_resolves_deterministically_to_metis(self):
+        # All-zero vectors: max() keeps the first pair, which is metis. The voice
+        # must never depend on dict/iteration luck.
+        voice = get_life_voice("Unformed", self._state())
+        assert voice.endswith(_VOICE_GARNISH["metis"])
+
+    def test_voice_is_base_then_garnish_joined_and_stripped(self):
+        state = self._state(bia=5.0)
+        voice = get_life_voice("hubris", state)
+        assert voice == f"{_VOICE_BY_FLAW['hubris']} {_VOICE_GARNISH['bia']}"
+        assert voice == voice.strip()
+
+    def test_is_deterministic_for_identical_inputs(self):
+        a = get_life_voice("hubris", self._state(metis=3.0, kleos=1.0))
+        b = get_life_voice("hubris", self._state(metis=3.0, kleos=1.0))
+        assert a == b
