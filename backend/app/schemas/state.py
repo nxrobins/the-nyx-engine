@@ -398,9 +398,17 @@ class HypnosResponse(BaseModel):
 # Kernel I/O
 # ---------------------------------------------------------------------------
 
+# The largest action the request layer accepts. Kept equal to welfare._SCAN_CAP
+# (the crisis detector canonicalizes + scans at most this many chars): rejecting
+# anything longer HERE means genuine ideation can never ride in past the scan
+# window into a durable store unredacted (audit M3 follow-up). A literal, not an
+# import, so the schema layer stays free of the services layer.
+MAX_ACTION_CHARS = 65_536
+
+
 class PlayerAction(BaseModel):
     """Incoming player action."""
-    action: str
+    action: str = Field(max_length=MAX_ACTION_CHARS)
     session_id: str = ""     # required for session isolation
     player_id: str = "usr_001"
     content_prefs: dict | None = None   # The Vigil: self-asserted consent (carried, not yet acted on)

@@ -339,3 +339,31 @@ class TestNoLeakParity:
         assert all(phrase not in record.getMessage() for record in caplog.records)
         # What WAS persisted is the redaction token, not the words.
         assert any(a == REDACTION_TOKEN for a in captured), captured
+
+
+# ---------------------------------------------------------------------------
+# Action length cap — the request-layer floor under the welfare scan window
+# (audit M3 follow-up: reject what the crisis scan can't fully cover).
+# ---------------------------------------------------------------------------
+class TestActionLengthCap:
+    def test_over_cap_action_is_rejected(self):
+        from pydantic import ValidationError
+
+        from app.schemas.state import MAX_ACTION_CHARS, PlayerAction
+
+        with pytest.raises(ValidationError):
+            PlayerAction(action="x" * (MAX_ACTION_CHARS + 1))
+
+    def test_at_cap_action_is_accepted(self):
+        from app.schemas.state import MAX_ACTION_CHARS, PlayerAction
+
+        pa = PlayerAction(action="x" * MAX_ACTION_CHARS)
+        assert len(pa.action) == MAX_ACTION_CHARS
+
+    def test_cap_matches_the_welfare_scan_window(self):
+        # If these drift, a future ideation phrase could sit in the gap between
+        # "accepted by the request" and "scanned by welfare".
+        from app.schemas.state import MAX_ACTION_CHARS
+        from app.services.welfare import _SCAN_CAP
+
+        assert MAX_ACTION_CHARS == _SCAN_CAP
