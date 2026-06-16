@@ -68,6 +68,49 @@ def _target_harmed(action: str, target: str) -> bool:
     )
 
 
+# Action/harm verbs that can constitute "doing the forbidden thing". A forbidden
+# clause like "betray the village" is BROKEN only when the action shares this
+# deed verb AND an object token — mirroring _target_harmed (target name + harm
+# verb). The old _shares_terms broke on a SINGLE shared noun, so "walk through
+# the village" or even "protect the village" wrongly severed a "never betray the
+# village" oath → an inescapable broken-oath doom. Better to miss an oblique
+# break than to route an innocent act to a permanent death (audit S2).
+_FORBIDDEN_VERBS: frozenset[str] = frozenset({
+    "attack", "stab", "kill", "strike", "hurt", "harm", "betray", "abandon",
+    "steal", "rob", "loot", "burn", "deceive", "lie", "break", "destroy",
+    "poison", "murder", "slay", "raid", "sabotage",
+})
+
+_OATH_STOPWORDS: frozenset[str] = frozenset({
+    "i", "will", "to", "the", "a", "an", "my", "of", "and", "from", "with",
+    "at", "in", "on", "them", "it",
+})
+
+
+def _does_forbidden(action: str, forbidden_action: str) -> bool:
+    """True only when the action actually COMMITS the forbidden deed.
+
+    Requires the forbidden clause's deed verb AND (if it has any) one of its
+    object tokens, so a benign action that merely shares a noun with the clause
+    does NOT break the oath. Falls back to requiring the whole clause present
+    when no deed verb is recognised — still far stricter than any-shared-token.
+    """
+    action_tokens = set(_normalize(action).split())
+    clause_tokens = [
+        t for t in _normalize(forbidden_action).split() if t not in _OATH_STOPWORDS
+    ]
+    if not clause_tokens:
+        return False
+    deed_verbs = [t for t in clause_tokens if t in _FORBIDDEN_VERBS]
+    objects = [t for t in clause_tokens if t not in _FORBIDDEN_VERBS]
+    if deed_verbs:
+        verb_hit = any(v in action_tokens for v in deed_verbs)
+        object_hit = not objects or any(o in action_tokens for o in objects)
+        return verb_hit and object_hit
+    # No recognised deed verb: require the full clause present (conservative).
+    return all(t in action_tokens for t in clause_tokens)
+
+
 def verify_oaths(state: ThreadState, action: str) -> tuple[list[str], list[str], list[str]]:
     """Compare an action against active oath terms.
 
@@ -89,7 +132,7 @@ def verify_oaths(state: ThreadState, action: str) -> tuple[list[str], list[str],
         if oath.terms is None:
             continue
 
-        if oath.terms.forbidden_action and _shares_terms(action, oath.terms.forbidden_action):
+        if oath.terms.forbidden_action and _does_forbidden(action, oath.terms.forbidden_action):
             broken_ids.append(oath.oath_id)
             continue
 

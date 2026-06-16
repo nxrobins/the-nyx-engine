@@ -93,6 +93,14 @@ class TestDetectCrisis:
     def test_empty_action_is_not_flagged(self):
         assert detect_crisis("").flagged is False
 
+    def test_ideation_trailing_a_long_entry_is_still_flagged(self):
+        # audit M3: the old 4 KB scan cap let a genuine ideation phrase TRAILING a
+        # long benign entry escape BOTH the crisis card and durable-store redaction
+        # (a simultaneous care-hole and privacy leak). A phrase well past the old
+        # 4096-char boundary must now flag.
+        long_prefix = "the harvest was good this year. " * 200  # ~6 KB of benign text
+        assert detect_crisis(long_prefix + " i want to kill myself").flagged is True
+
     def test_fails_SAFE_on_internal_error(self, monkeypatch):
         # On ANY internal error, fail FLAGGED (show help + redact) — never
         # silently 'not flagged' (the unifying law: more help, less leak).

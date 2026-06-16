@@ -170,11 +170,34 @@ class TestVerifyOathsEdges:
 
     def test_forbidden_action_breaks_the_oath(self):
         # A "never X" oath is broken by doing X — the most direct path to
-        # oath-break → Nemesis lethal → death.
+        # oath-break → Nemesis lethal → death. The deed verb AND its object are
+        # present, so the break is real.
         state = _ledger(_oath("o1", forbidden_action="betray the village"))
         broken, fulfilled, transformed = verify_oaths(state, "I betray the village at dawn")
         assert broken == ["o1"]
         assert fulfilled == [] and transformed == []
+
+    def test_forbidden_oath_survives_an_innocent_noun_share(self):
+        # audit S2: the old matcher broke the oath on a SINGLE shared noun, so
+        # merely being near the village wrongly routed the player to an inescapable
+        # broken-oath doom. An action that does not commit the deed must NOT break.
+        state = _ledger(_oath("o1", forbidden_action="betray the village"))
+        broken, _, _ = verify_oaths(state, "I walk through the village peacefully")
+        assert broken == []
+
+    def test_forbidden_oath_survives_a_fulfilling_action(self):
+        # Even PROTECTING the village (the opposite of betrayal) shares the noun
+        # and used to break "never betray the village". It must not.
+        state = _ledger(_oath("o2", forbidden_action="betray the village"))
+        broken, _, _ = verify_oaths(state, "I protect the village from raiders")
+        assert broken == []
+
+    def test_forbidden_oath_breaks_on_the_actual_deed(self):
+        # The deed verb plus an object token still breaks it — no regression in
+        # catching a genuine violation.
+        state = _ledger(_oath("o3", forbidden_action="betray the village"))
+        broken, _, _ = verify_oaths(state, "I betray the village elders for coin")
+        assert broken == ["o3"]
 
     def test_oath_with_no_terms_is_skipped_not_crashed(self):
         # An oath whose text parsed to no structured terms must be inert in

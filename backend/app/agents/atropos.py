@@ -80,6 +80,16 @@ class Atropos(AgentBase):
                 seals a doom; Atropos cuts when that doom matures. The flag
                 is kept for the proposal trace.
         """
+        # The Vigil (permanence — audit S1): a self-destruction framing makes the
+        # death non-miracleable NO MATTER which trigger fires this turn, so compute
+        # it ONCE and stamp every terminal return — not just the keyword branch.
+        # This can only STRENGTHEN permanence: a benign action keeps the flag False,
+        # so a natural doom/dead-soul death stays Eris-miracle-eligible as intended.
+        action_lower = action.lower()
+        is_self_destruct = any(
+            trigger in action_lower for trigger in settings.atropos_death_keywords
+        )
+
         # --- Trigger 1: Doom terminal (staged death has matured) ---
         if is_doom_terminal(state):
             logger.info(
@@ -89,6 +99,7 @@ class Atropos(AgentBase):
             return _attach_proposal(AtroposResponse(
                 terminal_state=True,
                 death_reason=doom_death_reason(state),
+                self_destruction_origin=is_self_destruct,
             ), action=action, nemesis_lethal=nemesis_lethal)
 
         # --- Trigger 2: Dead soul (all vectors <= 1.0) ---
@@ -100,11 +111,11 @@ class Atropos(AgentBase):
                     "Your soul gutters like a candle in wind. Every dimension "
                     "of your being has faded to nothing. The thread dissolves."
                 ),
+                self_destruction_origin=is_self_destruct,
             ), action=action, nemesis_lethal=nemesis_lethal)
 
         # --- Trigger 3: Self-destruction keywords ---
-        action_lower = action.lower()
-        if any(trigger in action_lower for trigger in settings.atropos_death_keywords):
+        if is_self_destruct:
             logger.info("Atropos: Thread severed — Self-destruction detected.")
             return _attach_proposal(AtroposResponse(
                 terminal_state=True,
@@ -124,6 +135,7 @@ class Atropos(AgentBase):
                         "The story has nowhere left to go. Your thread frays "
                         "at the edges, unraveling into silence."
                     ),
+                    self_destruction_origin=is_self_destruct,
                 ), action=action, nemesis_lethal=nemesis_lethal)
 
         # --- Warning state: vectors getting dangerously low ---
