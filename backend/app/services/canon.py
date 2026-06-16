@@ -807,6 +807,7 @@ def maybe_depart_npcs(state: ThreadState) -> list[str]:
         npc = canon.npcs[npc_id]
         if npc.betrayal_weight >= threshold:
             npc.status = "departed"
+            npc.departed_turn = state.session.turn_count
             notes.append(
                 f"{npc.name} is gone — betrayed past returning, they have left "
                 f"your life and will not be in the scene again."

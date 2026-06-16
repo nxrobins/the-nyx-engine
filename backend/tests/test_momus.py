@@ -838,3 +838,69 @@ class TestAgentIdentity:
     def test_agent_name(self):
         m = Momus()
         assert m.name == "momus"
+
+
+# ===========================================================================
+# The departing witness's goodbye (#28 "The Witnesses Leave" interaction):
+# on the turn an NPC departs for good, the leaving prose may name them one
+# last time; from the next turn on, naming them as present is drift again.
+# ===========================================================================
+
+def _departed_state(*, turn_count: int, departed_turn: int) -> ThreadState:
+    """A scene whose only named NPC, Sera, has DEPARTED (status 'departed',
+    already removed from present_npc_ids) on `departed_turn`, with the turn
+    clock now at `turn_count`."""
+    return ThreadState(
+        session=SessionData(
+            turn_count=turn_count,
+            current_environment="Thornwell (hill village). A hard winter presses on the roofs.",
+        ),
+        canon=WorldCanon(
+            locations={
+                "thornwell": CanonLocation(
+                    location_id="thornwell", name="Thornwell",
+                    region="Ashlands", kind="hill village",
+                ),
+            },
+            npcs={
+                "sera": CanonNPC(
+                    npc_id="sera", name="Sera", role="mother",
+                    home_location_id="thornwell", current_location_id="thornwell",
+                    status="departed", departed_turn=departed_turn,
+                    last_seen_turn=departed_turn,
+                ),
+            },
+            current_scene=SceneState(
+                scene_id="scene_1", location_id="thornwell",
+                present_npc_ids=[],   # Sera has just walked out
+            ),
+        ),
+    )
+
+
+# A strong-participation goodbye ("says") naming the departing NPC, then a
+# pronoun-only sentence the presence check never touches.
+_GOODBYE = (
+    "Sera says nothing more. She turns and walks out the door, "
+    "and you know she will never return."
+)
+
+
+class TestDepartingWitnessGoodbye:
+    @pytest.mark.asyncio
+    async def test_named_goodbye_survives_on_the_departure_turn(self, momus):
+        # departed_turn == turn_count: the leaving prose naming Sera with a
+        # strong marker must NOT be redacted — the one turn it matters most.
+        state = _departed_state(turn_count=5, departed_turn=5)
+        result = await momus.validate_prose(_GOODBYE, state)
+        assert not any("Sera" in h for h in result.hallucinations), result.hallucinations
+        assert "Sera says nothing more." in result.corrected_prose
+
+    @pytest.mark.asyncio
+    async def test_named_presence_is_flagged_after_the_departure_turn(self, momus):
+        # departed_turn < turn_count: from the next turn on she is gone, and
+        # naming her as present again IS drift and is flagged/redacted as before.
+        state = _departed_state(turn_count=6, departed_turn=5)
+        result = await momus.validate_prose(_GOODBYE, state)
+        assert any("Sera" in item for item in result.hallucinations), result.hallucinations
+        assert "Sera says nothing more." not in result.corrected_prose
