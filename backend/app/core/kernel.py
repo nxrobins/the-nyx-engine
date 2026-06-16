@@ -75,6 +75,7 @@ from app.services.bfl import generate_image
 from app.services.canon import (
     apply_environment_update,
     bootstrap_canon,
+    client_safe_state,
     derive_environment_string,
     maybe_arrive_npcs,
     maybe_depart_npcs,
@@ -1922,7 +1923,7 @@ class NyxKernel:
                 }) + "\n\n"
                 yield "data: " + json.dumps({
                     "type": "state",
-                    "payload": self.state.model_dump(),
+                    "payload": client_safe_state(self.state).model_dump(),
                     "ui_choices": [],
                     "terminal": False,
                     "death_reason": "",
@@ -1957,7 +1958,7 @@ class NyxKernel:
                 }) + "\n\n"
                 yield "data: " + json.dumps({
                     "type": "state",
-                    "payload": ctx.outcome.state.model_dump(),
+                    "payload": client_safe_state(ctx.outcome.state).model_dump(),
                     "ui_choices": [],
                     "terminal": True,
                     "death_reason": ctx.death_reason,
@@ -2041,7 +2042,7 @@ class NyxKernel:
 
             yield "data: " + json.dumps({
                 "type": "state",
-                "payload": result.state.model_dump(),
+                "payload": client_safe_state(result.state).model_dump(),
                 "ui_choices": result.ui_choices,
                 "terminal": False,
                 "death_reason": "",

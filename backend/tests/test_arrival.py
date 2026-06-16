@@ -10,6 +10,9 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import json
+
+import pytest
 
 import pytest
 
@@ -24,7 +27,12 @@ from app.schemas.state import (
     ThreadState,
     WorldCanon,
 )
-from app.services.canon import _arrival_eligible, bootstrap_canon, maybe_arrive_npcs
+from app.services.canon import (
+    _arrival_eligible,
+    bootstrap_canon,
+    client_safe_state,
+    maybe_arrive_npcs,
+)
 
 
 def _npc(npc_id, name, *, status="latent", cond=None, bond=0.0, role="stranger"):
@@ -204,6 +212,78 @@ class TestBootstrapAuthoring:
         ])
         canon = bootstrap_canon(seed, "Orin", "unknown")
         assert canon.npcs["npc_sera"].status == "alive"   # the family Sera, untouched
+
+
+class TestClientSafeState:
+    """ARR-C14: the unsprung (latent) cast never leaks; the real state keeps it."""
+
+    def test_strips_latent_keeps_the_rest(self):
+        st = _state(
+            12,
+            _npc("npc_a", "Ada", status="alive"),
+            _npc("npc_b", "Ben", status="latent", cond=ArrivalCondition(min_turn=10)),
+            _npc("npc_c", "Cal", status="dead"),
+            present=["npc_a"],
+        )
+        safe = client_safe_state(st)
+        assert "npc_b" not in safe.canon.npcs        # latent stripped from the wire
+        assert "npc_a" in safe.canon.npcs            # alive kept
+        assert "npc_c" in safe.canon.npcs            # dead kept (canon truth)
+        assert "npc_b" in st.canon.npcs              # the REAL state is untouched
+        assert "Ben" not in json.dumps(safe.model_dump())
+
+    def test_fast_path_no_latent_returns_same_object(self):
+        st = _state(12, _npc("npc_a", "Ada", status="alive"), present=["npc_a"])
+        assert client_safe_state(st) is st           # no copy when nothing is latent
+
+    def test_no_canon_is_safe(self):
+        st = ThreadState(session=SessionData(turn_count=1))
+        assert client_safe_state(st) is st
+
+
+class TestApiLatentStrip:
+    """ARR-C14 at the wire: /state and /action never expose a latent NPC."""
+
+    @pytest.fixture
+    def api_client(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from app.api.routes import router
+
+        api = FastAPI()
+        api.include_router(router, prefix="/api")
+        return TestClient(api)
+
+    def _init(self, api_client, player_id="arr_strip"):
+        resp = api_client.post("/api/init", json={
+            "hamartia": "Hubris of the Intellect", "player_id": player_id,
+            "name": "Orin", "gender": "boy",
+            "first_memory": "A light in the distance I could not reach.",
+        })
+        assert resp.status_code == 200, resp.text
+        return resp.json()["session_id"]
+
+    def test_latent_npc_never_reaches_the_client(self, api_client):
+        from app.api.routes import _sessions
+
+        sid = self._init(api_client)
+        kernel = _sessions[sid].kernel
+        kernel.state.canon.npcs["npc_ghost"] = CanonNPC(
+            npc_id="npc_ghost", name="Ghostwright", role="ally",
+            home_location_id="home", current_location_id="home",
+            status="latent", arrival_condition=ArrivalCondition(min_turn=10),
+        )
+        # /state strips it...
+        state = api_client.get(f"/api/state?session_id={sid}").json()
+        assert "npc_ghost" not in state["canon"]["npcs"]
+        assert "Ghostwright" not in json.dumps(state)
+        # ...but the REAL kernel state keeps it (it must persist to arrive)...
+        assert "npc_ghost" in kernel.state.canon.npcs
+        # ...and /action also strips it from the returned state.
+        act = api_client.post("/api/action", json={"session_id": sid, "action": "look around"}).json()
+        assert "npc_ghost" not in act["state"]["canon"]["npcs"]
+        assert "Ghostwright" not in json.dumps(act["state"])
 
 
 class TestKernelArrival:

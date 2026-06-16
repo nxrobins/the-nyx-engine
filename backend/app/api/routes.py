@@ -32,6 +32,7 @@ from app.core.kernel import NyxKernel
 from app.db import get_dead_threads
 from app.schemas.state import InitRequest, PlayerAction, TurnResult
 from app.services.bfl import generate_image
+from app.services.canon import client_safe_state
 from app.services.legacy import augment_thread_summary
 from app.services.welfare import CRISIS_RESOURCES, detect_crisis
 
@@ -178,8 +179,9 @@ async def init_session(req: InitRequest) -> TurnResult:
         gender=req.gender,
         first_memory=req.first_memory,
     )
-    # model_copy ensures session_id is in model_fields_set for serialization
-    return result.model_copy(update={"session_id": sid})
+    # model_copy ensures session_id is in model_fields_set for serialization.
+    # client_safe_state strips not-yet-arrived latent NPCs from the wire (ARR-C14).
+    return result.model_copy(update={"session_id": sid, "state": client_safe_state(result.state)})
 
 
 # ------------------------------------------------------------------
@@ -199,6 +201,7 @@ async def submit_action(action: PlayerAction) -> TurnResult:
         update["crisis_resources"] = CRISIS_RESOURCES
     with _in_flight(action.session_id):   # THR-C6: not evictable mid-turn
         result = await kernel.process_turn(action.action)
+    update["state"] = client_safe_state(result.state)   # ARR-C14: hide latent NPCs
     return result.model_copy(update=update)
 
 
@@ -303,7 +306,7 @@ async def get_state(session_id: str = ""):
     if not session_id:
         return {"error": "session_id required"}
     kernel = _require_session(session_id)
-    return kernel.state.model_dump()
+    return client_safe_state(kernel.state).model_dump()   # ARR-C14: hide latent NPCs
 
 
 # ------------------------------------------------------------------
