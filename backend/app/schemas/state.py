@@ -109,6 +109,22 @@ class NPCEvent(BaseModel):
     note: str = ""          # <= 80 chars; deterministic template, never a model write
 
 
+class ArrivalCondition(BaseModel):
+    """A machine-checkable predicate for when a LATENT NPC enters the life.
+
+    Conjunctive over the NON-DEFAULT gates: every gate that is set must hold,
+    and at least one must be set (an all-default condition is vacuous and never
+    fires — friction must be earned). The gates read ONLY canon + turn, never
+    soul/pressures/doom, so arrival stays a pure function of canon. Authored,
+    never model-invented (The Witnesses Arrive).
+    """
+    min_turn: int = Field(default=0, ge=0, le=200)
+    requires_bond_npc_id: str = Field(default="", max_length=80)
+    requires_bond_at_least: float = Field(default=0.0, ge=-10.0, le=10.0)
+    on_clock_resolved: str = Field(default="", max_length=80)
+    arrival_priority: int = Field(default=0, ge=0, le=99)  # author tiebreak; lower arrives first
+
+
 class CanonNPC(BaseModel):
     """A named person in the world canon."""
     npc_id: str
@@ -116,7 +132,7 @@ class CanonNPC(BaseModel):
     role: str
     home_location_id: str
     current_location_id: str
-    status: str = "alive"  # alive | dead | missing | departed
+    status: str = "alive"  # alive | dead | missing | departed | latent
     trust: float = 0.0
     fear: float = 0.0
     obligation: float = 0.0
@@ -128,6 +144,12 @@ class CanonNPC(BaseModel):
     betrayal_weight: float = Field(default=0.0, ge=0.0, le=10.0)  # monotone; never decremented
     betrayal_count: int = Field(default=0, ge=0, le=99)          # monotone tally; compounding reads THIS
     events: list[NPCEvent] = Field(default_factory=list)         # bounded ring (EVENT_CAP)
+    # The Witnesses Arrive: a "latent" NPC is authored but NOT present at birth;
+    # it enters the life when its arrival_condition is met (see maybe_arrive_npcs).
+    # arrived_turn stamps the entry (0 = never arrived). Both default so every
+    # pre-existing NPC and serialized thread round-trips unchanged.
+    arrival_condition: ArrivalCondition | None = None
+    arrived_turn: int = 0
 
 
 class CanonLocation(BaseModel):

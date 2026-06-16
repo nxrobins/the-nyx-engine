@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     # point (canon._record_warming), so departure is its logical end — roughly
     # four deliberate betrayals of the same person.
     npc_depart_betrayal_weight: float = 5.0
+    # The Witnesses Arrive: a latent NPC arrives only while the LIVING-present
+    # cast is below this cap. Set to the family max_length so a dense world is
+    # never dead-on-arrival for the feature (ARR-C11).
+    arrival_present_cap: int = 12
 
     # Doom staging — death arrives in installments, not as a syntax error.
     # Escape thresholds are calibrated against pressure decay rates so an
