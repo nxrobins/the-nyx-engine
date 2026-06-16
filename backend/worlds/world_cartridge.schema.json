@@ -1,5 +1,46 @@
 {
   "$defs": {
+    "CartridgeArrivalCondition": {
+      "additionalProperties": false,
+      "description": "The authored predicate for when a LATENT NPC enters the life. Conjunctive\nover its non-default gates; at least one must be set (an all-default condition\nis vacuous and rejected). Gates read canon + turn only (The Witnesses Arrive).",
+      "properties": {
+        "min_turn": {
+          "default": 0,
+          "maximum": 200,
+          "minimum": 0,
+          "title": "Min Turn",
+          "type": "integer"
+        },
+        "requires_bond_with": {
+          "default": "",
+          "maxLength": 80,
+          "title": "Requires Bond With",
+          "type": "string"
+        },
+        "requires_bond_at_least": {
+          "default": 0.0,
+          "maximum": 10.0,
+          "minimum": -10.0,
+          "title": "Requires Bond At Least",
+          "type": "number"
+        },
+        "on_clock_resolved": {
+          "default": "",
+          "maxLength": 80,
+          "title": "On Clock Resolved",
+          "type": "string"
+        },
+        "arrival_priority": {
+          "default": 0,
+          "maximum": 99,
+          "minimum": 0,
+          "title": "Arrival Priority",
+          "type": "integer"
+        }
+      },
+      "title": "CartridgeArrivalCondition",
+      "type": "object"
+    },
     "CartridgeClock": {
       "additionalProperties": false,
       "properties": {
@@ -45,6 +86,76 @@
         "stakes"
       ],
       "title": "CartridgeClock",
+      "type": "object"
+    },
+    "CartridgeLatentNPC": {
+      "additionalProperties": false,
+      "description": "An authored NPC absent at birth — it ENTERS when its arrival fires. Same\nshape as a family NPC plus the required arrival predicate.",
+      "properties": {
+        "name": {
+          "maxLength": 60,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "role": {
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        },
+        "trait": {
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Trait",
+          "type": "string"
+        },
+        "trust": {
+          "default": 0.0,
+          "maximum": 10.0,
+          "minimum": -10.0,
+          "title": "Trust",
+          "type": "number"
+        },
+        "fear": {
+          "default": 0.0,
+          "maximum": 10.0,
+          "minimum": -10.0,
+          "title": "Fear",
+          "type": "number"
+        },
+        "obligation": {
+          "default": 0.0,
+          "maximum": 10.0,
+          "minimum": -10.0,
+          "title": "Obligation",
+          "type": "number"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Tags",
+          "type": "array"
+        },
+        "arrival": {
+          "$ref": "#/$defs/CartridgeArrivalCondition"
+        },
+        "arrival_role": {
+          "default": "",
+          "maxLength": 40,
+          "title": "Arrival Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "role",
+        "trait",
+        "arrival"
+      ],
+      "title": "CartridgeLatentNPC",
       "type": "object"
     },
     "CartridgeNPC": {
@@ -279,6 +390,14 @@
       },
       "maxItems": 8,
       "title": "Clocks",
+      "type": "array"
+    },
+    "latent_family": {
+      "items": {
+        "$ref": "#/$defs/CartridgeLatentNPC"
+      },
+      "maxItems": 6,
+      "title": "Latent Family",
       "type": "array"
     },
     "scene_problem": {

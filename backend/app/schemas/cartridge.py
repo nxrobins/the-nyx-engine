@@ -82,6 +82,26 @@ class CartridgeClock(BaseModel):
     claims_npc_id: str = Field(default="", max_length=80)
 
 
+class CartridgeArrivalCondition(BaseModel):
+    """The authored predicate for when a LATENT NPC enters the life. Conjunctive
+    over its non-default gates; at least one must be set (an all-default condition
+    is vacuous and rejected). Gates read canon + turn only (The Witnesses Arrive)."""
+    model_config = ConfigDict(extra="forbid")
+
+    min_turn: int = Field(default=0, ge=0, le=200)
+    requires_bond_with: str = Field(default="", max_length=80)   # name or npc_id of a FAMILY member
+    requires_bond_at_least: float = Field(default=0.0, ge=-10.0, le=10.0)
+    on_clock_resolved: str = Field(default="", max_length=80)    # an authored clock LABEL (non-claiming)
+    arrival_priority: int = Field(default=0, ge=0, le=99)        # lower arrives first
+
+
+class CartridgeLatentNPC(CartridgeNPC):
+    """An authored NPC absent at birth — it ENTERS when its arrival fires. Same
+    shape as a family NPC plus the required arrival predicate."""
+    arrival: CartridgeArrivalCondition
+    arrival_role: str = Field(default="", max_length=40)
+
+
 class HomeLocation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -129,6 +149,10 @@ class WorldCartridge(BaseModel):
     # (see canon._instantiate_authored_clocks): the world supplies stakes + a
     # bool; it never gains authority to sever.
     clocks: list[CartridgeClock] = Field(default_factory=list, max_length=8)
+    # The Witnesses Arrive: NPCs absent at birth that ENTER when their arrival
+    # predicate is met. Default [] → every existing cartridge is a pure no-op and
+    # the keystone equivalence (to_world_seed() == builtin) holds by construction.
+    latent_family: list[CartridgeLatentNPC] = Field(default_factory=list, max_length=6)
     scene_problem: str = Field(min_length=1, max_length=400)
     scene_objective: str = Field(min_length=1, max_length=400)
 
@@ -174,10 +198,17 @@ class WorldCartridge(BaseModel):
         bootstrap_canon keys its dicts by slugify(name); a collision silently
         drops a canon entity. Reject the whole cartridge instead.
         """
-        npc_slugs = [slugify(npc.name) for npc in self.family]
+        # Family AND latent NPCs share the npc_{slug} keyspace in bootstrap_canon,
+        # so they must be unique together, and the combined cast must fit the cap.
+        all_npcs = list(self.family) + list(self.latent_family)
+        npc_slugs = [slugify(npc.name) for npc in all_npcs]
         if len(set(npc_slugs)) != len(npc_slugs):
             dupes = sorted({s for s in npc_slugs if npc_slugs.count(s) > 1})
             raise ValueError(f"NPC name slug collision: {dupes}")
+        if len(all_npcs) > 12:
+            raise ValueError(
+                f"family + latent_family must be <= 12 NPCs, got {len(all_npcs)}"
+            )
 
         clock_slugs = [slugify(c.label) for c in self.clocks]
         if len(set(clock_slugs)) != len(clock_slugs):
@@ -222,6 +253,56 @@ class WorldCartridge(BaseModel):
             c.claims_npc_id = f"npc_{key}"
         return self
 
+    @model_validator(mode="after")
+    def _latent_arrivals_resolve(self) -> WorldCartridge:
+        """The Witnesses Arrive: each latent NPC's arrival must be EARNED and
+        resolve (mirrors _claims_resolve_and_exclusive). A vacuous, dangling, or
+        death-coupled condition would mean an author's arrival silently never (or
+        wrongly) fires — so reject the whole cartridge (fail-loud at the loader).
+
+          * at least one gate set (min_turn>0 / requires_bond_with / on_clock_resolved);
+          * requires_bond_with → a FAMILY member's npc_{slug} (NEVER another latent —
+            you cannot earn an arrival via a bond that has not formed, AG-ARR-5);
+          * on_clock_resolved → an authored, NON-claiming clock (ARR-C7: a clock that
+            TAKES a life may not also summon one). Ids normalize to runtime form.
+        """
+        family_by_slug = {slugify(npc.name): npc for npc in self.family}
+        clock_by_slug = {slugify(c.label): c for c in self.clocks}
+        for lat in self.latent_family:
+            cond = lat.arrival
+            if not (cond.min_turn > 0 or cond.requires_bond_with or cond.on_clock_resolved):
+                raise ValueError(
+                    f"latent NPC '{lat.name}': arrival is vacuous (no gate set) — set "
+                    "min_turn, requires_bond_with, and/or on_clock_resolved"
+                )
+            raw_bond = cond.requires_bond_with.strip()
+            if raw_bond:
+                direct = slugify(raw_bond)
+                stripped = slugify(raw_bond[4:]) if raw_bond.lower().startswith("npc_") else direct
+                key = direct if direct in family_by_slug else stripped
+                if key not in family_by_slug:
+                    raise ValueError(
+                        f"latent NPC '{lat.name}': requires_bond_with '{raw_bond}' "
+                        f"resolves to no FAMILY NPC (known: {sorted(family_by_slug)})"
+                    )
+                cond.requires_bond_with = f"npc_{key}"
+            raw_clock = cond.on_clock_resolved.strip()
+            if raw_clock:
+                clock_slug = slugify(raw_clock)
+                clock = clock_by_slug.get(clock_slug)
+                if clock is None:
+                    raise ValueError(
+                        f"latent NPC '{lat.name}': on_clock_resolved '{raw_clock}' "
+                        f"names no authored clock (known: {sorted(clock_by_slug)})"
+                    )
+                if clock.claims_npc_id:
+                    raise ValueError(
+                        f"latent NPC '{lat.name}': on_clock_resolved '{raw_clock}' is a "
+                        "claiming clock — a death may not summon an arrival"
+                    )
+                cond.on_clock_resolved = f"clock_{clock_slug}"
+        return self
+
     # ── Adapter to the runtime dataclass ──────────────────────────
 
     def to_world_seed(self) -> WorldSeed:
@@ -230,7 +311,13 @@ class WorldCartridge(BaseModel):
         Deferred import keeps the schema layer free of a load-time dependency on
         core/ (world_seeds is a pure leaf, so there is no cycle either way).
         """
-        from app.core.world_seeds import SeedClock, WorldNPC, WorldSeed
+        from app.core.world_seeds import (
+            SeedArrival,
+            SeedClock,
+            SeedLatentNPC,
+            WorldNPC,
+            WorldSeed,
+        )
 
         return WorldSeed(
             settlement=self.settlement,
@@ -272,5 +359,24 @@ class WorldCartridge(BaseModel):
                     claims_npc_id=c.claims_npc_id,
                 )
                 for c in self.clocks
+            ],
+            latent=[
+                SeedLatentNPC(
+                    name=lat.name,
+                    role=lat.role,
+                    trait=lat.trait,
+                    trust=lat.trust,
+                    fear=lat.fear,
+                    obligation=lat.obligation,
+                    tags=tuple(lat.tags),
+                    arrival=SeedArrival(
+                        min_turn=lat.arrival.min_turn,
+                        requires_bond_npc_id=lat.arrival.requires_bond_with,
+                        requires_bond_at_least=lat.arrival.requires_bond_at_least,
+                        on_clock_resolved=lat.arrival.on_clock_resolved,
+                        arrival_priority=lat.arrival.arrival_priority,
+                    ),
+                )
+                for lat in self.latent_family
             ],
         )
