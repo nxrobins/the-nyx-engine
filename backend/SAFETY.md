@@ -41,33 +41,59 @@ detection design, coupling only to the *existing* `atropos_death_keywords`:
    world-readable log or an unauthenticated row.
 
 Both are deterministic and **keyless** — they protect the default public engine.
-Tests: `backend/tests/test_welfare.py`.
+Tests: `backend/tests/test_welfare.py` (the Phase-1 permanence/redaction floor) +
+`backend/tests/test_crisis_routing.py` (the Phase-2 crisis-routing surface + gating).
+
+---
+
+## Phase 2 — SHIPPED, but GATED (inert until `welfare_copy_reviewed` is flipped)
+
+The crisis-routing **seam** is built and tested, and **inert by default**:
+`settings.welfare_copy_reviewed` is `False`, so nothing user-facing renders until
+a human (ideally clinical) reviewer signs the words and flips the flag. *An AI
+must not author the live crisis copy a vulnerable person reads* — so the copy
+ships as a clearly-marked **DRAFT** and the flag-flip is a human decision, not a
+build step.
+
+- **One canonical detector** (`services/welfare.detect_crisis` / `is_flagged`) —
+  the real-world-framed subset of `atropos_death_keywords` UNION a first-person
+  ideation pattern set (`_IDEATION_PATTERNS`). It drives BOTH the care channel and
+  the durable-store redaction from one lexicon (so they can never desync) and runs
+  on **every** turn regardless of the gate — only the *display* is gated.
+- **Server-owned crisis copy** (`CRISIS_RESOURCES`) — 988 + findahelpline.com +
+  the "this is a game, not counseling" disclaimer, with an import-time guard that
+  refuses to start without all three. **DRAFT, pending review.**
+- **Routes** — `/action` attaches `crisis_resources` and `/turn` yields a
+  `crisis_resources` SSE event FIRST, both only when flagged AND
+  `welfare_copy_reviewed`; `GET /safety` returns the gate state + (when reviewed)
+  the copy.
+- **Frontend** — `ConsentGate.svelte` (content warning + self-asserted consent),
+  `CrisisInterstitial.svelte` (the in-flow card, above the death surface), and the
+  always-on, network-independent `CrisisLink.svelte` backstop on every screen.
+
+Tests: `backend/tests/test_crisis_routing.py` (detector superset, gating, the
+resources contract) + `frontend/src/lib/safety.test.ts` (the always-on link copy).
 
 ---
 
 ## DEFERRED — requires human + clinical review before it ships
 
-The full hardened plan (`~/.claude/plans/`, "The Vigil") specifies the
-duty-of-care **surface**. Engineering ships the seam; **a human signs the
-words.** These are gated behind `settings.welfare_copy_reviewed` (default
-`False`) and must NOT render live or be authored as final content without
-human (and ideally clinical/legal) sign-off:
+The full hardened plan (`~/.claude/plans/`, "The Vigil") specifies the rest of
+the duty-of-care **surface**. Engineering ships the seam; **a human signs the
+words.** Still unbuilt:
 
-- **Crisis-resource interstitial + copy** — the wording that signposts to
-  established independent services (e.g. 988 Suicide & Crisis Lifeline +
-  findahelpline.com international pointer), with an explicit disclaimer that the
-  engine does not counsel, monitor, or follow up. *An AI must not author the
-  live crisis copy a vulnerable person reads.*
-- **Ideation detection-pattern expansion** — the current redaction couples to
-  the existing keyword list (high-precision, low-recall, honest). A real
-  ideation detector (indirect/past-tense/metaphorical framings) is a
-  clinically-informed design, not an engineering guess. A **persistent,
-  always-reachable help link** is the honest backstop for low recall.
-- **Consent + content-warning + opt-out onboarding UI** (frontend).
+- **Ideation detection-pattern expansion** — the shipped `_IDEATION_PATTERNS` is
+  a deliberately high-precision, **low-recall** floor. A fuller detector
+  (indirect/past-tense/metaphorical framings) is a clinically-informed design, not
+  an engineering guess. The always-reachable `CrisisLink` is the honest backstop
+  for everything the regex misses; no copy claims completeness.
+- **Per-theme content opt-outs** — beyond the single consent gate.
 - **Aletheia, the output welfare classifier** — a guardian sibling of Sophia
   (frozen verdict, zero state authority, deterministic mock) that softens a
   *depiction* (never the consequence) when a player has opted out. The seam
   mirrors Sophia exactly; its rubric and the soften/veto copy need review.
+- **Flipping `welfare_copy_reviewed`** — the gate itself. A human reviews the
+  DRAFT copy + detection above, then flips it. That review *is* the ship gate.
 
 ### Constraints carried forward (from the hardened plan, SAFE-E1..E7)
 - **Superset coupling:** any real-world phrase that can cause a keyword-death
@@ -83,7 +109,8 @@ human (and ideally clinical/legal) sign-off:
   redaction).
 - **Not an enforced age wall;** self-asserted consent is documented as such.
 
-The character still dies on schedule and the world stays grim — Phase 1 only
-ensures the engine stops leaking a person's crisis disclosure and stops handing
-a self-destructive input a lucky survival. The rest waits for a human to sign
-the words.
+The character still dies on schedule and the world stays grim. Phase 1 (always
+on) stops the engine leaking a person's crisis disclosure and handing a
+self-destructive input a lucky survival; Phase 2 (built, gated) adds the
+signposting-to-real-help surface. The gate stays closed until a human signs the
+words.
