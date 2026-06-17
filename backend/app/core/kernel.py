@@ -1242,18 +1242,23 @@ class NyxKernel:
         action: str,
         prose: str,
         choices: list[str],
-    ) -> tuple[str, list[str], list[str]]:
+    ) -> tuple[str, list[str], list[str], MomusValidation | None]:
         """Sophia's semantic pass after Momus's factual gate.
 
         Refuse-only (ADJ-E3): pass-as-is → else ONE targeted critique-brief
         regenerate → if it now passes commit it, else commit the ORIGINAL
         Momus-cleared draft and park the unresolved brief for next turn.
-        Never selects a draft by score; Sophia writes no state. Returns
-        (prose, choices, sophia_residue).
+        Never selects a draft by score; Sophia writes no state.
+
+        Returns (prose, choices, sophia_residue, validation_override). The
+        override is the REGENERATION's Momus validation when a regen replaces the
+        prose, so _finalize_turn corrects/commits the regen rather than reverting
+        to the stale base-draft validation; it is None when the prose is left
+        unchanged (the caller keeps the base draft's validation).
         """
         critique = await self.sophia.judge(prose, ctx)
         if critique.verdict != "revise" or not critique.judged:
-            return prose, choices, []
+            return prose, choices, [], None
 
         revisions = 0
         while revisions < settings.sophia_max_revisions:
@@ -1262,17 +1267,20 @@ class NyxKernel:
                 ctx, action, repair_brief=critique.critique_brief
             )
             # Re-police the regeneration: Momus (factual) then Sophia (semantic).
-            regen_prose, regen_choices, _mv, _ = await self._repair_prose_if_needed(
+            regen_prose, regen_choices, regen_validation, _ = await self._repair_prose_if_needed(
                 ctx, action, regen_prose, regen_choices
             )
             regen_critique = await self.sophia.judge(regen_prose, ctx)
             if regen_critique.verdict != "revise" or not regen_critique.judged:
-                return regen_prose, regen_choices or choices, []
+                # The regen is committed — hand back ITS validation so the
+                # finalizer operates on the prose actually being finalized, not
+                # the base draft Sophia just rejected.
+                return regen_prose, regen_choices or choices, [], regen_validation
             critique = regen_critique
 
         residue = [critique.critique_brief] if critique.critique_brief else []
         logger.info("Sophia: unresolved after revision — keeping original, deferring brief.")
-        return prose, choices, residue
+        return prose, choices, residue, None
 
     async def _grade_and_defer(self, ctx: TurnContext, prose: str) -> list[str]:
         """Stream path: GRADE the already-streamed prose, never regenerate it.
@@ -1864,9 +1872,14 @@ class NyxKernel:
                 ctx, action, prose, choices
             )
             # Sophia's semantic pass: critique-brief regeneration (refuse-only).
-            prose, choices, sophia_residue = await self._judge_prose_if_needed(
+            prose, choices, sophia_residue, judge_validation = await self._judge_prose_if_needed(
                 ctx, action, prose, choices
             )
+            # If Sophia regenerated the prose, finalize against the REGEN's
+            # validation — otherwise _finalize_turn's repair step would overwrite
+            # the Sophia-approved prose with the base draft Sophia rejected.
+            if judge_validation is not None:
+                validation = judge_validation
         except BaseException:
             self._cancel_dream_task(dream_task)
             raise

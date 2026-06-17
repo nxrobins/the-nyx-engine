@@ -155,3 +155,56 @@ class TestDeathUnjudged:
         result = await kernel.process_turn("embrace the void")
         assert result.terminal               # self-destruct, Eris off → no miracle
         assert calls["n"] == 0               # death prose bypasses Sophia entirely (ADJ-E6)
+
+
+class TestRegenIsCommitted:
+    """The committed prose must be Sophia's APPROVED regeneration, not the base
+    draft she rejected. Regression for the sync-path parity defect: a stale base
+    validation (repair_needed=True) used to overwrite the clean regen inside
+    _finalize_turn, silently reverting the whole adjudication tier.
+    """
+
+    @pytest.mark.asyncio
+    async def test_regen_prose_is_committed_not_the_rejected_base_draft(self, monkeypatch):
+        from app.schemas.state import MomusValidation
+
+        kernel = NyxKernel()
+        await _init(kernel)
+
+        ORIG = "The hearth was warm and Orin felt, for once, wholly safe and unafraid here."
+        ORIG_CORRECTED = "The hearth was warm and Orin felt, for once, a little less exposed."
+        REGEN = "The hearth guttered; Orin counted the exits and trusted none of the dark."
+
+        async def fake_clotho(ctx, action, *, repair_brief=""):
+            # The repair_brief is only set on the regeneration pass.
+            return (REGEN, ["wait", "leave"]) if repair_brief else (ORIG, ["stay", "go"])
+
+        monkeypatch.setattr(kernel, "_request_clotho_pass", fake_clotho)
+
+        async def fake_momus(prose, state):
+            if prose == ORIG:
+                # exactly one hallucination -> minor drift -> commit corrected,
+                # repair_needed=True (the stale validation that used to win).
+                return MomusValidation(
+                    valid=False,
+                    hallucinations=["a comfort canon denies"],
+                    repair_needed=True,
+                    corrected_prose=ORIG_CORRECTED,
+                )
+            return MomusValidation(valid=True)   # the regen is factually clean
+
+        monkeypatch.setattr(kernel.momus, "validate_prose", fake_momus)
+
+        async def fake_judge(prose, ctx):
+            # Sophia rejects the base corrected draft, approves the regen.
+            if prose == REGEN:
+                return JudgeCritique(verdict="pass")
+            return _revise()
+
+        monkeypatch.setattr(kernel.sophia, "judge", fake_judge)
+
+        result = await kernel.process_turn("tend the fire")
+        assert not result.terminal
+        assert result.prose == REGEN, result.prose            # not the rejected draft
+        assert kernel.state.prose_history[-1] == REGEN        # memory records the regen
+        assert ORIG_CORRECTED not in kernel.state.prose_history
