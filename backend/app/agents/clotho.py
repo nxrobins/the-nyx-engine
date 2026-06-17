@@ -258,8 +258,11 @@ def _parse_clotho_output(raw: str, epoch_phase: int) -> tuple[str, list[str]]:
         return raw.strip(), []
 
     separator = "---CHOICES---"
+    prose = raw.strip()
     if separator in raw:
         parts = raw.split(separator, 1)
+        # Marker-free prose, used on EVERY exit below: a malformed choices tail
+        # must never leak the ---CHOICES--- marker or its raw JSON to the player.
         prose = parts[0].strip()
         choices_raw = parts[1].strip()
         try:
@@ -269,9 +272,9 @@ def _parse_clotho_output(raw: str, epoch_phase: int) -> tuple[str, list[str]]:
         except (json.JSONDecodeError, TypeError):
             logger.warning(f"Clotho choice parse failed: {choices_raw[:100]}")
 
-    # Fallback: return prose as-is + deterministic choices
+    # Fallback: deterministic choices (prose is already marker-free above).
     logger.info(f"Using fallback choices for epoch {epoch_phase}")
-    return raw.strip(), _FALLBACK_CHOICES.get(epoch_phase, [])
+    return prose, _FALLBACK_CHOICES.get(epoch_phase, [])
 
 
 # ---------------------------------------------------------------------------
