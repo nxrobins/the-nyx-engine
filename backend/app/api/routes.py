@@ -172,13 +172,19 @@ async def init_session(req: InitRequest) -> TurnResult:
     that the client must send back on every subsequent request.
     """
     sid, kernel = _get_or_create_session()
-    result = await kernel.initialize(
-        hamartia=req.hamartia,
-        player_id=req.player_id,
-        name=req.name,
-        gender=req.gender,
-        first_memory=req.first_memory,
-    )
+    # THR-C6: not evictable mid-init (symmetric with /action and /turn). Without
+    # this, the fresh session sits at processing==0 across initialize()'s many
+    # awaits, so a concurrent over-cap flood can LRU-evict it — calling reset()
+    # on the kernel initialize() is still mutating, and returning a session_id
+    # that 404s on the client's very next request.
+    with _in_flight(sid):
+        result = await kernel.initialize(
+            hamartia=req.hamartia,
+            player_id=req.player_id,
+            name=req.name,
+            gender=req.gender,
+            first_memory=req.first_memory,
+        )
     # model_copy ensures session_id is in model_fields_set for serialization.
     # client_safe_state strips not-yet-arrived latent NPCs from the wire (ARR-C14).
     return result.model_copy(update={"session_id": sid, "state": client_safe_state(result.state)})
