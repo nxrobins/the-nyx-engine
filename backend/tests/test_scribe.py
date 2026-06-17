@@ -121,3 +121,46 @@ class TestMockScribe:
 
         chapter = await Scribe().draft_chapter(_snapshot())
         assert chapter is None  # both attempts gated out — the book is shorter
+
+
+class TestScribeSnapshotExcludesLatent:
+    """ARR-C14 on the book surface: a latent (authored-but-never-arrived) NPC
+    must not reach the biographer — naming it would leak the unsprung cast into
+    the published book. Dead/departed/missing are still named: a biography may
+    name its dead, just not its unarrived.
+    """
+
+    def test_latent_npc_is_absent_from_snapshot_npc_names(self):
+        from app.core.kernel import NyxKernel
+        from app.core.world_seeds import get_world_seed
+        from app.schemas.state import (
+            ArrivalCondition,
+            CanonNPC,
+            SessionData,
+            ThreadState,
+        )
+        from app.services.canon import bootstrap_canon
+
+        canon = bootstrap_canon(get_world_seed("stone"), "Orin", "boy")
+        canon.npcs["npc_dead"] = CanonNPC(
+            npc_id="npc_dead", name="Dornan", role="uncle",
+            home_location_id="home", current_location_id="home", status="dead",
+        )
+        canon.npcs["npc_latent"] = CanonNPC(
+            npc_id="npc_latent", name="Ghostwright", role="ally",
+            home_location_id="home", current_location_id="home",
+            status="latent", arrival_condition=ArrivalCondition(min_turn=40),
+        )
+
+        kernel = NyxKernel()
+        kernel.state = ThreadState(
+            session=SessionData(player_id="p", player_name="Orin", turn_count=9, run_number=1),
+            canon=canon,
+        )
+        kernel.state.soul_ledger.hamartia = "Wrath of the Untempered"
+
+        snapshot = kernel._build_scribe_snapshot(epoch_index=3, covers=(7, 9))
+        assert "Ghostwright" not in snapshot.npc_names      # the unsprung witness, excluded
+        assert "Dornan" in snapshot.npc_names               # the dead are still named
+        alive = [n.name for n in canon.npcs.values() if n.status == "alive"]
+        assert any(name in snapshot.npc_names for name in alive)

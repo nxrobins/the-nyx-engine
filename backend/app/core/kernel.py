@@ -1691,8 +1691,14 @@ class NyxKernel:
         state = self.state
         npc_names: list[str] = []
         if state.canon:
-            # All statuses — a biography may name its dead.
-            npc_names = [npc.name for npc in state.canon.npcs.values()]
+            # All statuses EXCEPT latent — a biography may name its dead, but a
+            # latent (authored-but-never-arrived) witness was never part of this
+            # life. Feeding its name to the Scribe would leak the unsprung cast
+            # into the published book, the same ARR-C14 leak client_safe_state
+            # closes on the wire.
+            npc_names = [
+                npc.name for npc in state.canon.npcs.values() if npc.status != "latent"
+            ]
         return ScribeSnapshot(
             thread_stamp=f"{state.session.player_id}:{state.session.run_number}",
             epoch_index=epoch_index,
