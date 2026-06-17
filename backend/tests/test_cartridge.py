@@ -247,6 +247,19 @@ class TestLatentAuthoring:
             WorldCartridge.model_validate(_valid_payload(latent_family=[
                 {"name": "Kael", "role": "ally", "trait": "steady", "arrival": {}}]))
 
+    def test_whitespace_only_bond_gate_rejected(self):
+        # A whitespace-only gate is truthy but resolves to nothing — it must be
+        # rejected as vacuous, not pass validation and then never arrive at runtime
+        # (canon.npcs.get("   ") -> None forever).
+        with pytest.raises(ValidationError):
+            WorldCartridge.model_validate(_valid_payload(latent_family=[
+                _latent(requires_bond_with="   ")]))
+
+    def test_whitespace_only_clock_gate_rejected(self):
+        with pytest.raises(ValidationError):
+            WorldCartridge.model_validate(_valid_payload(latent_family=[
+                _latent(on_clock_resolved="   ")]))
+
     def test_bond_anchor_resolves_to_family_npc_id(self):
         cart = WorldCartridge.model_validate(_valid_payload(latent_family=[
             _latent(requires_bond_with="Mara", requires_bond_at_least=5.0)]))
