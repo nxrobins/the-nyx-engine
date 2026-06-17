@@ -270,12 +270,19 @@ class WorldCartridge(BaseModel):
         clock_by_slug = {slugify(c.label): c for c in self.clocks}
         for lat in self.latent_family:
             cond = lat.arrival
-            if not (cond.min_turn > 0 or cond.requires_bond_with or cond.on_clock_resolved):
+            # Strip BEFORE the vacuous check (mirrors _claims_resolve_and_exclusive):
+            # a whitespace-only gate (e.g. requires_bond_with="   ") is truthy but
+            # resolves to nothing, so checking the raw strings here would let it pass
+            # as "a gate is set" while the latent could never actually arrive
+            # (_arrival_eligible would do canon.npcs.get("   ") -> None forever). Base
+            # the vacuous check on the stripped values so it is correctly rejected.
+            raw_bond = cond.requires_bond_with.strip()
+            raw_clock = cond.on_clock_resolved.strip()
+            if not (cond.min_turn > 0 or raw_bond or raw_clock):
                 raise ValueError(
                     f"latent NPC '{lat.name}': arrival is vacuous (no gate set) — set "
                     "min_turn, requires_bond_with, and/or on_clock_resolved"
                 )
-            raw_bond = cond.requires_bond_with.strip()
             if raw_bond:
                 direct = slugify(raw_bond)
                 stripped = slugify(raw_bond[4:]) if raw_bond.lower().startswith("npc_") else direct
@@ -286,7 +293,6 @@ class WorldCartridge(BaseModel):
                         f"resolves to no FAMILY NPC (known: {sorted(family_by_slug)})"
                     )
                 cond.requires_bond_with = f"npc_{key}"
-            raw_clock = cond.on_clock_resolved.strip()
             if raw_clock:
                 clock_slug = slugify(raw_clock)
                 clock = clock_by_slug.get(clock_slug)
