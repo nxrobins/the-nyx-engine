@@ -234,23 +234,27 @@ export async function submitAction(action: string): Promise<void> {
 	activeDream.set('');
 	_flinchEmittedThisTurn = false; // re-arm: one flinch per committed turn
 
-	const response = await fetch('/api/turn', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ action, session_id: _sessionId, content_prefs: currentContentPrefs() }),
-	});
-
-	if (!response.ok || !response.body) {
-		isProcessing.set(false);
-		throw new Error('Connection to the Nyx Engine lost.');
-	}
-
-	const reader = response.body.getReader();
-	const decoder = new TextDecoder('utf-8');
-	let buffer = '';
-	let fullProse = '';
-
+	let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 	try {
+		const response = await fetch('/api/turn', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ action, session_id: _sessionId, content_prefs: currentContentPrefs() }),
+		});
+
+		// A transport-level fetch reject (offline, backend restart, CORS) throws
+		// here, and a bad HTTP response throws just below — both now inside the
+		// try, so the finally always clears isProcessing; the UI never sticks on
+		// "The Fates deliberate..." after a network failure.
+		if (!response.ok || !response.body) {
+			throw new Error('Connection to the Nyx Engine lost.');
+		}
+
+		reader = response.body.getReader();
+		const decoder = new TextDecoder('utf-8');
+		let buffer = '';
+		let fullProse = '';
+
 		while (true) {
 			const { done, value } = await reader.read();
 			if (done) break;
@@ -291,7 +295,7 @@ export async function submitAction(action: string): Promise<void> {
 			}
 		}
 	} finally {
-		reader.releaseLock();
+		reader?.releaseLock();
 
 		// Safety net: if the 'state' event was dropped, commit any orphaned
 		// streaming prose so paragraphs don't repeat from the previous turn.

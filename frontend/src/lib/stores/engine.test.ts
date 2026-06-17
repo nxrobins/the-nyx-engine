@@ -140,4 +140,16 @@ describe('submitAction — the 3-phase SSE stream → store pipeline', () => {
 		await expect(submitAction('strike')).rejects.toThrow();
 		expect(get(isProcessing)).toBe(false); // never stuck
 	});
+
+	it('a network failure (fetch reject) clears the processing flag and throws', async () => {
+		// A transport-level failure (offline, backend restart, CORS) makes fetch
+		// REJECT, not resolve. The old code awaited fetch outside the try, so the
+		// throw skipped the finally and isProcessing stayed true forever — the UI
+		// bricked on "The Fates deliberate...". The finally must clear it now.
+		vi.stubGlobal('fetch', vi.fn(async () => {
+			throw new TypeError('Failed to fetch');
+		}));
+		await expect(submitAction('strike')).rejects.toThrow();
+		expect(get(isProcessing)).toBe(false); // never stuck — the regression guard
+	});
 });
