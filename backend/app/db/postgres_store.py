@@ -7,6 +7,23 @@ import logging
 
 logger = logging.getLogger("nyx.db.postgres")
 
+
+def _as_dict(value: object) -> dict:
+    """Decode a JSON/JSONB column to a dict.
+
+    asyncpg returns JSON/JSONB as a raw str unless a type codec is registered
+    (this store registers none), so the read side must json.loads it — mirroring
+    SQLite's json.loads and the write side's json.dumps. dict("{...}") would
+    raise ValueError. Defensive against str, None/empty, and an already-decoded
+    dict (so registering a codec later stays safe).
+    """
+    if isinstance(value, dict):
+        return value
+    if not value:
+        return {}
+    return json.loads(value)
+
+
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS players (
     player_id   TEXT PRIMARY KEY,
@@ -179,7 +196,7 @@ class PostgresStore:
                 "hamartia": row["hamartia"],
                 "death_reason": row["death_reason"],
                 "final_turn": row["final_turn"],
-                "soul_vectors": dict(row["final_soul_vectors"] or {}),
+                "soul_vectors": _as_dict(row["final_soul_vectors"]),
             }
             for row in rows
         ]
@@ -204,5 +221,5 @@ class PostgresStore:
             "hamartia": row["hamartia"],
             "death_reason": row["death_reason"],
             "final_turn": row["final_turn"],
-            "soul_vectors": dict(row["final_soul_vectors"] or {}),
+            "soul_vectors": _as_dict(row["final_soul_vectors"]),
         }
