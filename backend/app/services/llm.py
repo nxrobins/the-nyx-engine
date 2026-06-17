@@ -5,7 +5,7 @@ routing layer. LiteLLM handles provider dispatch, API formatting,
 and error normalization.
 
 Model string format: "provider/model" e.g.:
-  - "anthropic/claude-sonnet-4-20250514"
+  - "anthropic/claude-sonnet-4-6"
   - "openai/mercury-2"  (with custom api_base for Mercury)
 
 v2.1: Per-call credential injection replaces global env mutation.
@@ -108,7 +108,7 @@ async def generate(
     """Generate a completion via LiteLLM.
 
     Args:
-        model: LiteLLM model string, e.g. "anthropic/claude-sonnet-4-20250514"
+        model: LiteLLM model string, e.g. "anthropic/claude-sonnet-4-6"
         json_mode: Hint to provider that response should be valid JSON.
     """
     kwargs: dict = dict(
