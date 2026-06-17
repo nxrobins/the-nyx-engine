@@ -27,6 +27,7 @@ async def init_pool() -> None:
         return
 
     if settings.database_url:
+        store = None
         try:
             from app.db.postgres_store import PostgresStore
 
@@ -36,6 +37,15 @@ async def init_pool() -> None:
             return
         except Exception as exc:
             logger.error(f"PostgreSQL store init failed: {exc}. Falling back to SQLite.")
+            # initialize() may have opened the connection pool before failing
+            # (e.g. create_pool succeeded but the schema execute raised). Close it
+            # so those connections aren't leaked when we fall through to SQLite —
+            # close_pool() can't reclaim it once _store points at the SQLite store.
+            if store is not None:
+                try:
+                    await store.close()
+                except Exception:
+                    pass
 
     from app.db.sqlite_store import SQLiteStore
 
