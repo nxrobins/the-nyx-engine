@@ -23,14 +23,14 @@ class Settings(BaseSettings):
 
     # Agent model assignments (LiteLLM model strings)
     # Format: "provider/model" — LiteLLM routes automatically
-    clotho_model: str = "anthropic/claude-sonnet-4-20250514"
+    clotho_model: str = "anthropic/claude-sonnet-4-6"
     lachesis_model: str = "openai/mercury-2"
     nemesis_model: str = "openai/mercury-2"
     eris_model: str = "openai/mercury-2"
     hypnos_model: str = "anthropic/claude-haiku-4-5-20251001"
     chronicler_model: str = "anthropic/claude-haiku-4-5-20251001"
-    morpheus_model: str = "anthropic/claude-sonnet-4-20250514"
-    scribe_model: str = "anthropic/claude-sonnet-4-20250514"
+    morpheus_model: str = "anthropic/claude-sonnet-4-6"
+    scribe_model: str = "anthropic/claude-sonnet-4-6"
 
     # The Throttle — reliability bounds on REAL-model calls (mock mode is
     # unaffected: each agent returns at its `model == "mock"` guard before any
