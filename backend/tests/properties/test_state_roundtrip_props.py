@@ -22,6 +22,7 @@ from hypothesis import strategies as st
 
 from app.schemas.book import Chapter
 from app.schemas.morpheus import Promise
+from app.schemas.vignette import BoundVignette, ConsequencePacket, VignetteChoice
 from app.schemas.state import (
     AgentProposal,
     ArrivalCondition,
@@ -212,6 +213,16 @@ _thread_states = _m(
     terminal=st.booleans(), death_reason=_text, current_dream=_text,
     craft_notes=st.lists(_text, max_size=3), ledger=st.lists(_promises(), max_size=3),
     used_vignette_ids=st.lists(_ids, max_size=4),
+    pending_vignette=st.none() | _m(
+        BoundVignette, vignette_id=_ids, situation=_text,
+        choices=st.lists(
+            _m(VignetteChoice,
+               label=st.text(st.characters(blacklist_categories=("Cs",)), min_size=3, max_size=40),
+               packet=st.builds(ConsequencePacket, vector_deltas=st.just({"bia": 0.5}))),
+            min_size=1, max_size=3,
+        ),
+        cast_names=st.dictionaries(_ids, _text, max_size=2),
+    ),
     life_voice=_text, world_id=_text, prose_history=st.lists(_text, max_size=4),
     chronicle=st.lists(_text, max_size=4), factual_chronicle=st.lists(_text, max_size=4),
     recent_traces=st.lists(_trace, max_size=3), legacy_echoes=st.lists(_legacy, max_size=2),
@@ -281,6 +292,15 @@ def _maximal_thread_state() -> ThreadState:
         craft_notes=["do not name the dead as present"],
         ledger=[Promise(promise_id="a_debt", description="the father who never returned", event_turn=2, due_turn=10)],
         used_vignette_ids=["thornwell_wall_stone"],
+        pending_vignette=BoundVignette(
+            vignette_id="thornwell_tallow_short",
+            situation="The autumn render comes up short. Sera recounts the barrels.",
+            choices=[VignetteChoice(
+                label="Lean on the tallow supplier",
+                packet=ConsequencePacket(vector_deltas={"bia": 0.7}),
+            )],
+            cast_names={"mother": "Sera"},
+        ),
         life_voice="clipped, wrathful",
         world_id="builtin-stone",
         prose_history=["The door shuddered.", "Sera's hand found your shoulder."],

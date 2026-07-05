@@ -50,7 +50,15 @@ from app.agents.morpheus import Morpheus
 from app.agents.nemesis import Nemesis
 from app.agents.scribe import Scribe
 from app.core.config import settings
-from app.core.director import select_adult_beat
+from app.core.director import (
+    CRUCIBLE,
+    VIGNETTE,
+    next_beat_kind,
+    record_beat,
+    select_adult_beat,
+)
+from app.core.vignette_pools import pool_for_world
+from app.services.vignettes import apply_packet, select_vignette
 from app.core.resolver import ConflictResolver, ResolvedOutcome
 from app.core.world_registry import select_world
 from app.core.world_seeds import format_world_context
@@ -831,6 +839,13 @@ class NyxKernel:
             # Adulthood has no authored script — the Adult Director composes
             # a beat from live state (doom, clocks, oaths, pressures, flaw).
             beat_position, vignette_directive = select_adult_beat(self.state, turn)
+            # THE PULSE: adult age advances one year per CHAPTER close (see
+            # _finalize_turn), never per turn — with dense beats the old
+            # 1-year-per-turn formula would age a five-vignette chapter six
+            # years. Turn 10 (the Fork) still enters adulthood at the formula's
+            # age 18; after that the session's own age is authoritative.
+            if turn > 10:
+                age = session.player_age
 
         # Morpheus P2: the authored beat is the ceiling over the procedural
         # floor — same slot, validated at this exact moment, silent fallback.
@@ -1420,34 +1435,7 @@ class NyxKernel:
 
         # Prose history + Chronicler compression
         outcome.state.prose_history.append(prose)
-
-        if (ctx.turn % settings.chronicle_interval == 0
-                and len(outcome.state.prose_history) >= settings.chronicle_interval):
-            window = outcome.state.prose_history[-settings.chronicle_interval:]
-            logger.info(f"Chronicler triggered at turn {ctx.turn} — compressing {len(window)} turns")
-            chronicle_result = await self.chronicler.evaluate(
-                outcome.state, ctx.action, prose_window=window,
-            )
-            # Mythic track
-            if chronicle_result.chronicle_sentence:
-                outcome.state.chronicle.append(chronicle_result.chronicle_sentence)
-                await append_chronicle(self._thread_id, chronicle_result.chronicle_sentence)
-                logger.info(f"Chronicle [{len(outcome.state.chronicle)}]: {chronicle_result.chronicle_sentence}")
-
-            # Factual track
-            if chronicle_result.factual_digest:
-                outcome.state.factual_chronicle.append(chronicle_result.factual_digest)
-                await append_factual_chronicle(self._thread_id, chronicle_result.factual_digest)
-                logger.info(f"Factual [{len(outcome.state.factual_chronicle)}]: {chronicle_result.factual_digest}")
-
-            # Flush the prose history buffer
-            _retain = settings.chronicle_prose_retention
-            outcome.state.prose_history = outcome.state.prose_history[-_retain:]
-
-        # Cap prose_history to prevent unbounded growth between compressions
-        _cap = settings.chronicle_interval + settings.chronicle_prose_retention
-        if len(outcome.state.prose_history) > _cap:
-            outcome.state.prose_history = outcome.state.prose_history[-_cap:]
+        await self._compress_chronicle_if_due(outcome.state, ctx.turn, ctx.action)
 
         # RAG indexing + retrieval run concurrently (both are to_thread
         # wrapped ChromaDB calls); the query intentionally retrieves PAST
@@ -1492,11 +1480,25 @@ class NyxKernel:
             prose_summary=prose[:200],
             soul_vectors=outcome.state.soul_ledger.vectors.model_dump(),
         )
-        # Durability: snapshot the fully-committed turn (best-effort).
+        # THE PULSE: every adult full-pipeline turn IS a crucible. Record it
+        # (closing the chapter — the dream boundary), age the character one
+        # year per chapter close (adult age advances per CHAPTER, not per
+        # beat), and arm the next beat. Childhood is untouched (phase < 4).
+        next_situation = ""
+        if self.state.session.epoch_phase == 4:
+            closed = record_beat(self.state.session, CRUCIBLE)
+            if closed:
+                self.state.session.player_age += 1
+            next_situation, scheduled_labels = await self._schedule_next_beat()
+            if scheduled_labels:
+                choices = scheduled_labels
+
+        # Durability: snapshot the fully-committed turn (best-effort) — after
+        # scheduling, so an armed pending_vignette survives a restart.
         await self._snapshot_now()
 
         return TurnResult(
-            prose=prose,
+            prose=prose + (f"\n\n{next_situation}" if next_situation else ""),
             state=self.state,
             terminal=False,
             nemesis_struck=outcome.nemesis_struck,
@@ -1589,6 +1591,130 @@ class NyxKernel:
     # ------------------------------------------------------------------
     # Shared: Dream prefetch (epoch boundaries)
     # ------------------------------------------------------------------
+
+    async def _compress_chronicle_if_due(self, state: ThreadState, turn: int, action: str) -> None:
+        """Chronicler cadence — shared by the full finalize and finalize-lite
+        (P1-C8). Compresses every chronicle_interval BEATS; caps the buffer."""
+        if (turn % settings.chronicle_interval == 0
+                and len(state.prose_history) >= settings.chronicle_interval):
+            window = state.prose_history[-settings.chronicle_interval:]
+            logger.info(f"Chronicler triggered at turn {turn} — compressing {len(window)} turns")
+            chronicle_result = await self.chronicler.evaluate(
+                state, action, prose_window=window,
+            )
+            if chronicle_result.chronicle_sentence:
+                state.chronicle.append(chronicle_result.chronicle_sentence)
+                await append_chronicle(self._thread_id, chronicle_result.chronicle_sentence)
+                logger.info(f"Chronicle [{len(state.chronicle)}]: {chronicle_result.chronicle_sentence}")
+            if chronicle_result.factual_digest:
+                state.factual_chronicle.append(chronicle_result.factual_digest)
+                await append_factual_chronicle(self._thread_id, chronicle_result.factual_digest)
+                logger.info(f"Factual [{len(state.factual_chronicle)}]: {chronicle_result.factual_digest}")
+            _retain = settings.chronicle_prose_retention
+            state.prose_history = state.prose_history[-_retain:]
+
+        _cap = settings.chronicle_interval + settings.chronicle_prose_retention
+        if len(state.prose_history) > _cap:
+            state.prose_history = state.prose_history[-_cap:]
+
+    # ------------------------------------------------------------------
+    # THE PULSE: the vignette turn (cheap beat) + beat scheduling
+    # ------------------------------------------------------------------
+
+    def _matches_pending_vignette(self, action: str) -> bool:
+        pending = self.state.pending_vignette
+        return pending is not None and any(c.label == action for c in pending.choices)
+
+    async def _schedule_next_beat(self) -> tuple[str, list[str]]:
+        """Arm the NEXT beat after an adult commit. Returns (situation, labels).
+
+        Vignette next → select+bind from the world's authored deck, store it as
+        pending (durability: it round-trips, so resume re-presents the exact
+        buttons), buttons mode. Crucible next (budget spent / doom / maturing
+        clock / dry deck) → console mode, no pending. Childhood is untouched.
+        """
+        state = self.state
+        session = state.session
+        if session.epoch_phase != 4 or state.terminal:
+            return "", []
+        if next_beat_kind(state) == VIGNETTE:
+            bound = select_vignette(state, pool_for_world(state.world_id))
+            if bound is not None:
+                state.pending_vignette = bound
+                session.ui_mode = "buttons"
+                return bound.situation, [c.label for c in bound.choices]
+            # Dry deck: the selector already logged loudly; fall through.
+        state.pending_vignette = None
+        session.ui_mode = "open"
+        return "", []
+
+    async def _vignette_turn_core(self, action: str) -> tuple[TurnResult, dict]:
+        """The cheap beat: apply the authored packet, render short prose,
+        finalize-lite (P1-C8) — no council, no Momus, no lethal machinery
+        (P1-C4). The packet IS the consequence; everything is receipted."""
+        state = self.state
+        session = state.session
+        bound = state.pending_vignette
+        assert bound is not None  # dispatch guarantees
+
+        session.turn_count += 1
+        turn = session.turn_count
+        session.beat_position = "VIGNETTE"
+
+        receipt = apply_packet(state, bound, action)
+        # Ambient receipt constraint: every vignette lands its packet in the trace.
+        detail = {k: v for k, v in receipt.items() if k not in ("vignette_id", "choice")}
+        trace = DeliberationTrace(
+            turn_number=turn,
+            winner_order=["vignette"],
+            final_reason=f"Vignette '{bound.vignette_id}': {action!r} — {json.dumps(detail)}",
+        )
+        state.recent_traces.append(trace)
+        state.recent_traces = state.recent_traces[-8:]
+
+        prose = await self.clotho.render_vignette(
+            state, bound.situation, action, receipt.get("scene_evolution", ""),
+        )
+
+        # ── finalize-lite (P1-C8): prose + chronicler + RAG + DB + snapshot +
+        # milestone FLAG (image deferred to the next crucible — AG-1) ──
+        state.last_action = action
+        state.last_outcome = "vignette"
+        state.used_vignette_ids.append(bound.vignette_id)
+        state.pending_vignette = None
+        state.prose_history.append(f"{bound.situation}\n\n{prose}")
+        await self._compress_chronicle_if_due(state, turn, action)
+
+        is_milestone, milestone_vec = SoulVectorEngine.is_milestone(state.soul_ledger.vectors)
+        state.the_loom.milestone_reached = bool(is_milestone)
+        state.the_loom.image_prompt_trigger = (
+            f"A mortal's {milestone_vec} reaches its zenith. "
+            f"Environment: {session.current_environment}"
+        ) if is_milestone else ""
+
+        try:
+            await self.rag.add_turn(
+                turn_number=turn, action=action, outcome="vignette",
+                prose_summary=prose[:200], environment=session.current_environment,
+            )
+        except Exception as exc:
+            logger.warning(f"vignette RAG index failed (non-fatal): {exc}")
+
+        record_beat(session, VIGNETTE)
+        next_situation, labels = await self._schedule_next_beat()
+
+        await create_turn(
+            thread_id=self._thread_id, turn_number=turn, action=action,
+            outcome="vignette", prose_summary=prose[:200],
+            soul_vectors=state.soul_ledger.vectors.model_dump(),
+        )
+        await self._snapshot_now()
+
+        prose_out = prose + (f"\n\n{next_situation}" if next_situation else "")
+        result = TurnResult(
+            prose=prose_out, state=state, turn_number=turn, ui_choices=labels,
+        )
+        return result, receipt
 
     def _maybe_start_dream_task(self, ctx: TurnContext) -> asyncio.Task | None:
         """Start Hypnos weaving concurrently with prose generation.
@@ -1983,6 +2109,19 @@ class NyxKernel:
         # state mutation — no turn advance, no council, no persistence.
         if self.state.terminal:
             return self._severed_result()
+
+        # THE PULSE: a pending vignette's own button resolves on the cheap path.
+        # Anything else while buttons are pending ESCALATES to the full council
+        # (always correct, never wedges) — the crucible adjudicates it.
+        if self.state.pending_vignette is not None:
+            if self._matches_pending_vignette(action):
+                result, _receipt = await self._vignette_turn_core(action)
+                return result
+            logger.warning(
+                "vignette escalation: %r is not a pending choice — full council", action
+            )
+            self.state.pending_vignette = None
+
         ctx = await self._resolve_turn(action)
 
         # Rejected by Lachesis
@@ -2078,6 +2217,41 @@ class NyxKernel:
                 "death_reason": self.state.death_reason,
             }) + "\n\n"
             return
+
+        # THE PULSE: a pending vignette's own button resolves on the cheap path —
+        # same three-frame protocol, no council. A non-button input escalates.
+        if self.state.pending_vignette is not None:
+            if self._matches_pending_vignette(action):
+                result, receipt = await self._vignette_turn_core(action)
+                yield "data: " + json.dumps({
+                    "type": "mechanic",
+                    "payload": {
+                        "vector_deltas": _english_deltas(receipt.get("vector_deltas", {})),
+                        "dominant": _dominant_vector_english(receipt.get("vector_deltas", {})),
+                        "outcome": "vignette",
+                        "nemesis_struck": False,
+                        "eris_struck": False,
+                        "valid": True,
+                    },
+                }) + "\n\n"
+                yield "data: " + json.dumps({
+                    "type": "prose", "text": result.prose,
+                }) + "\n\n"
+                yield "data: " + json.dumps({
+                    "type": "state",
+                    "payload": client_safe_state(result.state).model_dump(),
+                    "ui_choices": result.ui_choices,
+                    "terminal": False,
+                    "death_reason": "",
+                    "nemesis_struck": False,
+                    "eris_struck": False,
+                    "turn_number": result.turn_number,
+                }) + "\n\n"
+                return
+            logger.warning(
+                "vignette escalation: %r is not a pending choice — full council", action
+            )
+            self.state.pending_vignette = None
 
         db_saved = False
         full_prose_buffer = ""
@@ -2216,6 +2390,15 @@ class NyxKernel:
             # the Scribe writes down what the curtain just closed on.
             self._maybe_start_morpheus(ctx)
             self._maybe_start_scribe(ctx)
+
+            # THE PULSE: if the crucible armed a vignette, present its authored
+            # situation as a final prose frame (the sync path carries it inside
+            # result.prose; the stream already sent its tokens live).
+            if self.state.pending_vignette is not None:
+                yield "data: " + json.dumps({
+                    "type": "prose",
+                    "text": f"\n\n{self.state.pending_vignette.situation}",
+                }) + "\n\n"
 
             yield "data: " + json.dumps({
                 "type": "state",

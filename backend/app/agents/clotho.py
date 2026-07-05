@@ -515,6 +515,51 @@ class Clotho(AgentBase):
                 ui_choices=choices,
             )
 
+    async def render_vignette(
+        self,
+        state: ThreadState,
+        situation: str,
+        chosen_label: str,
+        scene_evolution: str,
+    ) -> str:
+        """THE PULSE: the cheap beat's prose surface — digestible, flow-first.
+
+        Renders an AUTHORED situation + the player's chosen act + its authored
+        evolution into 2-3 short paragraphs. The sprint-10 lesson at beat level:
+        the model is handed a written scene, never asked to invent one. No
+        choices marker, no state authority — the packet already decided
+        everything. Hard length bound max_tokens=320 (P1-C9).
+        """
+        model = settings.clotho_vignette_model
+
+        if model == "mock":
+            await mock_pause(0.2)
+            evolution = f" {scene_evolution}" if scene_evolution else ""
+            return f"{situation}\n\nYou {chosen_label[0].lower()}{chosen_label[1:]}.{evolution}"
+
+        user_message = (
+            "Render this small scene. 2-3 SHORT paragraphs, under 150 words total. "
+            "Concrete, physical, present-tense pressure; no mysticism, no scene "
+            "break, no choices. End on the consequence.\n\n"
+            f"THE SITUATION (authored — keep its facts exactly):\n{situation}\n\n"
+            f"WHAT THE PLAYER DOES: {chosen_label}\n"
+            f"WHAT FOLLOWS (authored — land this visibly): {scene_evolution or 'the moment settles.'}"
+        )
+        try:
+            raw = await llm.generate(
+                model=model,
+                system_prompt=CLOTHO_SYSTEM_PROMPT,
+                user_message=user_message,
+                temperature=0.8,
+                max_tokens=320,   # P1-C9: the physical length bound
+            )
+            return raw.strip() or f"{situation}\n\nYou {chosen_label[0].lower()}{chosen_label[1:]}."
+        except Exception as e:
+            note_degraded("clotho", model, e)
+            logger.error(f"Vignette prose failed: {e}. Falling back to template.")
+            evolution = f" {scene_evolution}" if scene_evolution else ""
+            return f"{situation}\n\nYou {chosen_label[0].lower()}{chosen_label[1:]}.{evolution}"
+
     async def astream(
         self, state: ThreadState, action: str,
         nemesis_desc: str = "",

@@ -445,7 +445,19 @@ _POOLS: dict[str, VignettePool] = {
     pool.world_id: pool for pool in (_THORNWELL, _ASHFALL, _OLDGATE, _FENWARD)
 }
 
+# The four builtin worlds also exist as exported cartridge mirrors on disk
+# (worlds/{settlement}.nyx-world.json — the P1 proof-of-schema artifacts), and
+# selection can pick either id. The decks are SETTLEMENT content, so both ids
+# serve the same deck. Non-builtin cartridges (autonovel worlds) have no deck
+# until THE FACTORY (Phase 3) — dry pool, crucibles only, loudly.
+_ALIASES: dict[str, str] = {
+    "thornwell": "builtin-light",
+    "ashfall": "builtin-stone",
+    "oldgate": "builtin-crowd",
+    "fenward": "builtin-shadow",
+}
+
 
 def pool_for_world(world_id: str) -> VignettePool | None:
     """The authored deck for a world, or None (dry pool — caller falls back loudly)."""
-    return _POOLS.get(world_id)
+    return _POOLS.get(_ALIASES.get(world_id, world_id))
