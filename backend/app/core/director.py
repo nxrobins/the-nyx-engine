@@ -17,9 +17,80 @@ Zero LLM tokens. Pure string assembly from state.
 
 from __future__ import annotations
 
-from app.schemas.state import CanonNPC, SceneClock, ThreadState
+from app.schemas.state import CanonNPC, SceneClock, SessionData, ThreadState
 
 ADULT_CADENCE: tuple[str, str, str] = ("SETUP", "COMPLICATION", "RESOLUTION")
+
+# ---------------------------------------------------------------------------
+# THE PULSE — the two-speed beat scheduler (Phase 1, sub-slice 1)
+#
+# Every turn is a VIGNETTE (cheap, buttons, typed consequence packets, no
+# council) or a CRUCIBLE (the full Fates deliberation + console). A chapter is
+# 0..N vignettes capped by exactly one crucible; a dream marks every chapter
+# boundary. Deterministic, model-free (this module is pinned in
+# MODEL_FREE_MODULES). Inert until the kernel wires it (sub-slice 3).
+# ---------------------------------------------------------------------------
+
+VIGNETTE = "vignette"
+CRUCIBLE = "crucible"
+
+# P1-C1: Nigel's ruling — chapter length scales with age, hard maximum. A birth
+# chapter is its single (crucible-grade) beat; the ceiling grows with the
+# character's world. The budget is a CEILING, not a promise: drama fires the
+# crucible early (see next_beat_kind).
+CHAPTER_BUDGET_MAX = 5
+
+
+def chapter_budget(age: int) -> int:
+    """Vignettes allowed before this chapter's crucible, by age (P1-C1)."""
+    if age <= 3:
+        return 0
+    if age <= 7:
+        return 1
+    if age <= 12:
+        return 2
+    if age <= 17:
+        return 3
+    if age <= 29:
+        return 4
+    return CHAPTER_BUDGET_MAX
+
+
+def next_beat_kind(state: ThreadState) -> str:
+    """Decide this turn's beat kind. Pure: same state, same answer.
+
+    Crucible when:
+      - a doom is active — a doomed life is all crisis, and the lethal grain
+        lives at crucibles (P1-C4), so doom pacing keeps today's per-beat feel;
+      - a clock is one tick from firing — the stage is demanded;
+      - the chapter's age-scaled vignette budget is spent (P1-C1).
+    Otherwise: a vignette. Oath tests and arrivals stay CRUCIBLE DRIVERS
+    (what the crucible stages), not schedule triggers — an active oath lasting
+    twenty turns must not collapse twenty chapters into all-crucibles.
+    """
+    if state.doom.active:
+        return CRUCIBLE
+    if _maturing_clock(state) is not None:
+        return CRUCIBLE
+    if state.session.beats_spent >= chapter_budget(state.session.player_age):
+        return CRUCIBLE
+    return VIGNETTE
+
+
+def record_beat(session: SessionData, kind: str) -> bool:
+    """Bookkeeping after a beat commits. Returns True iff the chapter closed.
+
+    A crucible always closes the chapter (increments chapter_index, resets the
+    spent count) — the True return is the dream boundary (P1-C10). A vignette
+    spends one beat of the budget.
+    """
+    session.beat_kind = kind
+    if kind == CRUCIBLE:
+        session.chapter_index += 1
+        session.beats_spent = 0
+        return True
+    session.beats_spent += 1
+    return False
 
 # Position skeletons follow the Sprint 10 conventions: explicit scene
 # breaks, time skips, names, dialogue, immediate consequence.
