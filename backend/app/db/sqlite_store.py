@@ -43,6 +43,20 @@ CREATE TABLE IF NOT EXISTS turns (
     created_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(thread_id) REFERENCES threads(thread_id)
 );
+
+-- Durability (THE THREAD PERSISTS): one latest-wins snapshot per resume token,
+-- so a living thread survives restart / eviction / refresh. Keyed by the opaque
+-- token (SC-4); turn_count carries the monotonic guard (SC-3).
+CREATE TABLE IF NOT EXISTS thread_snapshots (
+    token           TEXT PRIMARY KEY,
+    player_id       TEXT NOT NULL,
+    thread_id       INTEGER,
+    turn_count      INTEGER NOT NULL,
+    schema_version  INTEGER NOT NULL,
+    state_json      TEXT NOT NULL,
+    chapters_json   TEXT NOT NULL DEFAULT '[]',
+    updated_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -214,6 +228,70 @@ class SQLiteStore:
                 (json.dumps(current), thread_id),
             )
             conn.commit()
+
+    async def save_snapshot(
+        self,
+        token: str,
+        player_id: str,
+        thread_id: int | None,
+        turn_count: int,
+        schema_version: int,
+        state_json: str,
+        chapters_json: str,
+    ) -> None:
+        await asyncio.to_thread(
+            self._save_snapshot_sync, token, player_id, thread_id,
+            turn_count, schema_version, state_json, chapters_json,
+        )
+
+    def _save_snapshot_sync(
+        self, token, player_id, thread_id, turn_count, schema_version,
+        state_json, chapters_json,
+    ) -> None:
+        with self._connect() as conn:
+            # SC-3/CF-2: latest-wins by turn_count. A late write from an older
+            # turn is refused by the WHERE guard, never a clobber.
+            conn.execute(
+                """INSERT INTO thread_snapshots
+                       (token, player_id, thread_id, turn_count, schema_version,
+                        state_json, chapters_json, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(token) DO UPDATE SET
+                       player_id=excluded.player_id,
+                       thread_id=excluded.thread_id,
+                       turn_count=excluded.turn_count,
+                       schema_version=excluded.schema_version,
+                       state_json=excluded.state_json,
+                       chapters_json=excluded.chapters_json,
+                       updated_at=CURRENT_TIMESTAMP
+                   WHERE excluded.turn_count > thread_snapshots.turn_count""",
+                (token, player_id, thread_id, turn_count, schema_version,
+                 state_json, chapters_json),
+            )
+            conn.commit()
+
+    async def load_snapshot(self, token: str) -> dict | None:
+        return await asyncio.to_thread(self._load_snapshot_sync, token)
+
+    def _load_snapshot_sync(self, token: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """SELECT token, player_id, thread_id, turn_count, schema_version,
+                          state_json, chapters_json
+                   FROM thread_snapshots WHERE token = ?""",
+                (token,),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "token": row["token"],
+            "player_id": row["player_id"],
+            "thread_id": row["thread_id"],
+            "turn_count": row["turn_count"],
+            "schema_version": row["schema_version"],
+            "state_json": row["state_json"],
+            "chapters_json": row["chapters_json"],
+        }
 
     async def get_dead_threads(self, player_id: str) -> list[dict]:
         return await asyncio.to_thread(self._get_dead_threads_sync, player_id)

@@ -68,7 +68,10 @@ from app.schemas.state import (
 from app.db import (
     ensure_player, create_thread, update_thread_death,
     create_turn, append_chronicle, append_factual_chronicle,
-    get_dead_threads, get_last_ancestor,
+    get_dead_threads, get_last_ancestor, save_snapshot,
+)
+from app.services.durability import (
+    SNAPSHOT_SCHEMA_VERSION, mint_resume_token, serialize_snapshot,
 )
 from app.services import llm
 from app.services.bfl import generate_image
@@ -551,6 +554,10 @@ class NyxKernel:
         self._scribe_task: asyncio.Task | None = None
         self._chapters: list[Chapter] = []
 
+        # Durability: the opaque handle a client uses to resume this thread. Minted
+        # at initialize(); the key under which every post-turn snapshot is written.
+        self._resume_token: str = ""
+
         # DB persistence (set on initialize, cleared on reset)
         self._thread_id: int | None = None
 
@@ -721,6 +728,11 @@ class NyxKernel:
             prose_summary=clotho_result.prose[:200],
             soul_vectors=self.state.soul_ledger.vectors.model_dump(),
         )
+
+        # Durability: mint the resume handle and snapshot the newborn thread, so a
+        # resume works from turn 1 onward.
+        self._resume_token = mint_resume_token()
+        await self._snapshot_now()
 
         return TurnResult(
             prose=clotho_result.prose,
@@ -1454,6 +1466,8 @@ class NyxKernel:
             prose_summary=prose[:200],
             soul_vectors=outcome.state.soul_ledger.vectors.model_dump(),
         )
+        # Durability: snapshot the fully-committed turn (best-effort).
+        await self._snapshot_now()
 
         return TurnResult(
             prose=prose,
@@ -1506,6 +1520,9 @@ class NyxKernel:
             prose_summary=ctx.death_reason[:200],
             soul_vectors=ctx.outcome.state.soul_ledger.vectors.model_dump(),
         )
+        # Durability: snapshot the terminal state, so a resume rehydrates a dead
+        # thread as dead (SC-6 — permanence survives resume, no save-scumming).
+        await self._snapshot_now()
 
         return TurnResult(
             prose=f"**THREAD SEVERED**\n\n{ctx.death_reason}",
@@ -1516,6 +1533,32 @@ class NyxKernel:
             book_id=book_id,
             epitaph=epitaph,
         )
+
+    async def _snapshot_now(self) -> None:
+        """Best-effort durability snapshot of the committed state + book.
+
+        CF-7: a snapshot MUST NOT fail a turn — any error is logged and swallowed
+        (the turn already committed). CF-4: an over-cap payload is skipped loudly
+        by serialize_snapshot. SC-3/CF-2 (monotonic latest-wins) is the store's job.
+        """
+        if not self._resume_token:
+            return
+        try:
+            payload = serialize_snapshot(self.state, self._chapters)
+            if payload is None:
+                return  # over the size cap, already logged
+            state_json, chapters_json = payload
+            await save_snapshot(
+                token=self._resume_token,
+                player_id=self.state.session.player_id,
+                thread_id=self._thread_id,
+                turn_count=self.state.session.turn_count,
+                schema_version=SNAPSHOT_SCHEMA_VERSION,
+                state_json=state_json,
+                chapters_json=chapters_json,
+            )
+        except Exception as exc:
+            logger.error(f"snapshot write failed (turn committed regardless): {exc!r}")
 
     # ------------------------------------------------------------------
     # Shared: Dream prefetch (epoch boundaries)
