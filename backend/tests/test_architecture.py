@@ -49,6 +49,11 @@ MODEL_FREE_MODULES = [
     "core/director.py",
     "services/hamartia_engine.py",
     "services/assayer.py",
+    # THE PULSE: authored-vignette selection/binding and the hand-authored
+    # pools — cheap beats are the MOST deterministic; no model may ever
+    # compose or pick a vignette.
+    "services/vignettes.py",
+    "core/vignette_pools.py",
     # The Vigil's per-turn crisis detector: the highest-stakes safety decision
     # in the engine and deterministic by design. Pinned model-free so no future
     # "LLM classifier" can be wired into detect_crisis via the sanctioned
