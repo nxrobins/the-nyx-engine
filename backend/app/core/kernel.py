@@ -98,7 +98,11 @@ from app.services.hamartia_engine import (
     get_life_voice,
 )
 from app.services.legacy import build_legacy_echo
-from app.services.oath_engine import detect_oath, verify_oaths
+from app.services.oath_engine import (
+    detect_oath,
+    is_verifiable_violation,
+    verify_oaths,
+)
 from app.services.oath_parser import parse_oath_text
 from app.services.assayer import compute_verdict, write_verdict
 from app.services.beat_gate import gate_beat, preconditions_hold
@@ -880,7 +884,13 @@ class NyxKernel:
         # Step 3: Process oaths (detect -> parse -> verify)
         oath_broken_id: str | None = None
         broken_ids, fulfilled_ids, transformed_ids = verify_oaths(working_state, action)
-        if lachesis_result.oath_violation:
+        # Authority inversion: Lachesis's oath_violation is an unverified model
+        # string. Honor it only if it names an actually-active oath — the LLM may
+        # point at a real oath, never invent one to seal an inescapable death.
+        if is_verifiable_violation(
+            lachesis_result.oath_violation or "",
+            working_state.soul_ledger.active_oaths,
+        ):
             broken_ids.append(lachesis_result.oath_violation)
 
         seen_ids: set[str] = set()
