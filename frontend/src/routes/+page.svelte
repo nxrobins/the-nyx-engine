@@ -15,11 +15,18 @@
 	import CrisisLink from '$lib/components/CrisisLink.svelte';
 	import CrisisInterstitial from '$lib/components/CrisisInterstitial.svelte';
 	import { vestibuleState, loadSafety } from '$lib/stores/vestibule';
-	import { gameState, mechanicToast } from '$lib/stores/engine';
+	import { gameState, mechanicToast, resumeGame } from '$lib/stores/engine';
 
 	// The Vigil: hydrate the care gate once on boot (fail-closed → off).
-	onMount(() => {
+	onMount(async () => {
 		loadSafety();
+		// Durability (THE THREAD PERSISTS): if a thread was left running when the
+		// tab closed, rehydrate it from its stored token and go straight to play —
+		// a refresh no longer orphans a living life. A terminal thread resumes into
+		// the Death Rite (permanence survives the refresh).
+		if (await resumeGame()) {
+			vestibuleState.set('playing');
+		}
 	});
 
 	let leftOpen = $state(false);

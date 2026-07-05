@@ -239,6 +239,7 @@ export interface CrisisResources {
 
 export interface TurnResult {
 	session_id: string;
+	resume_token?: string;   // durability handle — persisted to resume this thread
 	prose: string;
 	state: ThreadState;
 	terminal: boolean;
