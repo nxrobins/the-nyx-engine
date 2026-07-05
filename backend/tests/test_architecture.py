@@ -42,6 +42,13 @@ MODEL_FREE_MODULES = [
     "services/canon.py",
     "services/promise_engine.py",
     "services/beat_gate.py",
+    # More pure consequence/state modules that MUST stay model-free (audit M7):
+    # the adult director (docstring promises "Zero LLM tokens"), the hamartia
+    # engine (assigns the permanent flaw deterministically), and the Assayer
+    # (its whole charter is "no LLM judges a life").
+    "core/director.py",
+    "services/hamartia_engine.py",
+    "services/assayer.py",
     # The Vigil's per-turn crisis detector: the highest-stakes safety decision
     # in the engine and deterministic by design. Pinned model-free so no future
     # "LLM classifier" can be wired into detect_crisis via the sanctioned
@@ -69,8 +76,13 @@ def _is_model_layer(module: str) -> bool:
 def _imported_modules(path: Path) -> set[str]:
     """Every fully-qualified module name a source file imports (via AST)."""
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    # package of this file, e.g. backend/app/services/x.py -> ("app", "services")
-    pkg = list(path.relative_to(_APP.parent).with_suffix("").parts[:-1])
+    # package of this file, e.g. backend/app/services/x.py -> ("app", "services").
+    # Only relative imports need it; a file outside the app tree (a test fixture)
+    # has no package, and its absolute imports resolve without one.
+    try:
+        pkg = list(path.relative_to(_APP.parent).with_suffix("").parts[:-1])
+    except ValueError:
+        pkg = []
     found: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -80,9 +92,20 @@ def _imported_modules(path: Path) -> set[str]:
             if node.level:  # relative import — resolve to an absolute name
                 base = pkg[: len(pkg) - (node.level - 1)]
                 parts = base + ([node.module] if node.module else [])
-                found.add(".".join(parts))
+                module = ".".join(parts)
             elif node.module:
-                found.add(node.module)
+                module = node.module
+            else:
+                continue
+            found.add(module)
+            # Also record each imported NAME as a fully-qualified module. This
+            # closes the `from app.services import llm` hole: that records only
+            # "app.services" above, which the layer check does not flag — but the
+            # thing imported IS app.services.llm. `from app import agents` → the
+            # same for "app.agents". (audit M7)
+            for alias in node.names:
+                if alias.name != "*":
+                    found.add(f"{module}.{alias.name}")
     return found
 
 
@@ -92,7 +115,7 @@ class TestDeterminismGradient:
     def test_guarded_set_exists_and_is_not_silently_shrunk(self):
         # A renamed/deleted module would make its parametrized case vanish; pin
         # the floor so the guard can't be hollowed out unnoticed.
-        assert len(MODEL_FREE_MODULES) >= 10
+        assert len(MODEL_FREE_MODULES) >= 13
         for rel in MODEL_FREE_MODULES:
             assert (_APP / rel).exists(), f"guarded module moved or renamed: {rel}"
 
@@ -124,3 +147,24 @@ class TestDeterminismGradient:
             f"litellm must be imported only by services/llm.py (the sole model "
             f"wrapper, so every model call has one auditable seam); found: {importers}"
         )
+
+    def test_from_import_idiom_is_not_a_blind_spot(self, tmp_path):
+        """`from app.services import llm` / `from app import agents` must be seen.
+
+        These record only "app.services" / "app" as the module, which the layer
+        check does not flag — yet the imported NAME is the model layer. If a
+        consequence module used this idiom to reach the LLM wrapper, the guard
+        would have missed it (audit M7). This pins that the extractor resolves the
+        imported name to its full path so `_is_model_layer` catches it.
+        """
+        f = tmp_path / "sneaky.py"
+        f.write_text(
+            "from app.services import llm\n"
+            "from app import agents\n"
+            "from app.agents import nemesis\n",
+            encoding="utf-8",
+        )
+        found = _imported_modules(f)
+        assert "app.services.llm" in found
+        assert "app.agents" in found
+        assert any(_is_model_layer(m) for m in found)
