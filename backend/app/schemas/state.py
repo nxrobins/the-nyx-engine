@@ -90,6 +90,12 @@ class SessionData(BaseModel):
     ui_mode: str = "buttons"    # "buttons" | "open"
     player_age: int = 3         # deterministic age per turn
     beat_position: str = "SETUP"  # SETUP | COMPLICATION | RESOLUTION | OPEN
+    # THE PULSE (P1-C7): two-speed chapter bookkeeping. Deterministic, mutated
+    # only by director.record_beat; must round-trip (durability). Inert until
+    # the kernel wires the scheduler (Phase 1 sub-slice 3).
+    chapter_index: int = 0      # chapters closed so far this life
+    beats_spent: int = 0        # vignettes spent in the current chapter
+    beat_kind: str = ""         # "" (unscheduled) | "vignette" | "crucible"
 
 
 # ---------------------------------------------------------------------------

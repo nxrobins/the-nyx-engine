@@ -163,6 +163,8 @@ _session = _m(
     current_environment=_text, epoch_phase=st.integers(1, 4),
     ui_mode=st.sampled_from(["buttons", "open"]), player_age=st.integers(3, 80),
     beat_position=st.sampled_from(["SETUP", "COMPLICATION", "RESOLUTION", "OPEN"]),
+    chapter_index=st.integers(0, 40), beats_spent=st.integers(0, 5),
+    beat_kind=st.sampled_from(["", "vignette", "crucible"]),
 )
 _ledger = _m(
     SoulLedger, hamartia=_text, hamartia_profile=st.none() | _hamartia,
@@ -254,7 +256,10 @@ def _maximal_thread_state() -> ThreadState:
         world_facts=["The Ashlands are volcanic, not burned."],
     )
     return ThreadState(
-        session=SessionData(player_id="p1", player_name="Hero", turn_count=12, player_age=14, epoch_phase=3),
+        session=SessionData(
+            player_id="p1", player_name="Hero", turn_count=12, player_age=14,
+            epoch_phase=3, chapter_index=4, beats_spent=2, beat_kind="vignette",
+        ),
         soul_ledger=SoulLedger(
             hamartia="Wrath",
             hamartia_profile=HamartiaProfile(name="Wrath", choice_bias="violent", style_directive="burns hot"),
