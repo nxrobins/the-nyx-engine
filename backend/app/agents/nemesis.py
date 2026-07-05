@@ -412,9 +412,14 @@ class Nemesis(AgentBase):
                     logger.warning("Nemesis: All retries returned empty prophecy. Using mock.")
                     return _mock_prophecy()
 
-                # Override intervention_type if we know what it should be
-                if force_type == "lethal_punishment" and result.intervention_type != "lethal_punishment":
-                    result.intervention_type = "lethal_punishment"
+                # Authority: the intervention TIER is the kernel's decision
+                # (force_type — lethal ONLY when an oath actually broke), never
+                # the model's. The model writes the prophecy/punishment text; it
+                # cannot self-escalate its own severity. Without this, a model
+                # answering a mere prophecy/punishment trigger with
+                # "lethal_punishment" would fabricate oath-broken consequences
+                # (resolver reads this tier) with no oath broken.
+                result.intervention_type = force_type
                 return result
             except Exception as e:
                 last_exc = e
