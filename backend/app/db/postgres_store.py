@@ -55,6 +55,17 @@ CREATE TABLE IF NOT EXISTS turns (
     soul_vectors  JSONB,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS thread_snapshots (
+    token           TEXT PRIMARY KEY,
+    player_id       TEXT NOT NULL,
+    thread_id       INT,
+    turn_count      INT NOT NULL,
+    schema_version  INT NOT NULL,
+    state_json      TEXT NOT NULL,
+    chapters_json   TEXT NOT NULL DEFAULT '[]',
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 """
 
 
@@ -177,6 +188,60 @@ class PostgresStore:
                 json.dumps([digest]),
                 thread_id,
             )
+
+    async def save_snapshot(
+        self,
+        token: str,
+        player_id: str,
+        thread_id: int | None,
+        turn_count: int,
+        schema_version: int,
+        state_json: str,
+        chapters_json: str,
+    ) -> None:
+        if not self._pool:
+            return
+        async with self._pool.acquire() as conn:
+            # SC-3/CF-2: latest-wins by turn_count; an older write is refused.
+            await conn.execute(
+                """INSERT INTO thread_snapshots
+                       (token, player_id, thread_id, turn_count, schema_version,
+                        state_json, chapters_json, updated_at)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+                   ON CONFLICT (token) DO UPDATE SET
+                       player_id=excluded.player_id,
+                       thread_id=excluded.thread_id,
+                       turn_count=excluded.turn_count,
+                       schema_version=excluded.schema_version,
+                       state_json=excluded.state_json,
+                       chapters_json=excluded.chapters_json,
+                       updated_at=NOW()
+                   WHERE excluded.turn_count > thread_snapshots.turn_count""",
+                token, player_id, thread_id, turn_count, schema_version,
+                state_json, chapters_json,
+            )
+
+    async def load_snapshot(self, token: str) -> dict | None:
+        if not self._pool:
+            return None
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """SELECT token, player_id, thread_id, turn_count, schema_version,
+                          state_json, chapters_json
+                   FROM thread_snapshots WHERE token = $1""",
+                token,
+            )
+        if not row:
+            return None
+        return {
+            "token": row["token"],
+            "player_id": row["player_id"],
+            "thread_id": row["thread_id"],
+            "turn_count": row["turn_count"],
+            "schema_version": row["schema_version"],
+            "state_json": row["state_json"],
+            "chapters_json": row["chapters_json"],
+        }
 
     async def get_dead_threads(self, player_id: str) -> list[dict]:
         if not self._pool:

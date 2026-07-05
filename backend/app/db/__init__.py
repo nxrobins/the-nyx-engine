@@ -126,6 +126,29 @@ async def append_factual_chronicle(thread_id: int | None, digest: str) -> None:
     await _store.append_factual_chronicle(thread_id, digest)
 
 
+async def save_snapshot(
+    token: str,
+    player_id: str,
+    thread_id: int | None,
+    turn_count: int,
+    schema_version: int,
+    state_json: str,
+    chapters_json: str,
+) -> None:
+    if _store is None:
+        return
+    await _store.save_snapshot(
+        token, player_id, thread_id, turn_count,
+        schema_version, state_json, chapters_json,
+    )
+
+
+async def load_snapshot(token: str) -> dict | None:
+    if _store is None:
+        return None
+    return await _store.load_snapshot(token)
+
+
 async def get_dead_threads(player_id: str) -> list[dict]:
     if _store is None:
         return []

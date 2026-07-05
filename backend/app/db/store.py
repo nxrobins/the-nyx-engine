@@ -35,3 +35,17 @@ class ThreadStore(Protocol):
     async def append_factual_chronicle(self, thread_id: int | None, digest: str) -> None: ...
     async def get_dead_threads(self, player_id: str) -> list[dict]: ...
     async def get_last_ancestor(self, player_id: str) -> dict | None: ...
+
+    # Durability (THE THREAD PERSISTS) — one latest-wins snapshot per resume
+    # token; the store enforces the monotonic guard (SC-3/CF-2).
+    async def save_snapshot(
+        self,
+        token: str,
+        player_id: str,
+        thread_id: int | None,
+        turn_count: int,
+        schema_version: int,
+        state_json: str,
+        chapters_json: str,
+    ) -> None: ...
+    async def load_snapshot(self, token: str) -> dict | None: ...
