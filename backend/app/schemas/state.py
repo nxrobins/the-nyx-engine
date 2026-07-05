@@ -341,6 +341,9 @@ class ThreadState(BaseModel):
     # Assayer P4: which world this life was born into (cartridge world_id
     # or "builtin-{archetype}"). The verdict's primary key.
     world_id: str = ""
+    # THE PULSE: vignettes this life has already lived — a life never replays
+    # one (no-repeat; the kernel appends after commit). Round-trips (durability).
+    used_vignette_ids: list[str] = Field(default_factory=list)
     # Chronicler: rolling prose buffer + dual-track compressed chronicle
     prose_history: list[str] = Field(default_factory=list)       # last N raw prose turns
     chronicle: list[str] = Field(default_factory=list)           # mythic sentence per 5-turn window
