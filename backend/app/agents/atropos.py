@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 
 from app.agents.base import AgentBase
 from app.core.config import settings
@@ -27,6 +28,36 @@ from app.services.doom import doom_death_reason, is_doom_terminal
 from app.services.soul_math import SoulVectorEngine
 
 logger = logging.getLogger("nyx.atropos")
+
+
+# Negation tokens that, appearing just before a death phrase, invert its intent:
+# "I will NEVER give up completely" is a vow to live, not a death wish.
+_NEGATIONS = (
+    "not", "never", "no", "wont", "won't", "dont", "don't", "cant", "can't",
+    "cannot", "wouldnt", "wouldn't", "refuse", "rather",
+)
+
+
+def expresses_self_destruction(action: str, keywords: list[str]) -> bool:
+    """True only for an UNNEGATED, whole-phrase self-destruction declaration.
+
+    The FICTION death must be earned by explicit intent. A raw substring match
+    killed players for benign actions ("I jump off the cart and run") and, with
+    no negation guard, read "I will never give up completely" as a death wish —
+    a permanent, non-miracleable death by accident. This trigger is deliberately
+    CONSERVATIVE (only unambiguous intent kills the character).
+
+    It is a SEPARATE surface from the real-human crisis detector
+    (services/welfare.py, REAL_WORLD_ATROPOS_PHRASES), which is intentionally
+    LIBERAL and fail-safe. This change does not touch that safety net.
+    """
+    lowered = action.lower()
+    for kw in keywords:
+        for match in re.finditer(r"\b" + re.escape(kw.lower()) + r"\b", lowered):
+            window = " ".join(lowered[: match.start()].split()[-4:])
+            if not any(neg in window.split() for neg in _NEGATIONS):
+                return True
+    return False
 
 
 def _attach_proposal(
@@ -85,9 +116,8 @@ class Atropos(AgentBase):
         # it ONCE and stamp every terminal return — not just the keyword branch.
         # This can only STRENGTHEN permanence: a benign action keeps the flag False,
         # so a natural doom/dead-soul death stays Eris-miracle-eligible as intended.
-        action_lower = action.lower()
-        is_self_destruct = any(
-            trigger in action_lower for trigger in settings.atropos_death_keywords
+        is_self_destruct = expresses_self_destruction(
+            action, settings.atropos_death_keywords
         )
 
         # --- Trigger 1: Doom terminal (staged death has matured) ---
