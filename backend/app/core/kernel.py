@@ -728,6 +728,24 @@ class NyxKernel:
     # ------------------------------------------------------------------
 
     async def _resolve_turn(self, action: str) -> TurnContext:
+        """Steps 1-8 with a rollback guard (audit M6).
+
+        The body advances the turn counter and epoch metadata before its awaits.
+        If anything after that raises (a service bug, a schema error), the turn is
+        left half-mutated — counter advanced, nothing committed — and the next
+        turn skips a number and jumps the age. Material state commits only in
+        _finalize_turn, so a session snapshot is all we need to restore. The
+        Lachesis-invalid path does its own in-band rollback and returns normally,
+        so it is unaffected.
+        """
+        session_backup = self.state.session.model_copy(deep=True)
+        try:
+            return await self._resolve_turn_body(action)
+        except Exception:
+            self.state.session = session_backup
+            raise
+
+    async def _resolve_turn_body(self, action: str) -> TurnContext:
         """Steps 1-8: Pure game math. Shared by sync and streaming pipelines.
 
         Lachesis → delta application → hamartia fork → oath processing →
