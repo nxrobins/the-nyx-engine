@@ -22,3 +22,4 @@ pyyaml>=6.0.0
 # Testing
 pytest>=8.0.0
 pytest-asyncio>=0.24.0
+hypothesis>=6.100.0   # property-based tests (backend/tests/properties/)
