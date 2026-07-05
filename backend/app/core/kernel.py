@@ -1441,6 +1441,11 @@ class NyxKernel:
         self._cancel_morpheus()  # the Author has no future to write here
         self._beat_sheet = None
         self.state = ctx.outcome.state
+        # Drop the permanence latch the instant death commits. From here on, any
+        # further action is refused at the turn entrypoints — no second death,
+        # no re-bound book, no duplicate verdict. Death is the engine's to keep.
+        self.state.terminal = True
+        self.state.death_reason = ctx.death_reason
         _refresh_derived_environment(self.state)
         epitaph = await self._generate_epitaph(ctx.outcome.state, ctx.turn, ctx.death_reason)
 
@@ -1852,8 +1857,25 @@ class NyxKernel:
     # Turn 1+: Sync pipeline (thin orchestration shell)
     # ------------------------------------------------------------------
 
+    def _severed_result(self) -> TurnResult:
+        """The fixed no-op a severed thread returns for any further action."""
+        return TurnResult(
+            prose=(
+                "**THE THREAD IS SEVERED**\n\nThis life is over; what the Fates "
+                "have cut cannot be rewoven."
+            ),
+            state=self.state,
+            terminal=True,
+            death_reason=self.state.death_reason,
+            turn_number=self.state.session.turn_count,
+        )
+
     async def process_turn(self, action: str) -> TurnResult:
         """Execute one full turn through the engine pipeline (sync Clotho)."""
+        # Permanence: a severed thread takes no more turns. Refuse before any
+        # state mutation — no turn advance, no council, no persistence.
+        if self.state.terminal:
+            return self._severed_result()
         ctx = await self._resolve_turn(action)
 
         # Rejected by Lachesis
@@ -1921,6 +1943,25 @@ class NyxKernel:
 
         DB persistence is guaranteed in the finally block.
         """
+        # Permanence: a severed thread takes no more turns. Refuse before the
+        # try-block so the finally-persist never fires — no turn is recorded.
+        if self.state.terminal:
+            yield "data: " + json.dumps({
+                "type": "prose",
+                "text": (
+                    "The thread is severed. This life is over; what the Fates "
+                    "have cut cannot be rewoven."
+                ),
+            }) + "\n\n"
+            yield "data: " + json.dumps({
+                "type": "state",
+                "payload": client_safe_state(self.state).model_dump(),
+                "ui_choices": [],
+                "terminal": True,
+                "death_reason": self.state.death_reason,
+            }) + "\n\n"
+            return
+
         db_saved = False
         full_prose_buffer = ""
         ctx: TurnContext | None = None

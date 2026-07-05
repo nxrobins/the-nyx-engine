@@ -318,6 +318,11 @@ class ThreadState(BaseModel):
     world_context: str = ""    # formatted world seed, fed to Clotho every turn
     last_action: str = ""
     last_outcome: str = ""
+    # Permanence latch — once a death commits (set in _handle_death), the thread
+    # is severed for good: no further turn runs, no council convenes, no book is
+    # re-bound. The engine, not the client, enforces that death is permanent.
+    terminal: bool = False
+    death_reason: str = ""     # the committed cause of death (stamped with the latch)
     current_dream: str = ""    # Hypnos dream text (consumed by next Clotho call)
     craft_notes: list[str] = Field(default_factory=list)  # Momus law violations fed to next Clotho call
     # Morpheus P2: the Promise Ledger — typed narrative obligations
