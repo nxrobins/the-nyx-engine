@@ -464,9 +464,15 @@ class InitRequest(BaseModel):
     content_prefs: dict | None = None   # The Vigil: self-asserted consent (carried, not yet acted on)
 
 
+class ResumeRequest(BaseModel):
+    """Rehydrate a living thread from its opaque durability token."""
+    resume_token: str = Field(default="", max_length=200)
+
+
 class TurnResult(BaseModel):
     """Final output of a complete turn through the Nyx Kernel."""
     session_id: str = ""     # returned on init, sent back on every turn
+    resume_token: str = ""   # durability handle — persist it to resume this thread
     prose: str
     state: ThreadState
     terminal: bool = False
