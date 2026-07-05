@@ -554,6 +554,12 @@ class NyxKernel:
         # DB persistence (set on initialize, cleared on reset)
         self._thread_id: int | None = None
 
+        # Audit H2: serialize turns on this session. Concurrent turns (double-
+        # click, /action + /turn, two tabs) must not interleave — the second
+        # would deepcopy a pre-commit state and last-writer-wins would discard
+        # the first turn's oaths/doom/canon while its DB row remained.
+        self._turn_lock = asyncio.Lock()
+
     # ------------------------------------------------------------------
     # Turn 0: Initialize session with hamartia choice
     # ------------------------------------------------------------------
@@ -1899,7 +1905,11 @@ class NyxKernel:
         )
 
     async def process_turn(self, action: str) -> TurnResult:
-        """Execute one full turn through the engine pipeline (sync Clotho)."""
+        """Execute one full turn (sync Clotho), serialized per session (H2)."""
+        async with self._turn_lock:
+            return await self._process_turn_body(action)
+
+    async def _process_turn_body(self, action: str) -> TurnResult:
         # Permanence: a severed thread takes no more turns. Refuse before any
         # state mutation — no turn advance, no council, no persistence.
         if self.state.terminal:
@@ -1962,6 +1972,16 @@ class NyxKernel:
     # ------------------------------------------------------------------
 
     async def process_turn_stream(self, action: str) -> AsyncGenerator[str, None]:
+        """SSE turn stream, serialized per session (audit H2).
+
+        The whole stream is one critical section; the lock releases when the
+        generator is exhausted or closed (client disconnect → GeneratorExit).
+        """
+        async with self._turn_lock:
+            async for _chunk in self._process_turn_stream_body(action):
+                yield _chunk
+
+    async def _process_turn_stream_body(self, action: str) -> AsyncGenerator[str, None]:
         """Execute one turn as an SSE async generator.
 
         Yields three phases as ``data: {...}\\n\\n`` lines:
