@@ -37,26 +37,56 @@ _NEGATIONS = (
     "cannot", "wouldnt", "wouldn't", "refuse", "rather",
 )
 
+# Physical leaps are ambiguous: "jump off the cart" is play, "jump off a cliff"
+# is death. So a leap kills the character ONLY when a lethal target follows it.
+# The real-human crisis detector (welfare.py) keeps a broad, target-free "jump
+# off" for fail-safe signposting — this only governs the FICTION death (Nigel's
+# ruling: relax SAFE-C4 so the fiction may be more conservative than crisis).
+_LEAP_PHRASES = (
+    "jump off", "jump from", "leap off", "leap from",
+    "throw myself off", "throw myself from", "hurl myself off",
+)
+_LETHAL_TARGETS = (
+    "cliff", "bridge", "roof", "rooftop", "tower", "ledge", "precipice",
+    "the edge", "great height", "to my death", "to my end",
+)
+
 
 def expresses_self_destruction(action: str, keywords: list[str]) -> bool:
-    """True only for an UNNEGATED, whole-phrase self-destruction declaration.
+    """True only for an UNNEGATED self-destruction declaration.
 
     The FICTION death must be earned by explicit intent. A raw substring match
     killed players for benign actions ("I jump off the cart and run") and, with
     no negation guard, read "I will never give up completely" as a death wish —
     a permanent, non-miracleable death by accident. This trigger is deliberately
-    CONSERVATIVE (only unambiguous intent kills the character).
+    CONSERVATIVE: an explicit whole-phrase declaration, or a physical leap toward
+    a lethal target — never a bare ambiguous verb.
 
     It is a SEPARATE surface from the real-human crisis detector
-    (services/welfare.py, REAL_WORLD_ATROPOS_PHRASES), which is intentionally
-    LIBERAL and fail-safe. This change does not touch that safety net.
+    (services/welfare.py), which is intentionally LIBERAL and fail-safe and is
+    NOT narrowed by this function — a genuine leap still routes to care.
     """
     lowered = action.lower()
+
+    def _unnegated(at: int) -> bool:
+        window = lowered[:at].split()[-4:]
+        return not any(neg in window for neg in _NEGATIONS)
+
+    # 1. Explicit whole-phrase declarations ("I drink the poison").
     for kw in keywords:
         for match in re.finditer(r"\b" + re.escape(kw.lower()) + r"\b", lowered):
-            window = " ".join(lowered[: match.start()].split()[-4:])
-            if not any(neg in window.split() for neg in _NEGATIONS):
+            if _unnegated(match.start()):
                 return True
+
+    # 2. A physical leap that names a lethal target ("jump off a cliff") —
+    #    but not "jump off the cart".
+    for leap in _LEAP_PHRASES:
+        for match in re.finditer(r"\b" + re.escape(leap) + r"\b", lowered):
+            if _unnegated(match.start()) and any(
+                target in lowered[match.end():] for target in _LETHAL_TARGETS
+            ):
+                return True
+
     return False
 
 

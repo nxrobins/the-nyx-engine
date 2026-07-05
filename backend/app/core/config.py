@@ -144,17 +144,16 @@ class Settings(BaseSettings):
     welfare_copy_reviewed: bool = False
 
     # Atropos death keywords — the FICTION self-destruction trigger. Matched
-    # whole-phrase and negation-guarded (atropos.expresses_self_destruction), so
-    # "I will never give up completely" no longer reads as a death wish. NOTE:
-    # this list is coupled to welfare.REAL_WORLD_ATROPOS_PHRASES by the SAFE-C4
-    # invariant (every real-world crisis phrase must also keyword-death), so
-    # content here is NOT changed autonomously — "jump off" stays generic on
-    # purpose (see the surfaced Vigil checkpoint in the-shelf.md).
+    # whole-phrase and negation-guarded (atropos.expresses_self_destruction).
+    # Nigel's Vigil ruling (SAFE-C4 relaxed): the fiction death may be MORE
+    # conservative than the real-human crisis detector. "jump off" is NOT here —
+    # a bare leap is ambiguous ("jump off the cart"); the matcher's death-context
+    # rule kills only "jump off a cliff / to my death". welfare.py keeps its broad
+    # "jump off" so care still fires either way (crisis breadth is unchanged).
     atropos_death_keywords: list[str] = [
         "surrender to death",
         "embrace the void",
         "drink the poison",
-        "jump off",
         "end my thread",
         "cut my own thread",
         "give up completely",

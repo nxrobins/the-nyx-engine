@@ -39,6 +39,17 @@ _BENIGN = [
     "I drink the water from the stream",
     "I cut the bread for my mother",
     "I run up the hill toward the gate",
+    "I jump off the cart and run",        # the audit's headline — now a benign leap
+    "I jump off the log into the grass",
+    "I leap off the step and keep going",
+]
+
+# Genuine leaps toward a lethal target — the fiction death IS earned here.
+_LETHAL_LEAPS = [
+    "I climb up and jump off a cliff",
+    "I jump off the bridge into the dark",
+    "I throw myself off the tower",
+    "I leap from the roof to my death",
 ]
 
 
@@ -58,3 +69,9 @@ def test_benign_non_keyword_actions_never_trigger(action):
 def test_explicit_unnegated_intent_still_triggers(kw):
     """The guard is conservative, not disabled: genuine intent still kills."""
     assert expresses_self_destruction(f"I {kw} now.", _KEYWORDS) is True
+
+
+@given(action=st.sampled_from(_LETHAL_LEAPS))
+def test_lethal_leaps_are_earned_deaths(action):
+    """A leap toward a lethal target IS self-destruction (death-context rule)."""
+    assert expresses_self_destruction(action, _KEYWORDS) is True
