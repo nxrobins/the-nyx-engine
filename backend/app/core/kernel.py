@@ -567,6 +567,32 @@ class NyxKernel:
         # the first turn's oaths/doom/canon while its DB row remained.
         self._turn_lock = asyncio.Lock()
 
+    @classmethod
+    def rehydrate(cls, snapshot: dict, token: str) -> "NyxKernel | None":
+        """Rebuild a live kernel from a durability snapshot (sub-slice 3).
+
+        Returns None on a schema-version MISMATCH — an expected migration path,
+        discarded to a fresh session (CF-5, logged INFO). A parse error at the
+        CURRENT version is CORRUPTION and propagates loudly (SC-7) for the caller
+        to surface. Transient state (the RAG index, background tasks) starts fresh
+        (AG-1/AG-2); `rag_context` in ThreadState preserves scene grounding. A
+        terminal snapshot rehydrates terminal (SC-6) — the C1 latch round-trips.
+        """
+        if snapshot.get("schema_version") != SNAPSHOT_SCHEMA_VERSION:
+            logger.info(
+                "resume: snapshot schema v%s != current v%s; discarding to fresh",
+                snapshot.get("schema_version"), SNAPSHOT_SCHEMA_VERSION,
+            )
+            return None
+        state = ThreadState.model_validate_json(snapshot["state_json"])
+        chapters = [Chapter.model_validate(c) for c in json.loads(snapshot["chapters_json"])]
+        kernel = cls()
+        kernel.state = state
+        kernel._chapters = chapters
+        kernel._thread_id = snapshot.get("thread_id")
+        kernel._resume_token = token
+        return kernel
+
     # ------------------------------------------------------------------
     # Turn 0: Initialize session with hamartia choice
     # ------------------------------------------------------------------

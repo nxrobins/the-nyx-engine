@@ -29,8 +29,9 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from app.core.config import settings
 from app.core.kernel import NyxKernel
-from app.db import get_dead_threads
-from app.schemas.state import InitRequest, PlayerAction, TurnResult
+from app.agents.clotho import _fallback_choices_for_state
+from app.db import get_dead_threads, load_snapshot
+from app.schemas.state import InitRequest, PlayerAction, ResumeRequest, TurnResult
 from app.services.bfl import generate_image
 from app.services.canon import client_safe_state
 from app.services.legacy import augment_thread_summary
@@ -187,7 +188,74 @@ async def init_session(req: InitRequest) -> TurnResult:
         )
     # model_copy ensures session_id is in model_fields_set for serialization.
     # client_safe_state strips not-yet-arrived latent NPCs from the wire (ARR-C14).
-    return result.model_copy(update={"session_id": sid, "state": client_safe_state(result.state)})
+    # resume_token: the durability handle the client persists to resume this thread.
+    return result.model_copy(update={
+        "session_id": sid,
+        "resume_token": kernel._resume_token,
+        "state": client_safe_state(result.state),
+    })
+
+
+# ------------------------------------------------------------------
+# POST /resume — rehydrate a living (or dead) thread from its token
+# ------------------------------------------------------------------
+
+def _resume_result(sid: str, kernel: NyxKernel) -> TurnResult:
+    """The client-facing view of a resumed thread: its last scene + state."""
+    state = kernel.state
+    last_prose = state.prose_history[-1] if state.prose_history else ""
+    choices: list[str] = []
+    if not state.terminal and state.session.ui_mode == "buttons":
+        choices = _fallback_choices_for_state(state, state.session.epoch_phase)
+    return TurnResult(
+        session_id=sid,
+        resume_token=kernel._resume_token,
+        prose=last_prose,
+        state=client_safe_state(state),
+        terminal=state.terminal,
+        death_reason=state.death_reason,
+        turn_number=state.session.turn_count,
+        ui_choices=choices,
+    )
+
+
+@router.post("/resume", response_model=TurnResult)
+async def resume_session(req: ResumeRequest) -> TurnResult:
+    """Rehydrate a thread from its opaque resume token.
+
+    SC-2/CF-3: if a live session already holds this token, return it — never a
+    second kernel for one thread. SC-4/CF-1: an unknown token 404s (no
+    enumeration). SC-5: a stale-schema snapshot 404s (discard to fresh);
+    corruption at the current version 500s loudly. SC-6: a terminal thread
+    rehydrates terminal (the Death Rite re-shows; no save-scumming).
+    """
+    _evict_stale()
+    token = req.resume_token
+    if not token:
+        raise HTTPException(status_code=404, detail="No resumable thread.")
+
+    # SC-2/CF-3: one live kernel per thread.
+    for existing_sid, entry in _sessions.items():
+        if entry.kernel._resume_token == token:
+            entry.touch()
+            return _resume_result(existing_sid, entry.kernel)
+
+    snapshot = await load_snapshot(token)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="No resumable thread.")
+    try:
+        kernel = NyxKernel.rehydrate(snapshot, token)
+    except Exception as exc:  # corruption at the current schema version (SC-7)
+        logger.error(f"resume: snapshot corrupt at current version: {exc!r}")
+        raise HTTPException(status_code=500, detail="The thread could not be restored.")
+    if kernel is None:  # schema mismatch — discard to fresh (CF-5)
+        raise HTTPException(status_code=404, detail="That thread can no longer be restored.")
+
+    sid = uuid.uuid4().hex
+    _sessions[sid] = _SessionEntry(kernel)
+    _evict_lru_if_over_cap(keep_sid=sid)
+    logger.info(f"Session resumed: {sid} (turn {kernel.state.session.turn_count})")
+    return _resume_result(sid, kernel)
 
 
 # ------------------------------------------------------------------
