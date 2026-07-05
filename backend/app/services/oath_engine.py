@@ -158,6 +158,22 @@ def _does_forbidden(action: str, forbidden_action: str) -> bool:
     return all(t in action_tokens for t in clause_tokens)
 
 
+def is_verifiable_violation(claimed_oath_id: str, active_oaths: list[Oath]) -> bool:
+    """Whether a model-claimed oath violation may be honored.
+
+    Lachesis (an LLM) can emit an ``oath_violation`` field; on its own that is an
+    unverified string. Honoring it blindly lets the lowest-authority tier seal an
+    inescapable death — a bare ``"none"`` (a common model tic) is truthy, and a
+    hallucinated id would doom a player who swore nothing. The deterministic
+    engine accepts the claim ONLY when it names an oath that is actually active,
+    so the model can at most point at a real, live oath — never invent one.
+    """
+    return bool(claimed_oath_id) and any(
+        o.oath_id == claimed_oath_id and o.status == "active"
+        for o in active_oaths
+    )
+
+
 def verify_oaths(state: ThreadState, action: str) -> tuple[list[str], list[str], list[str]]:
     """Compare an action against active oath terms.
 
