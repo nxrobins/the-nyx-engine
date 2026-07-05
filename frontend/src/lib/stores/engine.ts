@@ -34,6 +34,38 @@ export function getSessionId(): string {
 	return _sessionId;
 }
 
+// ── Durability: the resume token (THE THREAD PERSISTS, sub-slice 4) ──
+// A session UUID is ephemeral; the resume token, persisted here, is what lets a
+// living thread survive a refresh / new tab / restart. Distinct from player_id.
+const RESUME_TOKEN_KEY = 'nyx_resume_token';
+
+function saveResumeToken(token: string | undefined): void {
+	if (typeof localStorage === 'undefined' || !token) return;
+	try {
+		localStorage.setItem(RESUME_TOKEN_KEY, token);
+	} catch {
+		/* private-mode / quota — durability degrades to in-session only */
+	}
+}
+
+function clearResumeToken(): void {
+	if (typeof localStorage === 'undefined') return;
+	try {
+		localStorage.removeItem(RESUME_TOKEN_KEY);
+	} catch {
+		/* ignore */
+	}
+}
+
+export function getStoredResumeToken(): string {
+	if (typeof localStorage === 'undefined') return '';
+	try {
+		return localStorage.getItem(RESUME_TOKEN_KEY) || '';
+	} catch {
+		return '';
+	}
+}
+
 // ── Core State ──────────────────────────────────────────────────
 
 /** Current thread state (null before Turn 0 init) */
@@ -193,6 +225,7 @@ export async function initGame(params: {
 	if (!_sessionId) {
 		console.error('[nyx] CRITICAL: No session_id in /init response!', Object.keys(result));
 	}
+	saveResumeToken(result.resume_token);   // durability: persist the resume handle
 	gameState.set(result.state);
 	proseHistory.set([result.prose]);
 	uiChoices.set(result.ui_choices || []);
@@ -210,6 +243,64 @@ export async function initGame(params: {
 	void loadPlates(result.state?.world_id);
 
 	return result;
+}
+
+// ── Durability: resume a persisted thread on boot (sub-slice 4) ──────
+
+/**
+ * Attempt to rehydrate a living (or dead) thread from the stored resume token.
+ *
+ * Returns true if a thread was restored (the game view should show), false if
+ * there is nothing to resume or it can no longer be restored (stay on title).
+ * SC-6/UP-4: a terminal thread resumes straight into the Death Rite — permanence
+ * is not undone by a refresh.
+ */
+export async function resumeGame(): Promise<boolean> {
+	const token = getStoredResumeToken();
+	if (!token) return false;
+
+	let res: Response;
+	try {
+		res = await fetch('/api/resume', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ resume_token: token }),
+		});
+	} catch {
+		return false; // network error — keep the token, retry next boot
+	}
+
+	if (res.status === 404 || res.status === 500) {
+		clearResumeToken(); // unrestorable (unknown / stale / corrupt) — start fresh
+		return false;
+	}
+	if (!res.ok) return false;
+
+	const result: TurnResult = await res.json();
+	if (!result.session_id) return false;
+
+	_sessionId = result.session_id;
+	saveResumeToken(result.resume_token);
+	gameState.set(result.state);
+	proseHistory.set(result.prose ? [result.prose] : []);
+	uiChoices.set(result.ui_choices || []);
+	deliberationTrace.set(result.state.recent_traces?.at(-1) ?? null);
+	repairWitness.set(null);
+
+	// SC-6/UP-4: rehydrate the death, don't swallow it.
+	if (result.terminal) {
+		isTerminal.set(true);
+		deathReason.set(result.death_reason || '');
+		epitaph.set(result.epitaph || '');
+		bookId.set(result.book_id || '');
+	}
+
+	flinchToken.set({ agent: 'none', intensity: 0, seq: 0 });
+	_prevDoomStage = null;
+	_flinchEmittedThisTurn = false;
+	void loadPlates(result.state?.world_id);
+	isInitialized.set(true);
+	return true;
 }
 
 // ── Turn 1+: Streaming Action Submission ─────────────────────────
@@ -458,6 +549,7 @@ export async function resetGame(): Promise<void> {
 		body: JSON.stringify({ action: '', session_id: _sessionId }),
 	});
 	_sessionId = '';
+	clearResumeToken();   // the life is over — don't resume it on next boot
 	gameState.set(null);
 	proseHistory.set([]);
 	streamingProse.set('');
