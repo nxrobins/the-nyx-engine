@@ -33,6 +33,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.agents.atropos import expresses_self_destruction
 from app.api.routes import router
 from app.core.config import settings
 from app.services.welfare import (
@@ -118,18 +119,42 @@ class TestDetectCrisis:
 # ---------------------------------------------------------------------------
 
 class TestSupersetInvariant:
-    def test_real_world_phrases_are_subset_of_death_keywords(self):
-        keywords = {k.lower() for k in settings.atropos_death_keywords}
-        for phrase in REAL_WORLD_ATROPOS_PHRASES:
-            assert phrase.lower() in keywords, (
-                f"{phrase!r} can cause a keyword-death but is not in "
-                f"REAL_WORLD_ATROPOS_PHRASES's source set — care would not fire"
-            )
+    """SAFE-C4, relaxed by Nigel's Vigil ruling (2026-07-05): the FICTION death
+    may be more conservative than the real-human crisis detector. What must still
+    hold for safety: (a) crisis breadth is unchanged — every real-world phrase
+    still routes to care; (b) genuine self-harm intent still BOTH-fires (care +
+    fiction death); (c) nothing the fiction kills for is silently hidden from care.
+    """
 
-    def test_every_real_world_death_phrase_also_routes_to_care(self):
-        # Any phrase that can sever the thread by keyword MUST raise a signal.
+    def test_every_real_world_death_phrase_still_routes_to_care(self):
+        # Crisis breadth is UNCHANGED by the fiction-side relaxation.
         for phrase in REAL_WORLD_ATROPOS_PHRASES:
             assert detect_crisis(f"so I {phrase}").flagged is True
+
+    def test_every_fiction_keyword_death_routes_to_care_or_is_mythic(self):
+        # Anything the fiction kills for by keyword must route to care, UNLESS it
+        # is a purely mythic framing no distressed human would type (the engine's
+        # own diction: "embrace the void", "surrender to death", "welcome oblivion").
+        _MYTHIC = {"surrender to death", "embrace the void", "welcome oblivion"}
+        for kw in settings.atropos_death_keywords:
+            if kw in _MYTHIC:
+                continue
+            assert detect_crisis(f"so I {kw}").flagged is True, (
+                f"{kw!r} keyword-deaths but does not route to care"
+            )
+
+    def test_genuine_leap_both_fires_care_and_fiction_death(self):
+        # "jump off a cliff" is real intent: it BOTH shows care AND kills.
+        act = "I climb up and jump off a cliff"
+        assert detect_crisis(act).flagged is True
+        assert expresses_self_destruction(act, settings.atropos_death_keywords) is True
+
+    def test_benign_leap_shows_care_but_does_not_kill(self):
+        # "jump off the cart" is play: care may over-fire (fail-safe), but the
+        # character does NOT die — the decoupling the ruling authorized.
+        act = "I jump off the cart and run"
+        assert detect_crisis(act).flagged is True   # welfare stays broad
+        assert expresses_self_destruction(act, settings.atropos_death_keywords) is False
 
 
 # ---------------------------------------------------------------------------
