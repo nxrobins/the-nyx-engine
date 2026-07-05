@@ -1,0 +1,67 @@
+name: CI
+
+# The determinism gradient, the hermetic suite, and the type-checked frontend
+# are only guarantees if a machine re-checks them on every change. This runs the
+# full backend pytest suite (hermetic, mock-mode, offline) plus the frontend unit
+# tests and svelte-check on every push to main and every pull request.
+#
+# New property/innocence suites land under backend/tests/ and are picked up by
+# `pytest` automatically — no edit to this file is needed when they arrive.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege: CI only needs to read the checked-out code.
+permissions:
+  contents: read
+
+# A newer push to the same ref supersedes an in-flight run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend — pytest (hermetic)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      # The autouse conftest fixture forces every agent into mock mode with zero
+      # latency, so this needs no API keys. First run may fetch the ChromaDB
+      # embedding model once (kernel-level RAG tests); cached thereafter.
+      - name: Run test suite
+        run: pytest -q
+
+  frontend:
+    name: Frontend — vitest + svelte-check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Unit tests
+        run: npm test
+      - name: Types + component check
+        run: npm run check
