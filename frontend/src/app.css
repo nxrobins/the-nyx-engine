@@ -225,6 +225,19 @@ hr.nyx-divider {
 	}
 }
 
+/* THE SEAL (the bow ruling): the authored consequence, appended by the engine
+   as a vignette's final line. Plain and firm — the click of the box shutting —
+   with breathing room after it: the seam before the next card. */
+.prose-nyx p.vignette-seal {
+	margin-top: 1.4em;
+	margin-bottom: 2.2em;
+	padding-top: 0.9em;
+	border-top: 1px solid color-mix(in srgb, var(--nyx-border) 55%, transparent);
+	font-style: normal;
+	letter-spacing: 0.02em;
+	color: var(--nyx-text);
+}
+
 /* The light loading register: three ink drops breathing in sequence — the
    vignette wait pleases the eye without proclaiming machinery. */
 .ink-breath {

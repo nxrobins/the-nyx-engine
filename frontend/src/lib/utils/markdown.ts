@@ -75,6 +75,14 @@ export function renderProse(raw: string): string {
 					let line = p.trim();
 					if (!line) return '';
 
+					// THE SEAL (the bow ruling): a '⁂ '-prefixed paragraph is the
+					// engine-appended authored consequence — the closed box's final
+					// line, rendered in its own quiet register with the seam before
+					// the next card. Marker detected before escaping (engine-authored);
+					// the content itself still escapes below.
+					const isSeal = line.startsWith('⁂ ');
+					if (isSeal) line = line.slice(2);
+
 					// Escape any stray HTML (safety)
 					line = line
 						.replace(/&/g, '&amp;')
@@ -90,7 +98,9 @@ export function renderProse(raw: string): string {
 					// Single newlines → <br>
 					line = line.replace(/\n/g, '<br>');
 
-					return `<p>${line}</p>`;
+					return isSeal
+						? `<p class="vignette-seal">⁂&nbsp;${line}</p>`
+						: `<p>${line}</p>`;
 				})
 				.filter(Boolean)
 				.join('');

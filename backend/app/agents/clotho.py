@@ -517,19 +517,27 @@ class Clotho(AgentBase):
 
     @staticmethod
     def _vignette_user_message(situation: str, chosen_label: str, scene_evolution: str) -> str:
+        # The bow ruling: the model writes the MIDDLE of a closed box — the act
+        # and the world's immediate response. The authored consequence (the
+        # seal) is appended by the ENGINE afterward, never model-written.
         return (
-            "Render this small scene. 2-3 SHORT paragraphs, under 150 words total. "
-            "Concrete, physical, present-tense pressure; no mysticism, no scene "
-            "break, no choices. End on the consequence.\n\n"
+            "Render the middle of this small, CLOSED scene: the act and the "
+            "world's immediate response. 1-2 SHORT paragraphs, under 110 words. "
+            "Concrete, physical, present-tense; no mysticism, no scene break, "
+            "no choices. Introduce NO new characters. Open NO new questions — "
+            "resolve only what the situation put in motion. Do NOT state the "
+            "aftermath or name the final consequence — the chronicle seals the "
+            "scene after you. End mid-breath, on the world reacting.\n\n"
             f"THE SITUATION (authored — keep its facts exactly):\n{situation}\n\n"
             f"WHAT THE PLAYER DOES: {chosen_label}\n"
-            f"WHAT FOLLOWS (authored — land this visibly): {scene_evolution or 'the moment settles.'}"
+            f"WHERE IT IS HEADED (context only — do NOT write this): "
+            f"{scene_evolution or 'the moment settles.'}"
         )
 
     @staticmethod
     def _vignette_template(situation: str, chosen_label: str, scene_evolution: str) -> str:
-        evolution = f" {scene_evolution}" if scene_evolution else ""
-        return f"You {chosen_label[0].lower()}{chosen_label[1:]}.{evolution}"
+        # Middle only — the kernel appends the authored seal.
+        return f"You {chosen_label[0].lower()}{chosen_label[1:]}."
 
     async def render_vignette_stream(
         self,

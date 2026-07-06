@@ -115,6 +115,16 @@ class Vignette(BaseModel):
             raise ValueError(
                 f"choice set spans {len(dominants)} vectors; needs ≥ {MIN_VECTOR_SPAN}"
             )
+        # The bow ruling: every choice MUST carry its authored seal — the
+        # engine appends scene_evolution as the scene's closing line, so a
+        # vignette without one can never audibly shut. No bow, no ship.
+        for c in self.choices:
+            if len(c.packet.scene_evolution.strip()) < EVOLUTION_MIN_CHARS:
+                raise ValueError(
+                    f"choice {c.label!r} has no seal: scene_evolution is required "
+                    f"(≥ {EVOLUTION_MIN_CHARS} chars) — a vignette must wrap with "
+                    f"a bow on top"
+                )
         # Every {slot} in the situation must be a declared cast slot.
         unbound = set(_SLOT_RE.findall(self.situation)) - set(self.cast_slots)
         if unbound:

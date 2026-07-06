@@ -53,6 +53,23 @@ describe('renderProse', () => {
 		);
 	});
 
+	it('renders the vignette seal register (the bow ruling)', () => {
+		// A `⁂ `-prefixed paragraph is the engine-appended authored consequence.
+		expect(renderProse(['the act lands', '⁂ The scale is watched now.'].join(String.fromCharCode(10, 10)))).toBe(
+			'<p>the act lands</p><p class="vignette-seal">⁂&nbsp;The scale is watched now.</p>'
+		);
+	});
+
+	it('escapes HTML inside a seal (the seal is authored, but escape anyway)', () => {
+		const out = renderProse('⁂ a <img src=x onerror=1> consequence');
+		expect(out).toContain('vignette-seal');
+		expect(out).not.toContain('<img');
+	});
+
+	it('a mid-paragraph asterism is NOT a seal', () => {
+		expect(renderProse('stars ⁂ within prose')).toBe('<p>stars ⁂ within prose</p>');
+	});
+
 	it('renders bold/italic and escapes stray HTML', () => {
 		expect(renderProse('**hit** then *fade*')).toBe(
 			'<p><strong>hit</strong> then <em>fade</em></p>'
