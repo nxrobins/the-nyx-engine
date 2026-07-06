@@ -50,7 +50,7 @@ class TestResolveReturnType:
     async def test_context_has_required_fields(self, kernel: NyxKernel):
         await _init(kernel)
         ctx = await kernel._resolve_turn("attack the beast")
-        assert ctx.turn >= 2
+        assert ctx.turn >= 1  # birth is turn 0; the first action is turn 1
         assert ctx.phase >= 1
         assert ctx.ui_mode in ("buttons", "open")
         assert ctx.action == "attack the beast"
@@ -175,8 +175,8 @@ class TestResolveEpochMachine:
     @pytest.mark.asyncio
     async def test_phase_2_turns_4_to_6(self, kernel: NyxKernel):
         await _init(kernel)
-        for _ in range(3):
-            await kernel._resolve_turn("look around")  # turns 2-4
+        for _ in range(4):
+            await kernel._resolve_turn("look around")  # turns 1-4 (birth is turn 0)
         # Turn 4 should be phase 2
         assert kernel.state.session.epoch_phase == 2
 

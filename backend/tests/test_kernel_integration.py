@@ -37,12 +37,17 @@ class TestKernelInitialize:
             gender="boy",
             first_memory="A light in the distance I could not reach.",
         )
-        assert result.turn_number == 1
+        # THE PULSE calibration: the life opens AT BIRTH — turn 0, age 0, a
+        # single authored continuation choice. Turn 1 (the HEARTH) follows the
+        # first breath.
+        assert result.turn_number == 0
         assert result.prose != ""
         assert result.state.session.player_name == "Achilles"
         assert result.state.session.player_gender == "boy"
         assert result.state.soul_ledger.hamartia == "Unformed"
-        assert result.state.session.turn_count == 1
+        assert result.state.session.turn_count == 0
+        assert result.state.session.player_age == 0
+        assert result.ui_choices == ["Draw your first breath."]
         assert result.state.session.epoch_phase == 1
         assert result.state.session.ui_mode == "buttons"
 
@@ -262,9 +267,10 @@ class TestKernelProcessTurn:
             gender="boy",
         )
         result = await kernel.process_turn("attack the beast")
-        assert result.turn_number == 2
+        # Birth is turn 0; the first action is turn 1 (the HEARTH, age 3).
+        assert result.turn_number == 1
         assert result.prose != ""
-        assert result.state.session.turn_count == 2
+        assert result.state.session.turn_count == 1
 
     @pytest.mark.asyncio
     async def test_vector_deltas_applied(self, kernel: NyxKernel):
@@ -300,8 +306,8 @@ class TestKernelProcessTurn:
             name="Hero",
             gender="boy",
         )
-        # Turns 2-3 are Phase 1
-        for _ in range(2):
+        # Birth is turn 0; actions run turns 1-3 = Phase 1
+        for _ in range(3):
             await kernel.process_turn("look around")
         assert kernel.state.session.epoch_phase == 1
 
@@ -334,7 +340,7 @@ class TestKernelProcessTurn:
         for i in range(5):
             await kernel.process_turn(f"look around turn {i}")
 
-        assert kernel.state.session.turn_count == 6  # 1 (init) + 5
+        assert kernel.state.session.turn_count == 5  # 0 (birth) + 5
 
     @pytest.mark.asyncio
     async def test_prose_history_grows(self, kernel: NyxKernel):

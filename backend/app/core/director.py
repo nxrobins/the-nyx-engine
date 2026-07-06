@@ -96,7 +96,8 @@ def record_beat(session: SessionData, kind: str) -> bool:
 # breaks, time skips, names, dialogue, immediate consequence.
 _POSITION_SKELETONS: dict[str, str] = {
     "SETUP": (
-        "NEW SCENE. Time has passed since the last scene — days or weeks. "
+        "NEW SCENE. Time has passed since the last chapter — a season, "
+        "perhaps more; the character is a year older. "
         "Establish where the player now is through one specific physical "
         "activity ALREADY IN PROGRESS. Use NAMES from the canon and factual "
         "record. End the scene by introducing the pressure named below as "

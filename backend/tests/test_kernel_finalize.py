@@ -34,6 +34,9 @@ async def _init(kernel: NyxKernel) -> None:
         gender="boy",
         first_memory="A light in the distance I could not reach.",
     )
+    # THE PULSE calibration: birth is turn 0 — the breath is every life's
+    # first action, restoring this file's original turn frame (init -> turn 1).
+    await kernel.process_turn("Draw your first breath.")
 
 
 async def _get_ctx(kernel: NyxKernel, action: str = "look around") -> TurnContext:
@@ -155,7 +158,7 @@ class TestFinalizeStateCommit:
         ctx = await _get_ctx(kernel)
         result = await kernel._finalize_turn(ctx, "Final prose.", [])
         # kernel.state should reflect the finalized state
-        assert kernel.state.session.turn_count >= 2
+        assert kernel.state.session.turn_count >= 1  # birth is turn 0
         assert "Final prose." in kernel.state.prose_history
 
 

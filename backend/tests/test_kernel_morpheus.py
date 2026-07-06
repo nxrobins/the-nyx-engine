@@ -35,6 +35,9 @@ async def _init(kernel: NyxKernel) -> None:
         gender="girl",
         first_memory="The weight of a heavy stone in my hand.",  # Ashfall: Maren, Kael
     )
+    # THE PULSE calibration: birth is turn 0 — the breath is every life's
+    # first action, restoring this file's original turn frame (init -> turn 1).
+    await kernel.process_turn("Draw your first breath.")
 
 
 async def _play_to_boundary(kernel: NyxKernel) -> None:

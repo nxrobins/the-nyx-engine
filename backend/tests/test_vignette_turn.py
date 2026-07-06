@@ -181,7 +181,11 @@ class TestVignetteStream:
         frames = [f async for f in kernel.process_turn_stream("Demand a true weigh")]
         payloads = [json.loads(f[len("data: "):]) for f in frames if f.startswith("data: ")]
         kinds = [p.get("type") for p in payloads]
-        assert kinds == ["mechanic", "prose", "state"]
+        # Calibration: vignette prose now STREAMS — mechanic, then 1+ prose
+        # token frames, then exactly one closing state frame.
+        assert kinds[0] == "mechanic"
+        assert kinds[-1] == "state"
+        assert len(kinds) >= 3 and all(k == "prose" for k in kinds[1:-1])
         mech = payloads[0]["payload"]
         assert mech["outcome"] == "vignette" and mech["valid"] is True
-        assert payloads[2]["terminal"] is False
+        assert payloads[-1]["terminal"] is False

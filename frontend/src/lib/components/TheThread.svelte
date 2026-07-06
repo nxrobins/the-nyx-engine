@@ -121,12 +121,22 @@
 				</div>
 			{/if}
 
-			<!-- Diegetic loading state (processing, before any streaming arrives) -->
+			<!-- Diegetic loading state (processing, before any streaming arrives).
+			     THE PULSE calibration: a button beat (vignette / childhood) gets
+			     the LIGHT register — a small ink-breath, no proclamation — so the
+			     wait pleases the eye instead of announcing machinery. The full
+			     weaving treatment stays for console beats (the council convenes). -->
 			{#if $isProcessing && !$streamingProse}
-				<div class="flex flex-col items-center justify-center fade-in">
-					<div class="weaving-thread"></div>
-					<p class="weaving-text">The Fates are weaving...</p>
-				</div>
+				{#if $gameState?.session?.ui_mode === 'buttons'}
+					<div class="flex items-center justify-center fade-in" aria-hidden="true">
+						<div class="ink-breath"><span></span><span></span><span></span></div>
+					</div>
+				{:else}
+					<div class="flex flex-col items-center justify-center fade-in">
+						<div class="weaving-thread"></div>
+						<p class="weaving-text">The Fates are weaving...</p>
+					</div>
+				{/if}
 			{/if}
 
 			<!-- Streaming prose (typewriter effect during Clotho Phase 2).
