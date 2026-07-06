@@ -166,6 +166,65 @@ hr.nyx-divider {
 	margin: 1.5em 0;
 }
 
+/* ── THE PULSE: the two speeds, felt before read ───────────────────
+   Phase 1 ruling: flow is presentation too. A VIGNETTE breathes —
+   smaller, airier, unhurried. A CRUCIBLE bears down — denser lines,
+   tighter tracking, the full weight of the Fates. The dream keeps its
+   own register (.hypnos-text). Default register = crucible. */
+
+.thread-beat-vignette .prose-nyx {
+	font-size: 1.0625rem;
+	line-height: 2.05;
+	letter-spacing: 0.015em;
+}
+
+.thread-beat-vignette .prose-nyx p {
+	margin-bottom: 1.2em;
+}
+
+.thread-beat-crucible .prose-nyx {
+	line-height: 1.75;
+	letter-spacing: 0.005em;
+}
+
+.thread-beat-crucible .prose-nyx p {
+	margin-bottom: 0.7em;
+}
+
+/* The Fates lean in: the crucible console carries a faint gold pressure. */
+.fates-lean-in {
+	position: relative;
+}
+
+.fates-lean-in::before {
+	content: '';
+	position: absolute;
+	top: 0;
+	left: 15%;
+	right: 15%;
+	height: 1px;
+	background: linear-gradient(
+		90deg,
+		transparent,
+		var(--nyx-oracle-gold, #d4af37),
+		transparent
+	);
+	opacity: 0;
+	animation: fates-lean-in-breathe 4s ease-in-out infinite;
+}
+
+@keyframes fates-lean-in-breathe {
+	0%, 100% { opacity: 0.15; }
+	50% { opacity: 0.45; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.fates-lean-in::before {
+		animation: none;
+		opacity: 0.3;
+	}
+}
+
 /* ── Hypnos Pulse ─────────────────────────────────────────────── */
 
 .hypnos-text {

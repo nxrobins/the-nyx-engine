@@ -4,11 +4,19 @@
   Minimal, borderless, sumi-e aesthetic.
 -->
 <script lang="ts">
-	import { submitAction, isProcessing } from '$lib/stores/engine';
+	import { submitAction, isProcessing, gameState } from '$lib/stores/engine';
 
 	let inputText = $state('');
 	let inputEl = $state<HTMLInputElement | null>(null);
 	let error = $state('');
+
+	// THE PULSE: in adulthood the console opens only at crucibles — the full
+	// council is awake. The cue is felt, not announced (Phase 1 ruling: flow
+	// is presentation too).
+	const fatesLeanIn = $derived(
+		$gameState?.session?.epoch_phase === 4 &&
+		$gameState?.session?.beat_kind === 'crucible'
+	);
 
 	async function handleSubmit(e?: Event) {
 		e?.preventDefault();
@@ -36,14 +44,18 @@
 </script>
 
 <!-- Terminal state is owned by the Death Rite overlay, not the console. -->
-<div class="relative z-10 px-8 py-4">
+<div class="relative z-10 px-8 py-4" class:fates-lean-in={fatesLeanIn}>
 	<form onsubmit={handleSubmit} class="flex gap-3 items-center">
 			<input
 				bind:this={inputEl}
 				bind:value={inputText}
 				onkeydown={handleKeydown}
 				disabled={$isProcessing}
-				placeholder={$isProcessing ? 'The Fates deliberate...' : 'What do you do?'}
+				placeholder={$isProcessing
+					? 'The Fates deliberate...'
+					: fatesLeanIn
+						? 'The Fates lean in. What do you do?'
+						: 'What do you do?'}
 				class="flex-1 bg-transparent border-b border-[var(--nyx-border)] px-2 py-2
 					text-[var(--nyx-text)] placeholder:text-[var(--nyx-text-dim)]/50
 					focus:outline-none focus-visible:border-[var(--nyx-oracle-gold)]
