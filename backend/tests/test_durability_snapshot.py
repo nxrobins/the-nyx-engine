@@ -111,7 +111,7 @@ async def test_kernel_snapshots_each_committed_turn(tmp_path, monkeypatch):
         assert k._resume_token  # minted at birth
 
         snap = await db.load_snapshot(k._resume_token)
-        assert snap is not None and snap["turn_count"] == 1  # born, snapshotted
+        assert snap is not None and snap["turn_count"] == 0  # born (turn 0), snapshotted
 
         await k.process_turn("I haul the ore up the ladder")
         snap2 = await db.load_snapshot(k._resume_token)

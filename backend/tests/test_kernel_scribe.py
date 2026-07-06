@@ -27,6 +27,9 @@ async def _init(kernel: NyxKernel, hamartia: str = "Wrath of the Untempered") ->
         gender="boy",
         first_memory="The weight of a heavy stone in my hand.",  # Ashfall
     )
+    # THE PULSE calibration: birth is turn 0 — the breath is every life's
+    # first action, restoring this file's original turn frame (init -> turn 1).
+    await kernel.process_turn("Draw your first breath.")
 
 
 class TestLifeVoice:

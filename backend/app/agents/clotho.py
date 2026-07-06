@@ -515,6 +515,53 @@ class Clotho(AgentBase):
                 ui_choices=choices,
             )
 
+    @staticmethod
+    def _vignette_user_message(situation: str, chosen_label: str, scene_evolution: str) -> str:
+        return (
+            "Render this small scene. 2-3 SHORT paragraphs, under 150 words total. "
+            "Concrete, physical, present-tense pressure; no mysticism, no scene "
+            "break, no choices. End on the consequence.\n\n"
+            f"THE SITUATION (authored — keep its facts exactly):\n{situation}\n\n"
+            f"WHAT THE PLAYER DOES: {chosen_label}\n"
+            f"WHAT FOLLOWS (authored — land this visibly): {scene_evolution or 'the moment settles.'}"
+        )
+
+    @staticmethod
+    def _vignette_template(situation: str, chosen_label: str, scene_evolution: str) -> str:
+        evolution = f" {scene_evolution}" if scene_evolution else ""
+        return f"You {chosen_label[0].lower()}{chosen_label[1:]}.{evolution}"
+
+    async def render_vignette_stream(
+        self,
+        state: ThreadState,
+        situation: str,
+        chosen_label: str,
+        scene_evolution: str,
+    ) -> "AsyncGenerator[str, None]":
+        """THE PULSE calibration: stream the cheap beat's prose token-by-token,
+        so the first words land at first-token latency instead of after the
+        whole generation — the flow fix from Nigel's playtest. Same authored
+        inputs, same bound (max_tokens=320, P1-C9), same template fallback.
+        """
+        model = settings.clotho_vignette_model
+        if model == "mock":
+            await mock_pause(0.2)
+            yield self._vignette_template(situation, chosen_label, scene_evolution)
+            return
+        try:
+            async for token in llm.stream(
+                model=model,
+                system_prompt=CLOTHO_SYSTEM_PROMPT,
+                user_message=self._vignette_user_message(situation, chosen_label, scene_evolution),
+                temperature=0.8,
+                max_tokens=320,
+            ):
+                yield token
+        except Exception as e:
+            note_degraded("clotho", model, e)
+            logger.error(f"Vignette stream failed: {e}. Falling back to template.")
+            yield self._vignette_template(situation, chosen_label, scene_evolution)
+
     async def render_vignette(
         self,
         state: ThreadState,
@@ -534,31 +581,21 @@ class Clotho(AgentBase):
 
         if model == "mock":
             await mock_pause(0.2)
-            evolution = f" {scene_evolution}" if scene_evolution else ""
-            return f"{situation}\n\nYou {chosen_label[0].lower()}{chosen_label[1:]}.{evolution}"
+            return self._vignette_template(situation, chosen_label, scene_evolution)
 
-        user_message = (
-            "Render this small scene. 2-3 SHORT paragraphs, under 150 words total. "
-            "Concrete, physical, present-tense pressure; no mysticism, no scene "
-            "break, no choices. End on the consequence.\n\n"
-            f"THE SITUATION (authored — keep its facts exactly):\n{situation}\n\n"
-            f"WHAT THE PLAYER DOES: {chosen_label}\n"
-            f"WHAT FOLLOWS (authored — land this visibly): {scene_evolution or 'the moment settles.'}"
-        )
         try:
             raw = await llm.generate(
                 model=model,
                 system_prompt=CLOTHO_SYSTEM_PROMPT,
-                user_message=user_message,
+                user_message=self._vignette_user_message(situation, chosen_label, scene_evolution),
                 temperature=0.8,
                 max_tokens=320,   # P1-C9: the physical length bound
             )
-            return raw.strip() or f"{situation}\n\nYou {chosen_label[0].lower()}{chosen_label[1:]}."
+            return raw.strip() or self._vignette_template(situation, chosen_label, scene_evolution)
         except Exception as e:
             note_degraded("clotho", model, e)
             logger.error(f"Vignette prose failed: {e}. Falling back to template.")
-            evolution = f" {scene_evolution}" if scene_evolution else ""
-            return f"{situation}\n\nYou {chosen_label[0].lower()}{chosen_label[1:]}.{evolution}"
+            return self._vignette_template(situation, chosen_label, scene_evolution)
 
     async def astream(
         self, state: ThreadState, action: str,

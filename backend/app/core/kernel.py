@@ -138,10 +138,13 @@ logger = logging.getLogger("nyx.kernel")
 # ---------------------------------------------------------------------------
 
 # Age map: deterministic age per turn (childhood = turns 1-9)
+# THE PULSE calibration (Nigel's playtest ruling): age NEVER changes within a
+# chapter — only between them, at the dream. Each childhood epoch is a chapter,
+# so its age holds constant; the jump happens across the epoch boundary.
 _AGE_MAP: dict[int, int] = {
-    1: 3, 2: 4, 3: 5,      # Epoch 1: toddler → early child
-    4: 7, 5: 8, 6: 10,     # Epoch 2: school age
-    7: 12, 8: 14, 9: 17,   # Epoch 3: adolescence
+    1: 3, 2: 3, 3: 3,      # Epoch 1: THE HEARTH — early childhood
+    4: 7, 5: 7, 6: 7,      # Epoch 2: THE WORLD OUTSIDE — school age
+    7: 12, 8: 12, 9: 12,   # Epoch 3: THE CRUCIBLE — adolescence
 }
 
 # Authored beat directives — one per turn, keyed by turn number.
@@ -159,8 +162,8 @@ _TURN_BEATS: dict[int, tuple[str, str]] = {
         "something breaking."),
 
     2: ("COMPLICATION",
-        "NEW SCENE. Time has passed since the last scene. The child is "
-        "slightly older within this epoch. The disruption from the previous "
+        "NEW SCENE. Days have passed since the last scene — the child is the "
+        "same age; the season has barely moved. The disruption from the previous "
         "scene has consequences that are now visible. A NEW character enters "
         "the child's world (a neighbor, a stranger, another child). This "
         "person brings a problem or a revelation. Use NAMES. Reference "
@@ -705,32 +708,39 @@ class NyxKernel:
         logger.info(f"Prophecy: '{self.state.the_loom.current_prophecy}'")
 
         # -----------------------------------------------------------
-        # Force Turn 1: Clotho generates the actual birth scene
+        # Turn 0: BIRTH — the life opens at the coming-into-the-world
+        # (Nigel's ruling: the birth chapter is a single vignette-length
+        # beat). Age 0; one authored continuation choice; the first
+        # player action then lands on turn 1's HEARTH beat at age 3 —
+        # the time skip is the first chapter boundary.
         # -----------------------------------------------------------
-        self.state.session.turn_count = 1
-        phase, age, ui_mode, beat_position, _directive = _get_turn_metadata(1)
-        self.state.session.epoch_phase = phase
-        self.state.session.ui_mode = ui_mode
-        self.state.session.player_age = age
-        self.state.session.beat_position = beat_position
+        self.state.session.turn_count = 0
+        self.state.session.epoch_phase = 1
+        self.state.session.ui_mode = "buttons"
+        self.state.session.player_age = 0
+        self.state.session.beat_position = "BIRTH"
+        self.state.session.beat_kind = "vignette"   # the airy register
 
         # Tag state so Clotho (mock or real) knows this is a birth scene
         self.state.last_outcome = "birth"
 
         # Build the birth prompt for Clotho — grounded in world seed
         birth_prompt = (
-            f"This is the opening scene of a life. The player is {name}, "
-            f"a {gender}, age 3.\n\n"
+            f"This is the very first moment of a life: the birth itself. "
+            f"{name}, a {gender}, is being born — right now.\n\n"
             f"{world_context}\n\n"
-            f"The player's earliest memory is: '{first_memory}'.\n\n"
-            f"Write a scene that is ALREADY IN PROGRESS. The child is in the "
-            f"middle of a specific, mundane moment — a meal, a chore, watching "
-            f"their parent work, playing in the dirt. Use the family members "
-            f"BY NAME. Show the settlement through the child's eyes. The "
-            f"'active situation' should be background pressure that the child "
-            f"senses but doesn't understand.\n\n"
-            f"Do NOT begin with waking up. Do NOT begin with a mystical vision. "
-            f"Do NOT begin with a ceremony. Begin in the middle of ordinary life."
+            f"Write the coming-into-the-world in 2-3 SHORT paragraphs, from "
+            f"the newborn's edge of sense: first cold, first light, the "
+            f"mother's voice before the mother's face, the room's smells, the "
+            f"settlement heard but not yet seen. Use the family members BY "
+            f"NAME where a newborn would feel them (hands, voices, warmth). "
+            f"The 'active situation' may shade the adults' voices — worry the "
+            f"child cannot parse.\n\n"
+            f"One thread of strangeness is allowed: somewhere beneath it, the "
+            f"first memory that will one day surface — '{first_memory}' — is "
+            f"already waiting. Do not name it. Do NOT be mystical about the "
+            f"world itself: mud, wood, blood, and stone.\n\n"
+            f"End on the first breath not yet taken."
         )
 
         if legacy_echo is not None:
@@ -747,16 +757,16 @@ class NyxKernel:
         clotho_result = await self.clotho.evaluate(
             self.state,
             action=birth_prompt,
-            epoch_phase=phase,
+            epoch_phase=1,
         )
 
         # Seed prose history with the birth scene
         self.state.prose_history.append(clotho_result.prose)
 
-        # Persist Turn 1 to DB
+        # Persist Turn 0 (the birth) to DB
         await create_turn(
             thread_id=self._thread_id,
-            turn_number=1,
+            turn_number=0,
             action=birth_prompt,
             outcome="birth",
             prose_summary=clotho_result.prose[:200],
@@ -764,15 +774,18 @@ class NyxKernel:
         )
 
         # Durability: mint the resume handle and snapshot the newborn thread, so a
-        # resume works from turn 1 onward.
+        # resume works from the first breath onward.
         self._resume_token = mint_resume_token()
         await self._snapshot_now()
 
         return TurnResult(
             prose=clotho_result.prose,
             state=self.state,
-            turn_number=1,
-            ui_choices=clotho_result.ui_choices,
+            turn_number=0,
+            # The birth's single, authored continuation — a newborn chooses
+            # nothing else. Clicking it lands on turn 1 (the HEARTH, age 3):
+            # the first chapter boundary is the time skip itself.
+            ui_choices=["Draw your first breath."],
         )
 
     # ------------------------------------------------------------------
@@ -1648,10 +1661,10 @@ class NyxKernel:
         session.ui_mode = "open"
         return "", []
 
-    async def _vignette_turn_core(self, action: str) -> tuple[TurnResult, dict]:
-        """The cheap beat: apply the authored packet, render short prose,
-        finalize-lite (P1-C8) — no council, no Momus, no lethal machinery
-        (P1-C4). The packet IS the consequence; everything is receipted."""
+    def _vignette_apply(self, action: str) -> tuple["BoundVignette", dict, int]:
+        """The cheap beat's consequence: advance the turn, apply the authored
+        packet, land the receipt in the trace. No council, no Momus, no lethal
+        machinery (P1-C4). Deterministic; prose comes after."""
         state = self.state
         session = state.session
         bound = state.pending_vignette
@@ -1671,13 +1684,17 @@ class NyxKernel:
         )
         state.recent_traces.append(trace)
         state.recent_traces = state.recent_traces[-8:]
+        return bound, receipt, turn
 
-        prose = await self.clotho.render_vignette(
-            state, bound.situation, action, receipt.get("scene_evolution", ""),
-        )
+    async def _vignette_finalize(
+        self, bound: "BoundVignette", action: str, prose: str, turn: int,
+    ) -> TurnResult:
+        """finalize-lite (P1-C8): prose + chronicler + RAG + DB + snapshot +
+        milestone FLAG (image deferred to the next crucible — AG-1) + beat
+        bookkeeping + arming the next beat."""
+        state = self.state
+        session = state.session
 
-        # ── finalize-lite (P1-C8): prose + chronicler + RAG + DB + snapshot +
-        # milestone FLAG (image deferred to the next crucible — AG-1) ──
         state.last_action = action
         state.last_outcome = "vignette"
         state.used_vignette_ids.append(bound.vignette_id)
@@ -1711,9 +1728,17 @@ class NyxKernel:
         await self._snapshot_now()
 
         prose_out = prose + (f"\n\n{next_situation}" if next_situation else "")
-        result = TurnResult(
+        return TurnResult(
             prose=prose_out, state=state, turn_number=turn, ui_choices=labels,
         )
+
+    async def _vignette_turn_core(self, action: str) -> tuple[TurnResult, dict]:
+        """Sync vignette turn: apply → render (non-streamed) → finalize-lite."""
+        bound, receipt, turn = self._vignette_apply(action)
+        prose = await self.clotho.render_vignette(
+            self.state, bound.situation, action, receipt.get("scene_evolution", ""),
+        )
+        result = await self._vignette_finalize(bound, action, prose, turn)
         return result, receipt
 
     def _maybe_start_dream_task(self, ctx: TurnContext) -> asyncio.Task | None:
@@ -2229,10 +2254,12 @@ class NyxKernel:
             return
 
         # THE PULSE: a pending vignette's own button resolves on the cheap path —
-        # same three-frame protocol, no council. A non-button input escalates.
+        # same frame protocol, no council. Prose STREAMS token-by-token (the
+        # playtest flow fix: first words at first-token latency). A non-button
+        # input escalates to the full council.
         if self.state.pending_vignette is not None:
             if self._matches_pending_vignette(action):
-                result, receipt = await self._vignette_turn_core(action)
+                bound, receipt, turn = self._vignette_apply(action)
                 yield "data: " + json.dumps({
                     "type": "mechanic",
                     "payload": {
@@ -2244,9 +2271,25 @@ class NyxKernel:
                         "valid": True,
                     },
                 }) + "\n\n"
-                yield "data: " + json.dumps({
-                    "type": "prose", "text": result.prose,
-                }) + "\n\n"
+                prose_buffer = ""
+                async for token in self.clotho.render_vignette_stream(
+                    self.state, bound.situation, action,
+                    receipt.get("scene_evolution", ""),
+                ):
+                    prose_buffer += token
+                    yield "data: " + json.dumps({
+                        "type": "prose", "text": token,
+                    }) + "\n\n"
+                prose = prose_buffer.strip() or Clotho._vignette_template(
+                    bound.situation, action, receipt.get("scene_evolution", ""),
+                )
+                result = await self._vignette_finalize(bound, action, prose, turn)
+                # The next beat's authored situation, presented after the beat.
+                if self.state.pending_vignette is not None:
+                    yield "data: " + json.dumps({
+                        "type": "prose",
+                        "text": f"\n\n{self.state.pending_vignette.situation}",
+                    }) + "\n\n"
                 yield "data: " + json.dumps({
                     "type": "state",
                     "payload": client_safe_state(result.state).model_dump(),

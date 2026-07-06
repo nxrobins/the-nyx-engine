@@ -44,43 +44,24 @@ class TestPhaseMapping:
 
 
 class TestAgePinning:
-    """Deterministic age per turn — no drift within epochs."""
+    """Deterministic age per turn. THE PULSE calibration (Nigel's playtest
+    ruling): age NEVER changes within a chapter — each childhood epoch holds
+    one age; the jump happens only across the boundary (at the dream)."""
 
-    def test_turn_1_age_3(self):
-        _, age, *_ = _get_turn_metadata(1)
-        assert age == 3
+    def test_epoch_1_holds_age_3(self):
+        for turn in (1, 2, 3):
+            _, age, *_ = _get_turn_metadata(turn)
+            assert age == 3, f"turn {turn}"
 
-    def test_turn_2_age_4(self):
-        _, age, *_ = _get_turn_metadata(2)
-        assert age == 4
+    def test_epoch_2_holds_age_7(self):
+        for turn in (4, 5, 6):
+            _, age, *_ = _get_turn_metadata(turn)
+            assert age == 7, f"turn {turn}"
 
-    def test_turn_3_age_5(self):
-        _, age, *_ = _get_turn_metadata(3)
-        assert age == 5
-
-    def test_turn_4_age_7(self):
-        _, age, *_ = _get_turn_metadata(4)
-        assert age == 7
-
-    def test_turn_5_age_8(self):
-        _, age, *_ = _get_turn_metadata(5)
-        assert age == 8
-
-    def test_turn_6_age_10(self):
-        _, age, *_ = _get_turn_metadata(6)
-        assert age == 10
-
-    def test_turn_7_age_12(self):
-        _, age, *_ = _get_turn_metadata(7)
-        assert age == 12
-
-    def test_turn_8_age_14(self):
-        _, age, *_ = _get_turn_metadata(8)
-        assert age == 14
-
-    def test_turn_9_age_17(self):
-        _, age, *_ = _get_turn_metadata(9)
-        assert age == 17
+    def test_epoch_3_holds_age_12(self):
+        for turn in (7, 8, 9):
+            _, age, *_ = _get_turn_metadata(turn)
+            assert age == 12, f"turn {turn}"
 
     def test_turn_10_age_18(self):
         _, age, *_ = _get_turn_metadata(10)
@@ -262,24 +243,24 @@ class TestBoundaryTransitions:
         assert m10 == "open"
 
     def test_age_jump_epoch_1_to_2(self):
-        """Age 5 → 7: two years pass between epochs."""
+        """Age 3 → 7: the years pass BETWEEN chapters, at the dream."""
         _, a3, *_ = _get_turn_metadata(3)
         _, a4, *_ = _get_turn_metadata(4)
-        assert a3 == 5
+        assert a3 == 3
         assert a4 == 7
 
     def test_age_jump_epoch_2_to_3(self):
-        """Age 10 → 12: two years pass between epochs."""
+        """Age 7 → 12: the jump lives only at the boundary."""
         _, a6, *_ = _get_turn_metadata(6)
         _, a7, *_ = _get_turn_metadata(7)
-        assert a6 == 10
+        assert a6 == 7
         assert a7 == 12
 
     def test_age_jump_epoch_3_to_4(self):
-        """Age 17 → 18: one year pass into adulthood."""
+        """Age 12 → 18: adolescence ends at the Fork."""
         _, a9, *_ = _get_turn_metadata(9)
         _, a10, *_ = _get_turn_metadata(10)
-        assert a9 == 17
+        assert a9 == 12
         assert a10 == 18
 
 

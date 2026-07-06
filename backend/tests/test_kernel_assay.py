@@ -27,6 +27,9 @@ async def _init(kernel: NyxKernel, player_id: str = "assay_test") -> None:
         gender="boy",
         first_memory="The weight of a heavy stone in my hand.",
     )
+    # THE PULSE calibration: birth is turn 0 — the breath is every life's
+    # first action, restoring this file's original turn frame (init -> turn 1).
+    await kernel.process_turn("Draw your first breath.")
 
 
 class TestDeathWritesVerdict:

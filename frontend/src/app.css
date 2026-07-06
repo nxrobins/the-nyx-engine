@@ -225,6 +225,43 @@ hr.nyx-divider {
 	}
 }
 
+/* The light loading register: three ink drops breathing in sequence — the
+   vignette wait pleases the eye without proclaiming machinery. */
+.ink-breath {
+	display: flex;
+	gap: 0.5rem;
+	padding: 1.5rem 0;
+}
+
+.ink-breath span {
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	background: var(--nyx-text-dim);
+	opacity: 0.2;
+	animation: ink-breath 2.1s ease-in-out infinite;
+}
+
+.ink-breath span:nth-child(2) {
+	animation-delay: 0.35s;
+}
+
+.ink-breath span:nth-child(3) {
+	animation-delay: 0.7s;
+}
+
+@keyframes ink-breath {
+	0%, 100% { opacity: 0.15; transform: scale(0.85); }
+	50% { opacity: 0.7; transform: scale(1.2); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.ink-breath span {
+		animation: none;
+		opacity: 0.4;
+	}
+}
+
 /* ── Hypnos Pulse ─────────────────────────────────────────────── */
 
 .hypnos-text {
