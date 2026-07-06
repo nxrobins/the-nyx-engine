@@ -1732,12 +1732,21 @@ class NyxKernel:
             prose=prose_out, state=state, turn_number=turn, ui_choices=labels,
         )
 
+    @staticmethod
+    def _seal_line(scene_evolution: str) -> str:
+        """The bow (Nigel's closure ruling): the authored consequence, appended
+        VERBATIM by the engine as the scene's final line — the model writes the
+        middle, the math writes the ending. The `⁂ ` marker is the in-band cue
+        the frontend styles as the seal register + the seam before the next card."""
+        return f"\n\n⁂ {scene_evolution}" if scene_evolution.strip() else ""
+
     async def _vignette_turn_core(self, action: str) -> tuple[TurnResult, dict]:
-        """Sync vignette turn: apply → render (non-streamed) → finalize-lite."""
+        """Sync vignette turn: apply → render (non-streamed) → seal → finalize."""
         bound, receipt, turn = self._vignette_apply(action)
         prose = await self.clotho.render_vignette(
             self.state, bound.situation, action, receipt.get("scene_evolution", ""),
         )
+        prose += self._seal_line(receipt.get("scene_evolution", ""))
         result = await self._vignette_finalize(bound, action, prose, turn)
         return result, receipt
 
@@ -2283,8 +2292,16 @@ class NyxKernel:
                 prose = prose_buffer.strip() or Clotho._vignette_template(
                     bound.situation, action, receipt.get("scene_evolution", ""),
                 )
+                # The bow: the authored seal lands as its own closing frame —
+                # the box audibly shuts before the next card arrives.
+                seal = self._seal_line(receipt.get("scene_evolution", ""))
+                if seal:
+                    prose += seal
+                    yield "data: " + json.dumps({
+                        "type": "prose", "text": seal,
+                    }) + "\n\n"
                 result = await self._vignette_finalize(bound, action, prose, turn)
-                # The next beat's authored situation, presented after the beat.
+                # The next beat's authored situation, presented after the seam.
                 if self.state.pending_vignette is not None:
                     yield "data: " + json.dumps({
                         "type": "prose",

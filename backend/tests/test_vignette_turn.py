@@ -172,6 +172,45 @@ class TestChapterFlow:
         ]
 
 
+class TestTheSeal:
+    """The bow ruling: the engine appends the authored consequence as the
+    scene's final line — the model writes the middle, the math writes the
+    ending. The box audibly shuts."""
+
+    @pytest.mark.asyncio
+    async def test_sync_scene_ends_on_the_authored_seal(self, kernel):
+        await _adult_kernel(kernel)
+        _arm(kernel, evolution="The scale is watched now.")
+        result = await kernel.process_turn("Demand a true weigh")
+        assert "⁂ The scale is watched now." in result.prose
+        # The committed scene's last line IS the seal.
+        assert kernel.state.prose_history[-1].rstrip().endswith(
+            "⁂ The scale is watched now."
+        )
+
+    @pytest.mark.asyncio
+    async def test_stream_emits_the_seal_as_its_own_frame(self, kernel):
+        await _adult_kernel(kernel)
+        _arm(kernel, evolution="The scale is watched now.")
+        frames = [f async for f in kernel.process_turn_stream("Demand a true weigh")]
+        payloads = [json.loads(f[len("data: "):]) for f in frames if f.startswith("data: ")]
+        prose_texts = [p["text"] for p in payloads if p.get("type") == "prose"]
+        seal_frames = [t for t in prose_texts if t.strip().startswith("⁂ ")]
+        assert len(seal_frames) == 1
+        assert seal_frames[0].strip() == "⁂ The scale is watched now."
+
+    @pytest.mark.asyncio
+    async def test_exactly_one_seal_per_scene(self, kernel):
+        """The mock middle carries no consequence text — only the engine
+        appends it; exactly ONE seal exists in the committed scene."""
+        await _adult_kernel(kernel)
+        _arm(kernel, evolution="The scale is watched now.")
+        await kernel.process_turn("Demand a true weigh")
+        committed = kernel.state.prose_history[-1]
+        assert committed.count("The scale is watched now.") == 1
+        assert committed.count("⁂") == 1
+
+
 class TestVignetteStream:
     @pytest.mark.asyncio
     async def test_stream_emits_three_frames_and_no_council(self, kernel):

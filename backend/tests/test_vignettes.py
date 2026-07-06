@@ -25,7 +25,10 @@ from app.services.vignettes import select_vignette
 def _ok_choice(vec: str, mag: float = 0.5) -> VignetteChoice:
     return VignetteChoice(
         label=f"Do the {vec} thing",
-        packet=ConsequencePacket(vector_deltas={vec: mag}),
+        packet=ConsequencePacket(
+            vector_deltas={vec: mag},
+            scene_evolution=f"The {vec} choice leaves its mark on the room.",
+        ),
     )
 
 
@@ -87,6 +90,15 @@ class TestVignetteLint:
     def test_pool_rejects_duplicate_ids(self):
         with pytest.raises(ValidationError, match="duplicate"):
             VignettePool(world_id="test-world", vignettes=[_ok_vignette(), _ok_vignette()])
+
+    def test_bow_required_on_every_choice(self):
+        """The bow ruling: a choice without its authored seal cannot exist."""
+        sealless = VignetteChoice(
+            label="Do the thing quietly",
+            packet=ConsequencePacket(vector_deltas={"aidos": 0.5}),
+        )
+        with pytest.raises(ValidationError, match="no seal"):
+            _ok_vignette(choices=[_ok_choice("bia"), _ok_choice("metis"), sealless])
 
 
 class TestBuiltinPools:
