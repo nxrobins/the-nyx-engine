@@ -1719,11 +1719,21 @@ class NyxKernel:
     def _maybe_start_dream_task(self, ctx: TurnContext) -> asyncio.Task | None:
         """Start Hypnos weaving concurrently with prose generation.
 
-        Dreams fire on childhood RESOLUTION beats. Starting the task here
-        (instead of awaiting after finalize) hides the entire Haiku call
-        behind Clotho's much longer generation.
+        THE PULSE (P1-C10, Nigel's ruling): dreams are the TRANSITIONS between
+        chapters — one at every chapter close, never on a terminal beat. In
+        childhood a chapter closes at each epoch's RESOLUTION (bit-identical to
+        the old behavior); in adulthood every full-pipeline turn is a crucible,
+        and a crucible always closes its chapter. Vignette beats never dream
+        (they never close a chapter — and never call this). Starting the task
+        here hides the Haiku call behind Clotho's much longer generation.
         """
-        if ctx.terminal or ctx.beat_position != "RESOLUTION" or ctx.phase > 3:
+        if ctx.terminal:
+            return None
+        closes_chapter = (
+            ctx.phase == 4                        # adult crucible = chapter close
+            or ctx.beat_position == "RESOLUTION"  # childhood epoch end
+        )
+        if not closes_chapter:
             return None
         return asyncio.create_task(self.hypnos.weave_dream(ctx.outcome.state))
 
