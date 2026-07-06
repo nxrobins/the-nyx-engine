@@ -60,8 +60,12 @@ export interface SessionData {
 	current_environment: string;
 	epoch_phase: number;   // 1-4
 	ui_mode: string;       // "buttons" | "open"
-	player_age: number;    // deterministic age per turn
-	beat_position: string; // SETUP | COMPLICATION | RESOLUTION | OPEN
+	player_age: number;    // advances per CHAPTER close in adulthood (THE PULSE)
+	beat_position: string; // SETUP | COMPLICATION | RESOLUTION | OPEN | VIGNETTE
+	// THE PULSE: two-speed chapter bookkeeping (drives the beat registers).
+	chapter_index: number;
+	beats_spent: number;
+	beat_kind: string;     // "" | "vignette" | "crucible"
 }
 
 export interface CanonNPC {

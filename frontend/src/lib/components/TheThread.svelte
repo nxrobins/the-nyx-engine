@@ -102,8 +102,9 @@
 	<!-- Marginalia: present-NPC portraits (decorative, ≥1100px) -->
 	<Marginalia />
 
-	<!-- Scroll Area -->
-	<div class="flex-1 overflow-y-auto relative z-10">
+	<!-- Scroll Area. THE PULSE: the beat register — a vignette breathes, a
+	     crucible bears down — is carried by typography (flow is presentation). -->
+	<div class="flex-1 overflow-y-auto relative z-10 thread-beat-{$gameState?.session?.beat_kind || 'crucible'}">
 		<div class="thread-anchor-wrapper px-8 py-6">
 			<!-- Top spacer (pushes content to vertical center) -->
 			<div class="thread-anchor-spacer"></div>
