@@ -12,6 +12,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from app.schemas.morpheus import Promise
+from app.schemas.vignette import BoundVignette
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +345,10 @@ class ThreadState(BaseModel):
     # THE PULSE: vignettes this life has already lived — a life never replays
     # one (no-repeat; the kernel appends after commit). Round-trips (durability).
     used_vignette_ids: list[str] = Field(default_factory=list)
+    # THE PULSE: the vignette whose choices are on the player's screen right now
+    # (None in crucible/console mode). Stored, not recomputed, so a resumed
+    # thread re-presents exactly the buttons it left (durability).
+    pending_vignette: Optional["BoundVignette"] = None
     # Chronicler: rolling prose buffer + dual-track compressed chronicle
     prose_history: list[str] = Field(default_factory=list)       # last N raw prose turns
     chronicle: list[str] = Field(default_factory=list)           # mythic sentence per 5-turn window

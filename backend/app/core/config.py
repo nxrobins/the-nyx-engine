@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     # Agent model assignments (LiteLLM model strings)
     # Format: "provider/model" — LiteLLM routes automatically
     clotho_model: str = "anthropic/claude-sonnet-4-6"
+    # THE PULSE: the cheap-beat prose surface. Vignette prose is digestible and
+    # flow-first (Nigel's ruling) — haiku is the house tier for short literate
+    # prose (Hypnos/Chronicler). Hard length bound lives at the call (P1-C9).
+    clotho_vignette_model: str = "anthropic/claude-haiku-4-5-20251001"
     lachesis_model: str = "openai/mercury-2"
     nemesis_model: str = "openai/mercury-2"
     eris_model: str = "openai/mercury-2"

@@ -39,8 +39,8 @@ from app.schemas.state import (
 def _hermetic_settings(monkeypatch, tmp_path):
     """Force mock mode + zero simulated latency for every test."""
     for field in (
-        "clotho_model", "lachesis_model", "nemesis_model",
-        "eris_model", "hypnos_model", "chronicler_model",
+        "clotho_model", "clotho_vignette_model", "lachesis_model",
+        "nemesis_model", "eris_model", "hypnos_model", "chronicler_model",
         "morpheus_model", "scribe_model", "sophia_model",
     ):
         monkeypatch.setattr(settings, field, "mock")

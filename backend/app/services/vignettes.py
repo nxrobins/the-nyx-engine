@@ -72,3 +72,49 @@ def select_vignette(state: ThreadState, pool: VignettePool | None) -> BoundVigne
         choices=chosen.choices,
         cast_names=names,
     )
+
+
+def apply_packet(state: ThreadState, bound: BoundVignette, choice_label: str) -> dict:
+    """Apply a chosen vignette's typed consequence packet. Deterministic; the
+    ENTIRE consequence of a vignette beat (no council — P1-C4/C8).
+
+    Clamps mirror the schema caps (belt + braces, P1-C2): vectors [0,10] via the
+    SoulVectorEngine, pressures [0,10], bond via the field's own ±10 bound. The
+    scene evolution becomes the new immediate_problem — the stasis-killer. The
+    first cast NPC receives the bond delta.
+
+    Returns the receipt: what moved, by how much (lands in the trace slot).
+    """
+    from app.services.soul_math import SoulVectorEngine  # local: avoid cycles
+
+    choice = next((c for c in bound.choices if c.label == choice_label), None)
+    if choice is None:  # dispatch guarantees a match; defensive
+        raise ValueError(f"no choice {choice_label!r} on vignette {bound.vignette_id}")
+    packet = choice.packet
+    receipt: dict = {"vignette_id": bound.vignette_id, "choice": choice_label}
+
+    if packet.vector_deltas:
+        state.soul_ledger.vectors = SoulVectorEngine.apply_deltas(
+            state.soul_ledger.vectors, packet.vector_deltas
+        )
+        receipt["vector_deltas"] = dict(packet.vector_deltas)
+
+    if packet.pressure_deltas:
+        for key, delta in packet.pressure_deltas.items():
+            current = getattr(state.pressures, key)
+            setattr(state.pressures, key, max(0.0, min(10.0, current + delta)))
+        receipt["pressure_deltas"] = dict(packet.pressure_deltas)
+
+    if packet.bond_delta and bound.cast_names and state.canon:
+        first_name = next(iter(bound.cast_names.values()))
+        for npc in state.canon.npcs.values():
+            if npc.name == first_name and npc.status == "alive":
+                npc.bond = max(-10.0, min(10.0, npc.bond + packet.bond_delta))
+                receipt["bond"] = {npc.name: packet.bond_delta}
+                break
+
+    if packet.scene_evolution and state.canon and state.canon.current_scene:
+        state.canon.current_scene.immediate_problem = packet.scene_evolution
+        receipt["scene_evolution"] = packet.scene_evolution
+
+    return receipt
