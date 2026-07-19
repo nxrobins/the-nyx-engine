@@ -181,6 +181,65 @@ class TestVignetteAtomicity:
         assert kernel.state.pending_vignette is not None
 
     @pytest.mark.asyncio
+    async def test_finalize_stage_failure_still_reverts_the_packet(self, kernel, monkeypatch):
+        # The audit named 'finalize exception' as a trigger DISTINCT from a render
+        # failure. Drive the failure INTO _vignette_finalize (past _vignette_apply
+        # and the render) by making the turn's DB commit raise. The tier-1
+        # consequence must still fully revert, and a retry apply it exactly once.
+        await _adult_kernel(kernel)
+        _arm(kernel)
+        turn_before = kernel.state.session.turn_count
+        bia_before = kernel.state.soul_ledger.vectors.bia
+
+        import app.core.kernel as kmod
+        original = kmod.create_turn
+
+        async def _boom_commit(*a, **k):
+            raise RuntimeError("DB commit died inside finalize")
+
+        monkeypatch.setattr(kmod, "create_turn", _boom_commit)
+        with pytest.raises(RuntimeError):
+            await kernel.process_turn("Demand a true weigh")
+
+        # Reverted despite the failure landing AFTER the packet applied.
+        assert kernel.state.session.turn_count == turn_before
+        assert kernel.state.soul_ledger.vectors.bia == bia_before
+        assert kernel.state.pending_vignette is not None
+        assert kernel.state.pending_vignette.vignette_id == "test_beat"
+
+        # Commit restored — the retry applies the packet EXACTLY ONCE.
+        monkeypatch.setattr(kmod, "create_turn", original)
+        await kernel.process_turn("Demand a true weigh")
+        assert kernel.state.session.turn_count == turn_before + 1
+        assert kernel.state.soul_ledger.vectors.bia == pytest.approx(min(10.0, bia_before + 0.8))
+
+    @pytest.mark.asyncio
+    async def test_stream_client_disconnect_reverts(self, kernel):
+        # A REAL client disconnect is a GeneratorExit thrown INTO the stream at a
+        # yield (ASGI aclose()), not an internal error — the exact path the stream
+        # comment claims `except BaseException` handles. Close the generator mid-
+        # prose and assert the half-applied cheap turn reverted.
+        await _adult_kernel(kernel)
+        _arm(kernel)
+        turn_before = kernel.state.session.turn_count
+        bia_before = kernel.state.soul_ledger.vectors.bia
+
+        async def _slow_stream(*a, **k):
+            yield "the scale"
+            yield " groans"   # generator is suspended here when we close
+
+        kernel.clotho.render_vignette_stream = _slow_stream
+        agen = kernel.process_turn_stream("Demand a true weigh")
+        await agen.__anext__()   # frame 1: mechanic (packet already applied)
+        await agen.__anext__()   # frame 2: first prose token
+        await agen.aclose()      # client disconnects -> GeneratorExit at the yield
+
+        assert kernel.state.session.turn_count == turn_before
+        assert kernel.state.soul_ledger.vectors.bia == bia_before
+        assert kernel.state.pending_vignette is not None
+        assert kernel.state.pending_vignette.vignette_id == "test_beat"
+
+    @pytest.mark.asyncio
     async def test_invalid_escalation_preserves_the_armed_vignette(self, kernel):
         await _adult_kernel(kernel)
         _arm(kernel)

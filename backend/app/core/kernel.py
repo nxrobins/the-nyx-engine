@@ -1747,7 +1747,16 @@ class NyxKernel:
         failure (render error, disconnect, finalize exception) would otherwise
         leave the turn advanced and the packet applied but nothing persisted —
         and a client retry would apply the packet TWICE. Snapshot before, revert
-        on any failure so a retry re-applies exactly once."""
+        the IN-MEMORY state on any failure so the retry re-applies the tier-1
+        consequence (soul vectors, pressures, bond, the armed beat) exactly once.
+
+        Scope note (review): the guarantee is the packet, not finalize's
+        best-effort DERIVED writes. If the failure lands AFTER _vignette_finalize
+        has already run its chronicle-compression / RAG-index side effects (both
+        best-effort — RAG is caught non-fatal, the chronicle is a lossy rolling
+        summary) but BEFORE the commit, a retry may re-run those. That degrades a
+        derived surface, never the consequence math or permanence — consequence-
+        is-law is about the packet, and the packet is exactly-once."""
         backup = self.state.model_copy(deep=True)
         try:
             bound, receipt, turn = self._vignette_apply(action)
@@ -2244,8 +2253,20 @@ class NyxKernel:
         generator is exhausted or closed (client disconnect → GeneratorExit).
         """
         async with self._turn_lock:
-            async for _chunk in self._process_turn_stream_body(action):
-                yield _chunk
+            body = self._process_turn_stream_body(action)
+            try:
+                async for _chunk in body:
+                    yield _chunk
+            finally:
+                # V2-H4: a client disconnect closes THIS generator, but the
+                # cheap-turn rollback lives in `body`'s except-block. Async-gen
+                # finalization is DEFERRED (asyncio schedules aclose on the loop),
+                # so without an explicit close here `body`'s revert could run
+                # AFTER this `async with` has released the turn lock — and a fast
+                # reconnect+retry in that window would double-apply the packet,
+                # the exact defect H4 exists to close. Close `body` NOW, inside
+                # the lock, so any revert completes before the lock is released.
+                await body.aclose()
 
     async def _process_turn_stream_body(self, action: str) -> AsyncGenerator[str, None]:
         """Execute one turn as an SSE async generator.
