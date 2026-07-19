@@ -79,6 +79,31 @@ async def _init_one() -> tuple[str, str, NyxKernel]:
     return sid, result.resume_token, routes._sessions[sid].kernel
 
 
+class TestResumeConcurrency:
+    """V2-C1: two concurrent resumes of ONE token must never mint two kernels.
+    The critical section spans an await (load_snapshot); without the lock both
+    calls pass the empty scan and register — a stale twin could later overwrite a
+    terminal snapshot and un-kill a death."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_resume_of_one_token_mints_one_kernel(self, with_store):
+        import asyncio
+        sid, token, _ = await _init_one()
+        routes._sessions.pop(sid)  # evict: resumable, not live
+        before = len(routes._sessions)
+
+        a, b = await asyncio.gather(
+            resume_session(ResumeRequest(resume_token=token)),
+            resume_session(ResumeRequest(resume_token=token)),
+        )
+        # Exactly ONE new session; both callers see the same session_id.
+        assert len(routes._sessions) == before + 1
+        assert a.session_id == b.session_id
+        # And that one kernel is the sole holder of the token.
+        holders = [e for e in routes._sessions.values() if e.kernel._resume_token == token]
+        assert len(holders) == 1
+
+
 class TestResumeEndpoint:
     @pytest.mark.asyncio
     async def test_init_exposes_a_resume_token(self, with_store):

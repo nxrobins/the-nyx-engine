@@ -63,6 +63,14 @@ class _SessionEntry:
 
 _sessions: dict[str, _SessionEntry] = {}
 
+# SC-2/CF-3 (audit V2-C1): the /resume critical section — scan the live registry
+# for the token, then (if absent) rehydrate and register — spans an `await`
+# (load_snapshot). Two concurrent resumes of ONE token could both pass the scan
+# before either registers, minting TWO kernels for one thread (double DB writes;
+# a stale twin could later overwrite a terminal snapshot and un-kill a death).
+# Resume is a cold path, so one lock serializing it is the minimal zero-leak fix.
+_resume_lock = asyncio.Lock()
+
 
 def _get_or_create_session(session_id: str | None = None) -> tuple[str, NyxKernel]:
     """Return (session_id, kernel). Creates a new session if id is missing/expired."""
@@ -229,33 +237,37 @@ async def resume_session(req: ResumeRequest) -> TurnResult:
     corruption at the current version 500s loudly. SC-6: a terminal thread
     rehydrates terminal (the Death Rite re-shows; no save-scumming).
     """
-    _evict_stale()
     token = req.resume_token
     if not token:
         raise HTTPException(status_code=404, detail="No resumable thread.")
 
-    # SC-2/CF-3: one live kernel per thread.
-    for existing_sid, entry in _sessions.items():
-        if entry.kernel._resume_token == token:
-            entry.touch()
-            return _resume_result(existing_sid, entry.kernel)
+    # V2-C1: serialize the whole scan→rehydrate→register section so two
+    # concurrent resumes of one token can never both mint a kernel — the second
+    # blocks, then finds the first's registered session in the scan below.
+    async with _resume_lock:
+        _evict_stale()
+        # SC-2/CF-3: one live kernel per thread.
+        for existing_sid, entry in _sessions.items():
+            if entry.kernel._resume_token == token:
+                entry.touch()
+                return _resume_result(existing_sid, entry.kernel)
 
-    snapshot = await load_snapshot(token)
-    if snapshot is None:
-        raise HTTPException(status_code=404, detail="No resumable thread.")
-    try:
-        kernel = NyxKernel.rehydrate(snapshot, token)
-    except Exception as exc:  # corruption at the current schema version (SC-7)
-        logger.error(f"resume: snapshot corrupt at current version: {exc!r}")
-        raise HTTPException(status_code=500, detail="The thread could not be restored.")
-    if kernel is None:  # schema mismatch — discard to fresh (CF-5)
-        raise HTTPException(status_code=404, detail="That thread can no longer be restored.")
+        snapshot = await load_snapshot(token)
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail="No resumable thread.")
+        try:
+            kernel = NyxKernel.rehydrate(snapshot, token)
+        except Exception as exc:  # corruption at the current schema version (SC-7)
+            logger.error(f"resume: snapshot corrupt at current version: {exc!r}")
+            raise HTTPException(status_code=500, detail="The thread could not be restored.")
+        if kernel is None:  # schema mismatch — discard to fresh (CF-5)
+            raise HTTPException(status_code=404, detail="That thread can no longer be restored.")
 
-    sid = uuid.uuid4().hex
-    _sessions[sid] = _SessionEntry(kernel)
-    _evict_lru_if_over_cap(keep_sid=sid)
-    logger.info(f"Session resumed: {sid} (turn {kernel.state.session.turn_count})")
-    return _resume_result(sid, kernel)
+        sid = uuid.uuid4().hex
+        _sessions[sid] = _SessionEntry(kernel)
+        _evict_lru_if_over_cap(keep_sid=sid)
+        logger.info(f"Session resumed: {sid} (turn {kernel.state.session.turn_count})")
+        return _resume_result(sid, kernel)
 
 
 # ------------------------------------------------------------------
