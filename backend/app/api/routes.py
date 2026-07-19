@@ -238,6 +238,12 @@ def _resume_result(sid: str, kernel: NyxKernel) -> TurnResult:
         # The armed beat's own buttons + the card the player is mid-answer on.
         # (Labels travel here via ui_choices even when the wire state strips the
         # pending vignette's answer-key packets — V2-H3.)
+        # Presentation: the last COMPLETE scene (prose_history[-1]) followed by
+        # the pending card. For a vignette->vignette chain that last entry is
+        # "{prev.situation}\n\n{prev.prose}", so the recap re-shows the prior
+        # card's prompt above its resolution — a coherent catch-up for a
+        # returning player, intentionally a touch fuller than the live turn
+        # (which had only just shown that prompt) rather than byte-identical.
         choices = [c.label for c in state.pending_vignette.choices]
         prose = f"{last_prose}\n\n{state.pending_vignette.situation}".strip()
     elif state.session.ui_mode == "buttons":

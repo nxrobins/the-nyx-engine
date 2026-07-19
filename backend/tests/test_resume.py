@@ -177,6 +177,11 @@ class TestResumePresentation:
         kernel.state.pending_vignette = bound
         kernel.state.session.ui_mode = "buttons"
         kernel.state.session.turn_count = 4  # past birth, so the monotonic write wins
+        # A REALISTIC last scene (what a prior vignette turn stores: the prior
+        # card's situation + its resolved prose). A weak substring test would pass
+        # even if the WRONG scene were prepended — pin the composition explicitly.
+        last_scene = "You faced the toll-collector.\n\nYou paid, and he smiled thinly."
+        kernel.state.prose_history = [last_scene]
         await kernel._snapshot_now()
         routes._sessions.pop(sid)
 
@@ -185,8 +190,11 @@ class TestResumePresentation:
         assert result.ui_choices == [
             "Demand a true weigh", "Mark your carts secretly", "Keep your head down",
         ]
-        # The card the player is about to answer is on screen.
-        assert "The weigh-master's scale reads light again." in result.prose
+        # The last complete scene, THEN the pending card — in that exact order,
+        # with the real prior scene (not birth, not a decoy) above the new card.
+        assert result.prose == (
+            f"{last_scene}\n\nThe weigh-master's scale reads light again."
+        )
 
     @pytest.mark.asyncio
     async def test_terminal_resume_carries_the_epitaph_and_book(self, with_store):
