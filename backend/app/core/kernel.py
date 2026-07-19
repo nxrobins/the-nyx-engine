@@ -495,7 +495,12 @@ def _vignette_receipt_line(vignette_id: str, action: str, receipt: dict) -> str:
     raw json.dumps of the packet is ugly on the player surface. Render the
     consequence in the same English idiom as the mechanic ticker: 'Force +0.8;
     faction heat +0.4'. The structured packet still shapes state; this is only
-    the legible trace line (logs read it too)."""
+    the legible trace line (logs read it too).
+
+    Covers EVERY key apply_packet writes (vectors, pressures, bond, scene
+    evolution). A choice may move ONLY a bond or ONLY the scene (both satisfy the
+    P1-C3 movement floor, and scene_evolution is mandatory on every choice) —
+    those must never render as 'no measurable change'."""
     parts = [
         f"{name} {_fmt_delta(v)}"
         for name, v in _english_deltas(receipt.get("vector_deltas", {})).items()
@@ -505,7 +510,20 @@ def _vignette_receipt_line(vignette_id: str, action: str, receipt: dict) -> str:
         for key, v in receipt.get("pressure_deltas", {}).items()
         if v
     ]
-    consequence = "; ".join(parts) if parts else "no measurable change"
+    # Bond movement toward a named witness — it lands nowhere else on the surface
+    # (the mechanic ticker carries only vectors), so it must appear here.
+    parts += [
+        f"{name} bond {_fmt_delta(v)}"
+        for name, v in receipt.get("bond", {}).items()
+    ]
+    if parts:
+        consequence = "; ".join(parts)
+    elif receipt.get("scene_evolution"):
+        # A pure stasis-killer: the scene's problem moved and nothing else. The
+        # full evolution is the seal in prose; the receipt only notes it fired.
+        consequence = "the scene shifts"
+    else:
+        consequence = "no measurable change"
     return f"Vignette '{vignette_id}': {action!r} — {consequence}."
 
 
