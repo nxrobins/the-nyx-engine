@@ -270,14 +270,25 @@ export async function resumeGame(): Promise<boolean> {
 		return false; // network error — keep the token, retry next boot
 	}
 
-	if (res.status === 404 || res.status === 500) {
-		clearResumeToken(); // unrestorable (unknown / stale / corrupt) — start fresh
+	if (res.status === 404) {
+		clearResumeToken(); // unrestorable (unknown / stale schema) — start fresh
 		return false;
 	}
+	// V2-MED: any other non-OK (500 corruption OR a transient hiccup/restart) —
+	// KEEP the token and retry next boot. A rare truly-corrupt snapshot just
+	// re-fails harmlessly (the player can start fresh from the vestibule);
+	// clearing here would permanently orphan a life on a transient error.
 	if (!res.ok) return false;
 
 	const result: TurnResult = await res.json();
 	if (!result.session_id) return false;
+
+	// V2-MED (boot race): onMount awaits this resume while the vestibule is still
+	// interactive. If the player started a NEW life during the in-flight request
+	// (initGame set isInitialized), that life owns the stores now — yield rather
+	// than stomp it back to the old thread. No await below this line, so the
+	// check and the commit are one atomic synchronous block.
+	if (get(isInitialized)) return false;
 
 	_sessionId = result.session_id;
 	saveResumeToken(result.resume_token);

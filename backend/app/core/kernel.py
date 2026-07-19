@@ -483,6 +483,32 @@ def _dominant_vector_english(deltas: dict[str, float]) -> str:
     return _VECTOR_ENGLISH.get(dominant, dominant)
 
 
+def _fmt_delta(value: float) -> str:
+    """A signed, trailing-zero-free magnitude: 0.8 -> '+0.8', -1.0 -> '-1'."""
+    return f"{'+' if value >= 0 else ''}{value:g}"
+
+
+def _vignette_receipt_line(vignette_id: str, action: str, receipt: dict) -> str:
+    """A human-readable receipt for the Oracle's deliberation panel (V2-MED).
+
+    The vignette beat has no proposals, so final_reason IS its receipt — but a
+    raw json.dumps of the packet is ugly on the player surface. Render the
+    consequence in the same English idiom as the mechanic ticker: 'Force +0.8;
+    faction heat +0.4'. The structured packet still shapes state; this is only
+    the legible trace line (logs read it too)."""
+    parts = [
+        f"{name} {_fmt_delta(v)}"
+        for name, v in _english_deltas(receipt.get("vector_deltas", {})).items()
+    ]
+    parts += [
+        f"{key.replace('_', ' ')} {_fmt_delta(v)}"
+        for key, v in receipt.get("pressure_deltas", {}).items()
+        if v
+    ]
+    consequence = "; ".join(parts) if parts else "no measurable change"
+    return f"Vignette '{vignette_id}': {action!r} — {consequence}."
+
+
 # ---------------------------------------------------------------------------
 # TurnContext — the shared contract between _resolve_turn and the pipelines
 # ---------------------------------------------------------------------------
@@ -1676,11 +1702,12 @@ class NyxKernel:
 
         receipt = apply_packet(state, bound, action)
         # Ambient receipt constraint: every vignette lands its packet in the trace.
-        detail = {k: v for k, v in receipt.items() if k not in ("vignette_id", "choice")}
+        # The reason IS the receipt (no proposals on a cheap beat) — rendered in
+        # English for the Oracle, not raw JSON (V2-MED).
         trace = DeliberationTrace(
             turn_number=turn,
             winner_order=["vignette"],
-            final_reason=f"Vignette '{bound.vignette_id}': {action!r} — {json.dumps(detail)}",
+            final_reason=_vignette_receipt_line(bound.vignette_id, action, receipt),
         )
         state.recent_traces.append(trace)
         state.recent_traces = state.recent_traces[-8:]

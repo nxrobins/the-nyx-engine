@@ -94,7 +94,10 @@ class TestVignetteTurn:
         trace = kernel.state.recent_traces[-1]
         assert trace.winner_order == ["vignette"]
         assert "test_beat" in trace.final_reason
-        assert "metis" in trace.final_reason  # the packet is the receipt
+        # The packet IS the receipt — legible on the player surface (V2-MED):
+        # English vector name + signed delta, never a raw json.dumps dict.
+        assert "Cunning +0.8" in trace.final_reason
+        assert "{" not in trace.final_reason and '"' not in trace.final_reason
 
     @pytest.mark.asyncio
     async def test_finalize_lite_bookkeeping(self, kernel):

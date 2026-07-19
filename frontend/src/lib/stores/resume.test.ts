@@ -7,7 +7,8 @@ import {
 	isInitialized,
 	isTerminal,
 	deathReason,
-	uiChoices
+	uiChoices,
+	proseHistory
 } from './engine';
 
 // The node test env has no localStorage; install a Map-backed stub.
@@ -78,6 +79,32 @@ describe('resumeGame — durability sub-slice 4', () => {
 		mockResume({}, 404);
 		expect(await resumeGame()).toBe(false);
 		expect(store.get('nyx_resume_token')).toBeUndefined(); // start fresh next boot
+	});
+
+	it('keeps the token on a transient 500 (retry next boot), returns false', async () => {
+		// V2-MED: a 500 is not proof the life is gone — a DB hiccup or a deploy
+		// restart mid-request 500s too. Clearing the token here would permanently
+		// orphan a resumable life. Only 404 (unknown/stale) is unrestorable.
+		const store = installLocalStorage({ nyx_resume_token: 'tok-live' });
+		mockResume({}, 500);
+		expect(await resumeGame()).toBe(false);
+		expect(store.get('nyx_resume_token')).toBe('tok-live');
+	});
+
+	it('does not stomp a new life started during the in-flight resume (V2-MED)', async () => {
+		// The boot race: onMount awaits resumeGame() while the player clicks
+		// "awaken" — initGame commits a fresh session (isInitialized = true).
+		// The late-resolving resume must YIELD, not overwrite the new life.
+		installLocalStorage({ nyx_resume_token: 'tok-old' });
+		isInitialized.set(true);
+		const freshState = { session: { turn_count: 1 }, recent_traces: [] } as unknown as ThreadState;
+		gameState.set(freshState);
+		proseHistory.set(['a new life begins']);
+		mockResume(restored); // the OLD thread (turn 8) comes back late
+
+		expect(await resumeGame()).toBe(false);      // defer to the new life
+		expect(get(gameState)).toBe(freshState);     // NOT stomped
+		expect(get(proseHistory)).toEqual(['a new life begins']);
 	});
 
 	it('resumes a terminal thread into the death state (SC-6/UP-4)', async () => {
