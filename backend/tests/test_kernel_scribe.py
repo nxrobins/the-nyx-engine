@@ -119,6 +119,18 @@ class TestDeathBindsTheBook:
         assert "Severing" in book.chapters[0].title
 
     @pytest.mark.asyncio
+    async def test_death_persists_epitaph_and_book_to_state(self, kernel):
+        # V2-H2 (write half): the carved line and the bound-book link are stamped
+        # onto ThreadState at death, so the terminal snapshot carries them and a
+        # resume can re-show the Death Rite WHOLE — not just onto the ephemeral
+        # TurnResult, which the resume path never sees.
+        await _init(kernel)
+        result = await kernel.process_turn("embrace the void")  # turn 2: death
+        assert result.terminal
+        assert kernel.state.epitaph == result.epitaph and kernel.state.epitaph
+        assert kernel.state.book_id == result.book_id and kernel.state.book_id
+
+    @pytest.mark.asyncio
     async def test_binding_failure_never_blocks_death(self, kernel, monkeypatch):
         await _init(kernel)
 

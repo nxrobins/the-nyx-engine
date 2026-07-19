@@ -201,18 +201,54 @@ async def init_session(req: InitRequest) -> TurnResult:
 # ------------------------------------------------------------------
 
 def _resume_result(sid: str, kernel: NyxKernel) -> TurnResult:
-    """The client-facing view of a resumed thread: its last scene + state."""
+    """The client-facing view of a resumed thread (V2-H2).
+
+    The state layer preserves everything; this presentation must not betray it.
+    A resume re-shows EXACTLY what the player left:
+    - terminal → the Death Rite whole (its carved epitaph + bound-book link);
+    - the birth screen (turn 0) → "Draw your first breath." (it lives only in the
+      init result, never in state);
+    - an armed vignette → its OWN buttons + the card on screen (NOT the generic
+      fallback, which would silently escalate the first click to the council).
+    """
     state = kernel.state
     last_prose = state.prose_history[-1] if state.prose_history else ""
+
+    # Terminal: re-show the Rite as the death turn rendered it, carrying the
+    # persisted epitaph + book link so it is not hollow.
+    if state.terminal:
+        return TurnResult(
+            session_id=sid,
+            resume_token=kernel._resume_token,
+            prose=f"**THREAD SEVERED**\n\n{state.death_reason}",
+            state=client_safe_state(state),
+            terminal=True,
+            death_reason=state.death_reason,
+            turn_number=state.session.turn_count,
+            epitaph=state.epitaph,
+            book_id=state.book_id,
+        )
+
+    prose = last_prose
     choices: list[str] = []
-    if not state.terminal and state.session.ui_mode == "buttons":
+    if state.session.turn_count == 0 and state.pending_vignette is None:
+        # The newborn's single authored continuation — see kernel.initialize.
+        choices = ["Draw your first breath."]
+    elif state.pending_vignette is not None:
+        # The armed beat's own buttons + the card the player is mid-answer on.
+        # (Labels travel here via ui_choices even when the wire state strips the
+        # pending vignette's answer-key packets — V2-H3.)
+        choices = [c.label for c in state.pending_vignette.choices]
+        prose = f"{last_prose}\n\n{state.pending_vignette.situation}".strip()
+    elif state.session.ui_mode == "buttons":
         choices = _fallback_choices_for_state(state, state.session.epoch_phase)
+
     return TurnResult(
         session_id=sid,
         resume_token=kernel._resume_token,
-        prose=last_prose,
+        prose=prose,
         state=client_safe_state(state),
-        terminal=state.terminal,
+        terminal=False,
         death_reason=state.death_reason,
         turn_number=state.session.turn_count,
         ui_choices=choices,

@@ -330,6 +330,11 @@ class ThreadState(BaseModel):
     # re-bound. The engine, not the client, enforces that death is permanent.
     terminal: bool = False
     death_reason: str = ""     # the committed cause of death (stamped with the latch)
+    # V2-H2: the Death Rite's carved line + bound-book link, stamped onto state at
+    # death so the terminal snapshot carries them — a resumed dead thread re-shows
+    # the Rite WHOLE, not hollow. (Empty for living threads and pre-fix deaths.)
+    epitaph: str = ""
+    book_id: str = ""
     current_dream: str = ""    # Hypnos dream text (consumed by next Clotho call)
     craft_notes: list[str] = Field(default_factory=list)  # Momus law violations fed to next Clotho call
     # Morpheus P2: the Promise Ledger — typed narrative obligations

@@ -133,3 +133,74 @@ class TestResumeEndpoint:
         result = await resume_session(ResumeRequest(resume_token=token))
         assert result.terminal is True
         assert result.death_reason == "You chose oblivion."
+
+
+class TestResumePresentation:
+    """V2-H2: the presentation layer must not betray the state layer. A resume
+    re-shows exactly what the player left — the armed beat's own buttons, the
+    birth breath, and a dead thread's carved epitaph — not a generic fallback."""
+
+    @pytest.mark.asyncio
+    async def test_resume_at_birth_offers_the_breath(self, with_store):
+        # The newborn thread (turn 0, no pending vignette) is snapshotted at init.
+        # "Draw your first breath." lives only in the init result — a refresh here
+        # must reconstruct it, not serve the childhood fallback set.
+        sid, token, kernel = await _init_one()
+        assert kernel.state.session.turn_count == 0
+        assert kernel.state.pending_vignette is None
+        routes._sessions.pop(sid)
+
+        result = await resume_session(ResumeRequest(resume_token=token))
+        assert result.ui_choices == ["Draw your first breath."]
+        assert result.prose  # the birth scene, not empty
+
+    @pytest.mark.asyncio
+    async def test_resume_re_presents_the_armed_vignette(self, with_store):
+        from app.schemas.vignette import BoundVignette, ConsequencePacket, VignetteChoice
+
+        sid, token, kernel = await _init_one()
+        bound = BoundVignette(
+            vignette_id="scale_beat",
+            situation="The weigh-master's scale reads light again.",
+            choices=[
+                VignetteChoice(label="Demand a true weigh", packet=ConsequencePacket(
+                    vector_deltas={"bia": 0.8},
+                )),
+                VignetteChoice(label="Mark your carts secretly", packet=ConsequencePacket(
+                    vector_deltas={"metis": 0.8},
+                )),
+                VignetteChoice(label="Keep your head down", packet=ConsequencePacket(
+                    vector_deltas={"aidos": 0.6},
+                )),
+            ],
+        )
+        kernel.state.pending_vignette = bound
+        kernel.state.session.ui_mode = "buttons"
+        kernel.state.session.turn_count = 4  # past birth, so the monotonic write wins
+        await kernel._snapshot_now()
+        routes._sessions.pop(sid)
+
+        result = await resume_session(ResumeRequest(resume_token=token))
+        # The armed vignette's OWN labels — not _fallback_choices_for_state.
+        assert result.ui_choices == [
+            "Demand a true weigh", "Mark your carts secretly", "Keep your head down",
+        ]
+        # The card the player is about to answer is on screen.
+        assert "The weigh-master's scale reads light again." in result.prose
+
+    @pytest.mark.asyncio
+    async def test_terminal_resume_carries_the_epitaph_and_book(self, with_store):
+        sid, token, kernel = await _init_one()
+        kernel.state.session.turn_count = 6
+        kernel.state.terminal = True
+        kernel.state.death_reason = "The shaft took you."
+        kernel.state.epitaph = "Here lies Hero, who weighed light and paid heavy."
+        kernel.state.book_id = "hero-book-r1"
+        await kernel._snapshot_now()
+        routes._sessions.pop(sid)
+
+        result = await resume_session(ResumeRequest(resume_token=token))
+        # The Death Rite re-shows WHOLE — the carved line and the bound book.
+        assert result.terminal is True
+        assert result.epitaph == "Here lies Hero, who weighed light and paid heavy."
+        assert result.book_id == "hero-book-r1"
