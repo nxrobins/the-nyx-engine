@@ -124,6 +124,73 @@ class TestVignetteTurn:
         assert kernel.state.recent_traces[-1].winner_order != ["vignette"]
         assert result is not None
 
+
+class TestVignetteAtomicity:
+    """V2-H4: the cheap turn mutates self.state before rendering; a failure must
+    fully revert it, so a retry re-applies the packet exactly once, and an
+    invalid free-text escalation must not destroy the armed vignette."""
+
+    @pytest.mark.asyncio
+    async def test_render_failure_fully_reverts_then_retry_applies_once(self, kernel):
+        await _adult_kernel(kernel)
+        _arm(kernel, evolution="The scale is watched now.")
+        turn_before = kernel.state.session.turn_count
+        bia_before = kernel.state.soul_ledger.vectors.bia
+        used_before = list(kernel.state.used_vignette_ids)
+
+        original = kernel.clotho.render_vignette
+
+        async def _boom(*a, **k):
+            raise RuntimeError("render died mid-turn")
+
+        kernel.clotho.render_vignette = _boom
+        with pytest.raises(RuntimeError):
+            await kernel.process_turn("Demand a true weigh")
+
+        # Fully reverted — the cheap turn never happened.
+        assert kernel.state.session.turn_count == turn_before
+        assert kernel.state.soul_ledger.vectors.bia == bia_before
+        assert kernel.state.used_vignette_ids == used_before
+        assert kernel.state.pending_vignette is not None
+        assert kernel.state.pending_vignette.vignette_id == "test_beat"
+
+        # A retry applies the packet EXACTLY ONCE (no double-apply).
+        kernel.clotho.render_vignette = original
+        await kernel.process_turn("Demand a true weigh")
+        assert kernel.state.session.turn_count == turn_before + 1
+        assert kernel.state.soul_ledger.vectors.bia == pytest.approx(min(10.0, bia_before + 0.8))
+
+    @pytest.mark.asyncio
+    async def test_stream_render_failure_reverts(self, kernel):
+        await _adult_kernel(kernel)
+        _arm(kernel)
+        turn_before = kernel.state.session.turn_count
+        bia_before = kernel.state.soul_ledger.vectors.bia
+
+        async def _boom_stream(*a, **k):
+            yield "the scale groans"      # a token lands...
+            raise RuntimeError("stream died")  # ...then the connection dies
+
+        kernel.clotho.render_vignette_stream = _boom_stream
+        with pytest.raises(RuntimeError):
+            async for _ in kernel.process_turn_stream("Demand a true weigh"):
+                pass
+
+        assert kernel.state.session.turn_count == turn_before
+        assert kernel.state.soul_ledger.vectors.bia == bia_before
+        assert kernel.state.pending_vignette is not None
+
+    @pytest.mark.asyncio
+    async def test_invalid_escalation_preserves_the_armed_vignette(self, kernel):
+        await _adult_kernel(kernel)
+        _arm(kernel)
+        # "fly" makes mock Lachesis reject — an invalid free-text while buttons pend.
+        result = await kernel.process_turn("I fly away into the clouds")
+        # The armed vignette survives; the player's buttons are not destroyed.
+        assert kernel.state.pending_vignette is not None
+        assert kernel.state.pending_vignette.vignette_id == "test_beat"
+        assert result.terminal is False
+
     @pytest.mark.asyncio
     async def test_vignette_never_kills(self, kernel):
         """P1-C4: no lethal machinery on the cheap beat — even a collapsed soul
