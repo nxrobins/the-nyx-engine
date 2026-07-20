@@ -1741,14 +1741,34 @@ class NyxKernel:
         return f"\n\n⁂ {scene_evolution}" if scene_evolution.strip() else ""
 
     async def _vignette_turn_core(self, action: str) -> tuple[TurnResult, dict]:
-        """Sync vignette turn: apply → render (non-streamed) → seal → finalize."""
-        bound, receipt, turn = self._vignette_apply(action)
-        prose = await self.clotho.render_vignette(
-            self.state, bound.situation, action, receipt.get("scene_evolution", ""),
-        )
-        prose += self._seal_line(receipt.get("scene_evolution", ""))
-        result = await self._vignette_finalize(bound, action, prose, turn)
-        return result, receipt
+        """Sync vignette turn: apply → render (non-streamed) → seal → finalize,
+        ATOMICALLY (V2-H4). The cheap path mutates self.state directly (turn
+        counter, packet, trace) BEFORE the render and DB commit; a mid-turn
+        failure (render error, disconnect, finalize exception) would otherwise
+        leave the turn advanced and the packet applied but nothing persisted —
+        and a client retry would apply the packet TWICE. Snapshot before, revert
+        the IN-MEMORY state on any failure so the retry re-applies the tier-1
+        consequence (soul vectors, pressures, bond, the armed beat) exactly once.
+
+        Scope note (review): the guarantee is the packet, not finalize's
+        best-effort DERIVED writes. If the failure lands AFTER _vignette_finalize
+        has already run its chronicle-compression / RAG-index side effects (both
+        best-effort — RAG is caught non-fatal, the chronicle is a lossy rolling
+        summary) but BEFORE the commit, a retry may re-run those. That degrades a
+        derived surface, never the consequence math or permanence — consequence-
+        is-law is about the packet, and the packet is exactly-once."""
+        backup = self.state.model_copy(deep=True)
+        try:
+            bound, receipt, turn = self._vignette_apply(action)
+            prose = await self.clotho.render_vignette(
+                self.state, bound.situation, action, receipt.get("scene_evolution", ""),
+            )
+            prose += self._seal_line(receipt.get("scene_evolution", ""))
+            result = await self._vignette_finalize(bound, action, prose, turn)
+            return result, receipt
+        except BaseException:
+            self.state = backup   # the cheap turn never happened
+            raise
 
     def _maybe_start_dream_task(self, ctx: TurnContext) -> asyncio.Task | None:
         """Start Hypnos weaving concurrently with prose generation.
@@ -2161,10 +2181,13 @@ class NyxKernel:
             if self._matches_pending_vignette(action):
                 result, _receipt = await self._vignette_turn_core(action)
                 return result
-            logger.warning(
+            # V2-H4: do NOT clear pending here. A valid escalation's adult
+            # finalize re-arms the next beat (overwriting pending); an INVALID
+            # one (Lachesis rejection) leaves the armed vignette intact, so a
+            # fat-fingered free-text can't destroy the player's buttons.
+            logger.info(
                 "vignette escalation: %r is not a pending choice — full council", action
             )
-            self.state.pending_vignette = None
 
         ctx = await self._resolve_turn(action)
 
@@ -2230,8 +2253,20 @@ class NyxKernel:
         generator is exhausted or closed (client disconnect → GeneratorExit).
         """
         async with self._turn_lock:
-            async for _chunk in self._process_turn_stream_body(action):
-                yield _chunk
+            body = self._process_turn_stream_body(action)
+            try:
+                async for _chunk in body:
+                    yield _chunk
+            finally:
+                # V2-H4: a client disconnect closes THIS generator, but the
+                # cheap-turn rollback lives in `body`'s except-block. Async-gen
+                # finalization is DEFERRED (asyncio schedules aclose on the loop),
+                # so without an explicit close here `body`'s revert could run
+                # AFTER this `async with` has released the turn lock — and a fast
+                # reconnect+retry in that window would double-apply the packet,
+                # the exact defect H4 exists to close. Close `body` NOW, inside
+                # the lock, so any revert completes before the lock is released.
+                await body.aclose()
 
     async def _process_turn_stream_body(self, action: str) -> AsyncGenerator[str, None]:
         """Execute one turn as an SSE async generator.
@@ -2268,39 +2303,47 @@ class NyxKernel:
         # input escalates to the full council.
         if self.state.pending_vignette is not None:
             if self._matches_pending_vignette(action):
-                bound, receipt, turn = self._vignette_apply(action)
-                yield "data: " + json.dumps({
-                    "type": "mechanic",
-                    "payload": {
-                        "vector_deltas": _english_deltas(receipt.get("vector_deltas", {})),
-                        "dominant": _dominant_vector_english(receipt.get("vector_deltas", {})),
-                        "outcome": "vignette",
-                        "nemesis_struck": False,
-                        "eris_struck": False,
-                        "valid": True,
-                    },
-                }) + "\n\n"
-                prose_buffer = ""
-                async for token in self.clotho.render_vignette_stream(
-                    self.state, bound.situation, action,
-                    receipt.get("scene_evolution", ""),
-                ):
-                    prose_buffer += token
+                # V2-H4: atomic — a mid-stream disconnect (GeneratorExit at a
+                # yield) or a finalize failure must revert the half-applied cheap
+                # turn so a reconnect+retry re-applies the packet exactly once.
+                backup = self.state.model_copy(deep=True)
+                try:
+                    bound, receipt, turn = self._vignette_apply(action)
                     yield "data: " + json.dumps({
-                        "type": "prose", "text": token,
+                        "type": "mechanic",
+                        "payload": {
+                            "vector_deltas": _english_deltas(receipt.get("vector_deltas", {})),
+                            "dominant": _dominant_vector_english(receipt.get("vector_deltas", {})),
+                            "outcome": "vignette",
+                            "nemesis_struck": False,
+                            "eris_struck": False,
+                            "valid": True,
+                        },
                     }) + "\n\n"
-                prose = prose_buffer.strip() or Clotho._vignette_template(
-                    bound.situation, action, receipt.get("scene_evolution", ""),
-                )
-                # The bow: the authored seal lands as its own closing frame —
-                # the box audibly shuts before the next card arrives.
-                seal = self._seal_line(receipt.get("scene_evolution", ""))
-                if seal:
-                    prose += seal
-                    yield "data: " + json.dumps({
-                        "type": "prose", "text": seal,
-                    }) + "\n\n"
-                result = await self._vignette_finalize(bound, action, prose, turn)
+                    prose_buffer = ""
+                    async for token in self.clotho.render_vignette_stream(
+                        self.state, bound.situation, action,
+                        receipt.get("scene_evolution", ""),
+                    ):
+                        prose_buffer += token
+                        yield "data: " + json.dumps({
+                            "type": "prose", "text": token,
+                        }) + "\n\n"
+                    prose = prose_buffer.strip() or Clotho._vignette_template(
+                        bound.situation, action, receipt.get("scene_evolution", ""),
+                    )
+                    # The bow: the authored seal lands as its own closing frame —
+                    # the box audibly shuts before the next card arrives.
+                    seal = self._seal_line(receipt.get("scene_evolution", ""))
+                    if seal:
+                        prose += seal
+                        yield "data: " + json.dumps({
+                            "type": "prose", "text": seal,
+                        }) + "\n\n"
+                    result = await self._vignette_finalize(bound, action, prose, turn)
+                except BaseException:
+                    self.state = backup   # the cheap turn never happened
+                    raise
                 # The next beat's authored situation, presented after the seam.
                 if self.state.pending_vignette is not None:
                     yield "data: " + json.dumps({
@@ -2318,10 +2361,11 @@ class NyxKernel:
                     "turn_number": result.turn_number,
                 }) + "\n\n"
                 return
-            logger.warning(
+            # V2-H4: keep the armed vignette — an invalid free-text escalation
+            # must not destroy the player's buttons (see the sync path).
+            logger.info(
                 "vignette escalation: %r is not a pending choice — full council", action
             )
-            self.state.pending_vignette = None
 
         db_saved = False
         full_prose_buffer = ""
