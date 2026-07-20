@@ -101,6 +101,51 @@ class TestTheRealignment:
         assert all(s for *_, _, s in fired), fired
 
     @pytest.mark.asyncio
+    async def test_an_adult_sheet_survives_the_vignettes_of_its_chapter(self, kernel):
+        """P1-C6: the floor-beat window is the scheduler's NEXT CHAPTER, not 3
+        raw turns. An adult chapter runs up to 6 turns (5 vignettes + its
+        crucible), and only the crucible consumes an authored beat — so a
+        3-raw-turn window expires before the chapter it was authored FOR is
+        ever played. That is why every adult sheet stale-dropped."""
+        await _to_adulthood(kernel)
+        session = kernel.state.session
+        boundary = session.turn_count
+
+        kernel._beat_sheet = BeatSheet(
+            sheet_version=1,
+            thread_stamp=f"{session.player_id}:{session.run_number}",
+            epoch_start_turn=boundary + 1,      # authored for the chapter now opening
+            based_on_turn=boundary,
+            beats=[AuthoredBeat(position="SETUP", directive="NEW SCENE. Maren " + "x" * 50)],
+        )
+        kernel._sheet_chapter = session.chapter_index + 1
+
+        # Four vignettes are lived, then the chapter's crucible finally lands.
+        session.turn_count = boundary + 5
+        session.chapter_index += 1               # we are IN the chapter it serves
+        directive, _ = kernel._authored_directive(session.turn_count, "SETUP")
+        assert directive, "the authored beat expired before its own chapter was played"
+
+    @pytest.mark.asyncio
+    async def test_a_sheet_from_a_previous_chapter_is_still_dropped(self, kernel):
+        # The counterpart: widening the window to the chapter must not widen it
+        # to forever. A plan for a chapter already lived is stale and the floor
+        # must play — otherwise the realignment just removes the guard.
+        await _to_adulthood(kernel)
+        session = kernel.state.session
+        kernel._beat_sheet = BeatSheet(
+            sheet_version=1,
+            thread_stamp=f"{session.player_id}:{session.run_number}",
+            epoch_start_turn=session.turn_count + 1,
+            based_on_turn=session.turn_count,
+            beats=[AuthoredBeat(position="SETUP", directive="NEW SCENE. Maren " + "x" * 50)],
+        )
+        kernel._sheet_chapter = session.chapter_index      # serves THIS chapter
+        session.chapter_index += 1                          # ...which has now closed
+        directive, _ = kernel._authored_directive(session.turn_count, "SETUP")
+        assert directive == "", "a plan for a lived chapter must not still play"
+
+    @pytest.mark.asyncio
     async def test_an_in_flight_organ_survives_the_next_chapter_close(self, kernel):
         """Backpressure. Firing at EVERY close means the next close can arrive
         before a 25-40s organ finishes (a 2-turn chapter, or a doom — which

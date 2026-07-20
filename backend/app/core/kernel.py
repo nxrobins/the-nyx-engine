@@ -622,6 +622,8 @@ class NyxKernel:
         # timing. Not persisted — restored from self._chapters on rehydrate.
         self._scribe_epoch: int = 0
         self._scribe_covered_through: int = 0
+        # The chapter the current beat sheet was authored FOR (-1 = none).
+        self._sheet_chapter: int = -1
 
         # Durability: the opaque handle a client uses to resume this thread. Minted
         # at initialize(); the key under which every post-turn snapshot is written.
@@ -711,6 +713,7 @@ class NyxKernel:
         self._chapters = []
         self._scribe_epoch = 0            # a new life restarts the biography
         self._scribe_covered_through = 0
+        self._sheet_chapter = -1
         self._thread_id = None
 
         # Validate hamartia ("Unformed" is allowed — Lachesis overwrites at Turn 10)
@@ -1984,6 +1987,10 @@ class NyxKernel:
         if self._morpheus_task is not None and not self._morpheus_task.done():
             logger.debug("Morpheus still weaving — this chapter close yields to it.")
             return
+        # Stamp the chapter this plan is FOR. _finalize_turn's record_beat has
+        # already closed the previous chapter, so chapter_index is the ordinal
+        # of the one now opening — the one the Author is being asked to plan.
+        self._sheet_chapter = self.state.session.chapter_index
         snapshot = self._build_morpheus_snapshot()
         self._morpheus_task = asyncio.create_task(self.morpheus.reoutline(snapshot))
         logger.info(f"Morpheus fired for epoch starting turn {snapshot.epoch_start_turn}")
@@ -2015,10 +2022,12 @@ class NyxKernel:
         if sheet.thread_stamp != expected_stamp:
             logger.warning(f"Morpheus sheet stamp mismatch ({sheet.thread_stamp}) — dropped.")
             return
-        if not (sheet.epoch_start_turn <= next_turn <= sheet.epoch_start_turn + 2):
+        if not self._sheet_serves_now(sheet, next_turn):
             logger.warning(
-                f"Morpheus sheet window stale (serves {sheet.epoch_start_turn}.."
-                f"{sheet.epoch_start_turn + 2}, next turn {next_turn}) — dropped."
+                f"Morpheus sheet stale (serves chapter {self._sheet_chapter} / "
+                f"turns {sheet.epoch_start_turn}..{sheet.epoch_start_turn + 2}; "
+                f"now chapter {self.state.session.chapter_index}, next turn "
+                f"{next_turn}) — dropped."
             )
             return
 
@@ -2059,7 +2068,7 @@ class NyxKernel:
         sheet = self._beat_sheet
         if sheet is None:
             return "", []
-        if not (sheet.epoch_start_turn <= turn <= sheet.epoch_start_turn + 2):
+        if not self._sheet_serves_now(sheet, turn):
             return "", []
         beat = sheet.beat_for(position)
         if beat is None:
@@ -2070,6 +2079,23 @@ class NyxKernel:
             )
             return "", []
         return beat.directive, list(beat.pays_promise_ids)
+
+    def _sheet_serves_now(self, sheet, turn: int) -> bool:
+        """Is this beat sheet still the plan for the chapter being lived?
+
+        THE REALIGNMENT (V2-H1 / P1-C6): the floor-beat window is "the
+        scheduler's NEXT CHAPTER", not three raw turns. An adult chapter runs
+        1..6 turns (up to 5 vignettes plus its crucible) and ONLY the crucible
+        consumes an authored beat — so the old 3-turn window routinely expired
+        before the chapter it was authored FOR was ever played, which is why
+        every adult sheet stale-dropped and the Ledger died in adulthood.
+
+        Childhood keeps the original turn window bit-identical: its epochs ARE
+        three turns, and the P2 constitutional suite pins that arithmetic.
+        """
+        if self.state.session.epoch_phase == 4:
+            return self.state.session.chapter_index == self._sheet_chapter
+        return sheet.epoch_start_turn <= turn <= sheet.epoch_start_turn + 2
 
     def _cancel_morpheus(self) -> None:
         if self._morpheus_task is not None and not self._morpheus_task.done():
@@ -2815,5 +2841,6 @@ class NyxKernel:
         self._chapters = []
         self._scribe_epoch = 0            # a new life restarts the biography
         self._scribe_covered_through = 0
+        self._sheet_chapter = -1
         self._thread_id = None
         logger.info("Kernel reset — new thread begins.")
