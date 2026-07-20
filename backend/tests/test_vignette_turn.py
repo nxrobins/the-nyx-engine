@@ -94,7 +94,42 @@ class TestVignetteTurn:
         trace = kernel.state.recent_traces[-1]
         assert trace.winner_order == ["vignette"]
         assert "test_beat" in trace.final_reason
-        assert "metis" in trace.final_reason  # the packet is the receipt
+        # The packet IS the receipt — legible on the player surface (V2-MED):
+        # English vector name + signed delta, never a raw json.dumps dict.
+        assert "Cunning +0.8" in trace.final_reason
+        assert "{" not in trace.final_reason and '"' not in trace.final_reason
+
+    def test_receipt_line_covers_every_packet_key(self):
+        # V2-MED (review HIGH): apply_packet writes vectors, pressures, bond, AND
+        # scene_evolution. A choice may move ONLY a bond or ONLY the scene (both
+        # pass the P1-C3 floor); those must never render 'no measurable change'.
+        from app.core.kernel import _vignette_receipt_line
+
+        # Bond-only: the mechanic ticker never carries bond, so the receipt must.
+        bond_only = _vignette_receipt_line(
+            "beat", "Spare her", {"bond": {"Cassia": 1.0}},
+        )
+        assert "Cassia bond +1" in bond_only
+        assert "no measurable change" not in bond_only
+
+        # Scene-evolution-only (a pure stasis-killer): not a silent no-op.
+        scene_only = _vignette_receipt_line(
+            "beat", "Open the door", {"scene_evolution": "The door is yours now."},
+        )
+        assert "no measurable change" not in scene_only
+        assert "shifts" in scene_only
+
+        # Truly empty (defensive): the honest fallback still exists.
+        empty = _vignette_receipt_line("beat", "Wait", {})
+        assert "no measurable change" in empty
+
+        # A mixed packet reads cleanly, no raw JSON.
+        mixed = _vignette_receipt_line("beat", "Strike", {
+            "vector_deltas": {"bia": 0.8}, "bond": {"Kael": -1.5},
+            "scene_evolution": "Blood on the stones.",
+        })
+        assert "Force +0.8" in mixed and "Kael bond -1.5" in mixed
+        assert "{" not in mixed and '"' not in mixed
 
     @pytest.mark.asyncio
     async def test_finalize_lite_bookkeeping(self, kernel):
