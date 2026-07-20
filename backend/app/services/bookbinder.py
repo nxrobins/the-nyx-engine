@@ -44,6 +44,16 @@ def _book_id(state: ThreadState) -> str:
     return raw[:80].strip("-")
 
 
+def book_id_for(state: ThreadState) -> str:
+    """The deterministic book id for a thread.
+
+    Public because a resumed death must be able to ask "did my book ever bind?"
+    without a shelf scan: the id is a pure function of the thread, so the answer
+    is `load_book_markdown(book_id_for(state)) is not None`.
+    """
+    return _book_id(state)
+
+
 def _title(state: ThreadState) -> str:
     name = state.session.player_name
     hamartia = state.soul_ledger.hamartia

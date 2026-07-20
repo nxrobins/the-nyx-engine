@@ -220,6 +220,9 @@ class Morpheus(AgentBase):
                     user_message=_build_user_prompt(snapshot, violations),
                     temperature=0.6 if attempt == 1 else 0.8,
                     max_tokens=2000,
+                    # Write-behind (the Author works behind the curtain): 2000
+                    # tokens cannot land inside the 15s interactive budget.
+                    timeout=settings.llm_longform_timeout,
                 )
                 payload = _parse_sheet_payload(raw)
                 sheet = _assemble_sheet(payload, snapshot)

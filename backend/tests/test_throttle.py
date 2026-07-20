@@ -26,6 +26,19 @@ def _fake_completion(content: str = "ok"):
     return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
 
 
+def _scribe_snapshot():
+    """A minimal, valid ScribeSnapshot for budget-threading assertions."""
+    from app.schemas.book import ScribeSnapshot
+
+    return ScribeSnapshot(
+        thread_stamp="probe:1", epoch_index=1, epoch_name="The Hearth",
+        covers_turns=(1, 3), boundary_turn=3,
+        prose_window=["The door shuddered."], factual_chronicle=[], chronicle=[],
+        life_voice="clipped", player_name="Wren", player_age=12,
+        hamartia="Wrath", settlement="Ashfall", npc_names=["Maren"],
+    )
+
+
 # ---------------------------------------------------------------------------
 # CHANGE 1 — bounded calls: config threaded to acompletion, on BOTH paths
 # ---------------------------------------------------------------------------
@@ -46,6 +59,48 @@ class TestBoundedCalls:
         assert captured.get("timeout") == settings.llm_request_timeout == 15.0
         assert captured.get("num_retries") == settings.llm_num_retries == 1
         assert "request_timeout" not in captured
+
+    @pytest.mark.asyncio
+    async def test_generate_honors_a_per_call_timeout_override(self, monkeypatch):
+        # The write-behind escape hatch: long-form agents are NOT on the
+        # sequential turn chain and must not inherit the interactive budget.
+        captured: dict = {}
+
+        async def spy(**kwargs):
+            captured.update(kwargs)
+            return _fake_completion("ok")
+
+        monkeypatch.setattr(llm_mod.litellm, "acompletion", spy)
+        await llm_mod.generate(
+            model="anthropic/claude-x", system_prompt="s", user_message="u",
+            timeout=settings.llm_longform_timeout,
+        )
+        assert captured.get("timeout") == settings.llm_longform_timeout
+        assert settings.llm_longform_timeout > settings.llm_request_timeout
+
+    @pytest.mark.asyncio
+    async def test_writebehind_agents_use_the_longform_budget(self, monkeypatch):
+        """Root cause of 'no life ever bound a book': a 2200-token chapter draft
+        measures ~40s, but every real call was capped at the 15s interactive
+        budget, so BOTH scribe attempts timed out and the book went unwritten.
+        The Scribe and Morpheus must ask for the long-form wall clock."""
+        import app.agents.morpheus as morpheus_mod
+        import app.agents.scribe as scribe_mod
+
+        seen: list[float | None] = []
+
+        async def spy_generate(**kwargs):
+            seen.append(kwargs.get("timeout"))
+            raise RuntimeError("stop after capturing the budget")
+
+        monkeypatch.setattr(scribe_mod.llm, "generate", spy_generate)
+        monkeypatch.setattr(morpheus_mod.llm, "generate", spy_generate)
+        monkeypatch.setattr(settings, "scribe_model", "anthropic/claude-x")
+        monkeypatch.setattr(settings, "morpheus_model", "anthropic/claude-x")
+
+        await scribe_mod.Scribe().draft_chapter(_scribe_snapshot())
+        assert seen, "the Scribe never reached llm.generate"
+        assert all(t == settings.llm_longform_timeout for t in seen), seen
 
     @pytest.mark.asyncio
     async def test_stream_threads_timeout_and_retries(self, monkeypatch):
