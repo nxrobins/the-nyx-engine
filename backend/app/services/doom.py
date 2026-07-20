@@ -164,10 +164,10 @@ def maybe_begin_old_age_doom(state: ThreadState) -> str:
     """
     if state.doom.active:
         return ""
-    # Self-contained age (NOT coupled to _get_turn_metadata/_AGE_MAP). The childhood
-    # formula would read 18 here, but the >= threshold gate (>= 18 by OLD-AG-1) keeps
-    # that discrepancy permanently out of range.
-    age = 18 + max(0, state.session.turn_count - 10)
+    # THE PULSE (audit V2-C2): read the authoritative CHAPTER age. Under two-speed,
+    # adult age advances per chapter close, not per turn — a turn-derived proxy
+    # would age a life out purely for living many cheap vignette beats.
+    age = state.session.player_age
     if age < settings.old_age_threshold:
         return ""
     # Less runway with each decade past the threshold, FLOORED at 1 so the decline

@@ -21,12 +21,19 @@ from app.services.doom import (
 
 
 def _state(turn: int) -> ThreadState:
-    return ThreadState(session=SessionData(turn_count=turn))
+    # V2-C2: old-age doom now reads player_age (the chapter age), so drive that
+    # directly. turn_for_age keeps a plausible turn_count alongside for the
+    # kernel-ordering integration test (Scribe's epoch_index = turn//3).
+    return ThreadState(session=SessionData(turn_count=turn, player_age=_age_for_turn(turn)))
 
 
 def _turn_for_age(age: int) -> int:
-    # age = 18 + (turn_count - 10)  ->  turn_count = age - 8
+    # Legacy proxy retained only so the integration test lands at a sane turn_count.
     return age - 8
+
+
+def _age_for_turn(turn: int) -> int:
+    return 18 + max(0, turn - 10)
 
 
 class TestOnset:
@@ -123,7 +130,10 @@ class TestKernelOrdering:
             first_memory="A light in the distance I could not reach.",
         )
         # age 40 with threshold 20 -> max_stage floors at 1 (the worst case).
+        # V2-C2: the doom reads player_age; set it directly. A low turn_count
+        # keeps the Scribe death-book's epoch_index (turn//3) under its cap.
         k.state.session.turn_count = _turn_for_age(40)
+        k.state.session.player_age = 40
 
         onset = await k.process_turn("rest by the fire")
         assert not onset.terminal                      # survived the onset turn
