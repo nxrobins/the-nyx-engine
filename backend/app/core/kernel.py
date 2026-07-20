@@ -617,6 +617,11 @@ class NyxKernel:
         # The Bookbinder runs BEHIND the Death Rite; held so it is not GC'd
         # mid-flight, and so tests can await the book without sleeping.
         self._bind_task: asyncio.Task | None = None
+        # THE REALIGNMENT: the chapter ordinal and the turn covered so far,
+        # counted at FIRE time so a draft's span never depends on harvest
+        # timing. Not persisted — restored from self._chapters on rehydrate.
+        self._scribe_epoch: int = 0
+        self._scribe_covered_through: int = 0
 
         # Durability: the opaque handle a client uses to resume this thread. Minted
         # at initialize(); the key under which every post-turn snapshot is written.
@@ -655,6 +660,13 @@ class NyxKernel:
         kernel._chapters = chapters
         kernel._thread_id = snapshot.get("thread_id")
         kernel._resume_token = token
+        # THE REALIGNMENT: restore the biographer's place from the chapters that
+        # DID round-trip, so a resumed life neither re-drafts covered turns nor
+        # re-uses an ordinal (which _accept_chapter would drop as a duplicate).
+        kernel._scribe_epoch = max((c.epoch_index for c in chapters), default=0)
+        kernel._scribe_covered_through = max(
+            (c.covers_turns[1] for c in chapters), default=0
+        )
         kernel._relink_book_if_bound()
         return kernel
 
@@ -697,6 +709,8 @@ class NyxKernel:
         self._beat_sheet = None
         self._cancel_scribe()
         self._chapters = []
+        self._scribe_epoch = 0            # a new life restarts the biography
+        self._scribe_covered_through = 0
         self._thread_id = None
 
         # Validate hamartia ("Unformed" is allowed — Lachesis overwrites at Turn 10)
@@ -1858,15 +1872,35 @@ class NyxKernel:
         (they never close a chapter — and never call this). Starting the task
         here hides the Haiku call behind Clotho's much longer generation.
         """
-        if ctx.terminal:
+        if not self._closes_chapter(ctx):
             return None
-        closes_chapter = (
+        return asyncio.create_task(self.hypnos.weave_dream(ctx.outcome.state))
+
+    @staticmethod
+    def _closes_chapter(ctx: TurnContext) -> bool:
+        """Does this committed beat close a chapter? (THE REALIGNMENT, V2-H1.)
+
+        The chapter is THE PULSE's narrative unit, and this is the one predicate
+        that says so. In childhood a chapter closes at each authored epoch's
+        RESOLUTION; in adulthood every full-pipeline turn is a crucible and a
+        crucible always closes its chapter. A vignette never reaches here (the
+        cheap path builds no TurnContext), and a terminal beat closes nothing.
+
+        Every organ that works per-chapter — Hypnos's dream, Morpheus's
+        re-outline, the Scribe's chapter — shares this. They previously gated on
+        `beat_position == "RESOLUTION"`, but `select_adult_beat` derives that
+        from `(turn - 10) % 3`, a RAW-TURN cycle that vignettes push out of
+        step: the organs fired on roughly one adult chapter close in three,
+        chosen by however many vignettes happened to intervene. beat_position is
+        an act LABEL for the prose; it was never fit to be the mechanical
+        trigger, and this predicate is what replaces it.
+        """
+        if ctx.terminal:
+            return False
+        return (
             ctx.phase == 4                        # adult crucible = chapter close
             or ctx.beat_position == "RESOLUTION"  # childhood epoch end
         )
-        if not closes_chapter:
-            return None
-        return asyncio.create_task(self.hypnos.weave_dream(ctx.outcome.state))
 
     @staticmethod
     async def _settle_dream_task(dream_task: asyncio.Task | None) -> str:
@@ -1937,10 +1971,19 @@ class NyxKernel:
         )
 
     def _maybe_start_morpheus(self, ctx: TurnContext) -> None:
-        """Fire the Re-Outliner behind the dream-curtain at epoch boundaries."""
-        if ctx.terminal or ctx.beat_position != "RESOLUTION":
+        """Fire the Re-Outliner behind the dream-curtain at every chapter close."""
+        if not self._closes_chapter(ctx):
             return
-        self._cancel_morpheus()  # newest boundary wins
+        # BACKPRESSURE (V2-H1). This used to cancel-and-refire ("newest boundary
+        # wins"), which was harmless when firing was rare. Now that it fires at
+        # EVERY chapter close, the next close can easily arrive before the
+        # Author finishes — a young chapter is 2 turns, and a doom forces a
+        # crucible EVERY turn — so cancelling would restart a ~25s call forever
+        # and it would never once complete. An in-flight Author is left to
+        # finish; the floor plays until it lands.
+        if self._morpheus_task is not None and not self._morpheus_task.done():
+            logger.debug("Morpheus still weaving — this chapter close yields to it.")
+            return
         snapshot = self._build_morpheus_snapshot()
         self._morpheus_task = asyncio.create_task(self.morpheus.reoutline(snapshot))
         logger.info(f"Morpheus fired for epoch starting turn {snapshot.epoch_start_turn}")
@@ -2100,20 +2143,37 @@ class NyxKernel:
         )
 
     def _maybe_start_scribe(self, ctx: TurnContext) -> None:
-        """The biographer drafts the epoch just lived, behind the curtain."""
-        if ctx.terminal or ctx.beat_position != "RESOLUTION":
+        """The biographer drafts the CHAPTER just lived, behind the curtain.
+
+        THE REALIGNMENT (V2-H1): the epoch is the chapter, so the ordinal and the
+        covered span are counted from what has actually been drafted, not from
+        `turn // 3` + a hardcoded 3-turn window. A PULSE chapter runs 1..6 turns
+        (up to 5 vignettes + its crucible), so the old arithmetic both mislabeled
+        the chapter and covered the wrong turns. Counted at FIRE time (not at
+        harvest) so the span never depends on whether a draft happened to have
+        completed yet; childhood is bit-identical (turns 3/6/9 -> chapters 1/2/3
+        covering (1,3)/(4,6)/(7,9)).
+        """
+        if not self._closes_chapter(ctx):
+            return
+        # BACKPRESSURE: same reasoning as Morpheus — a 31-41s draft must not be
+        # restarted by the next close, or the book stays empty forever.
+        if self._scribe_task is not None and not self._scribe_task.done():
+            logger.debug("Scribe still drafting — this chapter close yields to it.")
             return
         boundary = self.state.session.turn_count
-        epoch_index = boundary // 3
-        if epoch_index < 1:
-            return
+        start = self._scribe_covered_through + 1
+        if start > boundary:
+            return                      # nothing new has been lived
+        epoch_index = self._scribe_epoch + 1
+        self._scribe_epoch = epoch_index
+        self._scribe_covered_through = boundary
         snapshot = self._build_scribe_snapshot(
             epoch_index=epoch_index,
-            covers=(boundary - 2, boundary),
+            covers=(start, boundary),
         )
-        self._cancel_scribe()
         self._scribe_task = asyncio.create_task(self.scribe.draft_chapter(snapshot))
-        logger.info(f"Scribe fired for chapter {epoch_index} (turns {boundary - 2}..{boundary})")
+        logger.info(f"Scribe fired for chapter {epoch_index} (turns {start}..{boundary})")
 
     def _harvest_scribe(self) -> None:
         """Collect a finished chapter. Failures cost a chapter, nothing more."""
@@ -2753,5 +2813,7 @@ class NyxKernel:
         self._beat_sheet = None
         self._cancel_scribe()
         self._chapters = []
+        self._scribe_epoch = 0            # a new life restarts the biography
+        self._scribe_covered_through = 0
         self._thread_id = None
         logger.info("Kernel reset — new thread begins.")
