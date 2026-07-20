@@ -119,14 +119,23 @@ def client_safe_state(state: ThreadState) -> ThreadState:
     when nothing is latent (the universal case for builtins), so there is no
     copy cost on the hot path."""
     canon = state.canon
-    if not canon or not canon.npcs:
-        return state
-    if not any(npc.status == "latent" for npc in canon.npcs.values()):
-        return state
+    has_latent = bool(
+        canon and canon.npcs
+        and any(npc.status == "latent" for npc in canon.npcs.values())
+    )
+    # V2-H3: an armed vignette's ConsequencePackets are the game's answer key
+    # (each button's exact deltas + the future seal). The labels already travel
+    # via ui_choices; the packets must never reach the wire.
+    has_pending = state.pending_vignette is not None
+    if not has_latent and not has_pending:
+        return state  # fast path preserved for the universal case
     shaped = state.model_copy(deep=True)
-    shaped.canon.npcs = {
-        nid: npc for nid, npc in shaped.canon.npcs.items() if npc.status != "latent"
-    }
+    if has_latent:
+        shaped.canon.npcs = {
+            nid: npc for nid, npc in shaped.canon.npcs.items() if npc.status != "latent"
+        }
+    if has_pending:
+        shaped.pending_vignette = None
     return shaped
 
 

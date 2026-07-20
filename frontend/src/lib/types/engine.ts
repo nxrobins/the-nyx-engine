@@ -219,6 +219,10 @@ export interface ThreadState {
 	last_outcome: string;
 	current_dream: string; // Hypnos dream text (consumed by next Clotho call)
 	craft_notes: string[];
+	used_vignette_ids: string[]; // THE PULSE: vignettes this life has lived (no-repeat)
+	// NOTE: pending_vignette (with its answer-key packets) is stripped by
+	// client_safe_state (V2-H3) — the wire never carries it; buttons arrive via
+	// ui_choices — so it is deliberately absent from this type.
 	ledger: Promise[]; // Morpheus P2: the Promise Ledger
 	life_voice: string; // Scribe P3: the voice this life's book is written in
 	world_id: string; // Assayer P4: which world this life was born into
