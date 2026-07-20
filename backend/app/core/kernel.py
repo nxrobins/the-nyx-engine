@@ -1596,6 +1596,12 @@ class NyxKernel:
         except Exception as exc:
             logger.error(f"Assay failed: {exc!r} — the death stands, unweighed.")
 
+        # V2-H2: stamp the carved line + bound-book link onto state BEFORE the
+        # snapshot, so a resume can re-show the Death Rite whole (the TurnResult
+        # below carries them too, but the resume path never sees it).
+        self.state.epitaph = epitaph
+        self.state.book_id = book_id
+
         # DB persist
         await create_turn(
             thread_id=self._thread_id,

@@ -288,6 +288,8 @@ def _maximal_thread_state() -> ThreadState:
         last_outcome="violent_triumph",
         terminal=True,
         death_reason="An oath was broken; the thread is already cut.",
+        epitaph="Here lies a child of ash, who kept one vow and broke another.",
+        book_id="ash-child-r0",
         current_dream="a river of ash",
         craft_notes=["do not name the dead as present"],
         ledger=[Promise(promise_id="a_debt", description="the father who never returned", event_turn=2, due_turn=10)],
