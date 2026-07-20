@@ -104,12 +104,22 @@ async def generate(
     temperature: float = 0.8,
     max_tokens: int = 1024,
     json_mode: bool = False,
+    timeout: float | None = None,
 ) -> str:
     """Generate a completion via LiteLLM.
 
     Args:
         model: LiteLLM model string, e.g. "anthropic/claude-sonnet-4-6"
         json_mode: Hint to provider that response should be valid JSON.
+        timeout: per-call wall-clock override. Defaults to the interactive
+            budget (THR-C4, settings.llm_request_timeout), which is deliberately
+            small so a brownout fails fast instead of stacking minutes across
+            the sequential turn chain. WRITE-BEHIND agents (the Scribe, Morpheus)
+            are NOT on that chain and legitimately generate far more tokens than
+            15s allows — they pass settings.llm_longform_timeout instead.
+            Measured: a 2200-token chapter draft takes ~40s, so under the
+            interactive budget every real chapter timed out and no life ever
+            bound a book.
     """
     kwargs: dict = dict(
         model=model,
@@ -125,7 +135,7 @@ async def generate(
         kwargs["response_format"] = {"type": "json_object"}
     # THR-C3/C4: bound each real call. `timeout=` (NOT request_timeout=, which is
     # a litellm module-global, inert as a call kwarg) + a single internal retry.
-    kwargs["timeout"] = settings.llm_request_timeout
+    kwargs["timeout"] = settings.llm_request_timeout if timeout is None else timeout
     kwargs["num_retries"] = settings.llm_num_retries
 
     logger.debug(f"LLM call: model={model}, temp={temperature}")

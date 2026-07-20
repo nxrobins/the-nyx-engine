@@ -157,6 +157,9 @@ class Scribe(AgentBase):
                     user_message=_build_user_prompt(snapshot, violations),
                     temperature=0.7,
                     max_tokens=2200,
+                    # Write-behind: a chapter draft measures ~40s, far past the
+                    # 15s interactive budget that silently unwrote every book.
+                    timeout=settings.llm_longform_timeout,
                 )
                 prose = prose.strip()
                 violations = gate_chapter(prose, snapshot)

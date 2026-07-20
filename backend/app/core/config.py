@@ -40,7 +40,13 @@ class Settings(BaseSettings):
     # unaffected: each agent returns at its `model == "mock"` guard before any
     # acompletion). Small numbers so a brownout fails fast to the mock net
     # rather than stacking minutes across the sequential turn stage-chain.
-    llm_request_timeout: float = 15.0   # per-call wall clock (THR-C4)
+    llm_request_timeout: float = 15.0   # per-call wall clock, INTERACTIVE agents (THR-C4)
+    # Write-behind long-form agents (Scribe, Morpheus) are NOT on the sequential
+    # turn chain, and legitimately generate 2000-2200 tokens — measured at ~40s
+    # for a chapter draft. Under the 15s interactive budget every real chapter
+    # timed out, so no real-model life ever bound a book (the shelf held only
+    # mock/sim books). They get their own, generous wall clock.
+    llm_longform_timeout: float = 120.0
     llm_num_retries: int = 1            # litellm-internal retries; <=2 attempts/stage (THR-C4)
     llm_concurrency_budget: int = 32    # global in-flight real-model calls; > per-turn fan-out (THR-C5)
     llm_acquire_timeout: float = 30.0   # max wait for a budget slot before degrading to mock (THR-C5)

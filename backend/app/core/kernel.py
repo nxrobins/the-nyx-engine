@@ -117,7 +117,13 @@ from app.services.oath_engine import (
 from app.services.oath_parser import parse_oath_text
 from app.services.assayer import compute_verdict, write_verdict
 from app.services.beat_gate import gate_beat, preconditions_hold
-from app.services.bookbinder import bind_book, list_books, write_book
+from app.services.bookbinder import (
+    bind_book,
+    book_id_for,
+    list_books,
+    load_book_markdown,
+    write_book,
+)
 from app.services.pressure import apply_pressure_delta, evolve_pressures, pressure_summary
 from app.services.promise_engine import (
     ABANDONMENT_OMEN,
@@ -564,6 +570,9 @@ class NyxKernel:
         # shorter book, never an error.
         self._scribe_task: asyncio.Task | None = None
         self._chapters: list[Chapter] = []
+        # The Bookbinder runs BEHIND the Death Rite; held so it is not GC'd
+        # mid-flight, and so tests can await the book without sleeping.
+        self._bind_task: asyncio.Task | None = None
 
         # Durability: the opaque handle a client uses to resume this thread. Minted
         # at initialize(); the key under which every post-turn snapshot is written.
@@ -602,7 +611,28 @@ class NyxKernel:
         kernel._chapters = chapters
         kernel._thread_id = snapshot.get("thread_id")
         kernel._resume_token = token
+        kernel._relink_book_if_bound()
         return kernel
+
+    def _relink_book_if_bound(self) -> None:
+        """Resolve a book that bound AFTER the death snapshot was written.
+
+        The Bookbinder runs behind the Death Rite, so the terminal snapshot is
+        written with book_id "" and the store's monotonic guard (SC-3) rightly
+        refuses a same-turn rewrite. The shelf is the durable record: a book id
+        is deterministic from the thread, so a resumed death can honestly relink
+        one that EXISTS (and stays unlinked if the binding never finished).
+        """
+        state = self.state
+        if not state.terminal or state.book_id:
+            return
+        try:
+            book_id = book_id_for(state)
+            if book_id and load_book_markdown(book_id) is not None:
+                state.book_id = book_id
+                logger.info(f"Resume relinked the bound book: {book_id}")
+        except Exception as exc:  # a missing shelf never breaks a resume
+            logger.warning(f"Book relink skipped: {exc!r}")
 
     # ------------------------------------------------------------------
     # Turn 0: Initialize session with hamartia choice
@@ -1536,27 +1566,16 @@ class NyxKernel:
         self.state.terminal = True
         self.state.death_reason = ctx.death_reason
         _refresh_derived_environment(self.state)
+        # The carved line is the Rite itself (150 tokens, well inside the
+        # interactive budget), so it stays on the critical path.
         epitaph = await self._generate_epitaph(ctx.outcome.state, ctx.turn, ctx.death_reason)
 
-        # Scribe P3: the life becomes a book. Failure costs the book, never
-        # the death — book_id is "" and the thread still joins the Tapestry.
-        book_id = await self._bind_book_at_death(epitaph, ctx.death_reason)
-
-        # Assayer P4: the life becomes a measurement. Same constitution:
-        # a verdict failure costs the verdict, never the death.
-        try:
-            verdict = compute_verdict(
-                self.state, death_reason=ctx.death_reason, book_id=book_id
-            )
-            write_verdict(verdict)
-        except Exception as exc:
-            logger.error(f"Assay failed: {exc!r} — the death stands, unweighed.")
-
-        # V2-H2: stamp the carved line + bound-book link onto state BEFORE the
-        # snapshot, so a resume can re-show the Death Rite whole (the TurnResult
-        # below carries them too, but the resume path never sees it).
+        # V2-H2: stamp the carved line onto state BEFORE the snapshot, so a
+        # resume can re-show the Death Rite whole. The bound-book link is NOT
+        # known yet — the Bookbinder now works BEHIND the Rite (see below), so
+        # book_id fills in later (and a resume resolves it from the shelf).
         self.state.epitaph = epitaph
-        self.state.book_id = book_id
+        self.state.book_id = ""
 
         # DB persist
         await create_turn(
@@ -1569,7 +1588,14 @@ class NyxKernel:
         )
         # Durability: snapshot the terminal state, so a resume rehydrates a dead
         # thread as dead (SC-6 — permanence survives resume, no save-scumming).
+        # This lands BEFORE the binding, so a crash mid-bind can never lose the
+        # death; the book is the only thing at risk, which is its constitution.
         await self._snapshot_now()
+
+        # The Bookbinder's hour, moved BEHIND the Rite. A chapter draft measures
+        # ~40s; awaiting it here stalled the Death Rite — the emotional beat —
+        # on a biographer. The Rite returns now; the book binds after.
+        self._start_bookbinding(epitaph, ctx.death_reason)
 
         return TurnResult(
             prose=f"**THREAD SEVERED**\n\n{ctx.death_reason}",
@@ -1577,7 +1603,7 @@ class NyxKernel:
             terminal=True,
             death_reason=ctx.death_reason,
             turn_number=ctx.turn,
-            book_id=book_id,
+            book_id="",          # not yet bound — the shelf/resume resolves it
             epitaph=epitaph,
         )
 
@@ -1970,9 +1996,15 @@ class NyxKernel:
         covers: tuple[int, int],
         death_reason: str = "",
         epitaph: str = "",
+        state: ThreadState | None = None,
     ) -> ScribeSnapshot:
-        """Freeze one lived epoch for the biographer (the photograph again)."""
-        state = self.state
+        """Freeze one lived epoch for the biographer (the photograph again).
+
+        `state` defaults to the live thread; the death-time binder passes the
+        CAPTURED terminal state explicitly, because it runs behind the Rite and
+        self.state may have been reset to a new life by then.
+        """
+        state = self.state if state is None else state
         npc_names: list[str] = []
         if state.canon:
             # All statuses EXCEPT latent — a biography may name its dead, but a
@@ -2044,57 +2076,102 @@ class NyxKernel:
         self._chapters.append(chapter)
         logger.info(f"Chapter {chapter.epoch_index} shelved: {chapter.title}")
 
-    async def _settle_scribe_task(self) -> None:
-        """At death: wait for a mid-draft chapter rather than losing it."""
-        task = self._scribe_task
-        self._scribe_task = None
-        if task is None:
-            return
-        try:
-            self._accept_chapter(await task)
-        except Exception as exc:
-            logger.warning(f"Pending chapter lost at death: {exc!r}")
+    def _start_bookbinding(self, epitaph: str, death_reason: str) -> None:
+        """Fire the Bookbinder BEHIND the Death Rite — never awaited by the turn.
 
-    async def _bind_book_at_death(self, epitaph: str, death_reason: str) -> str:
+        Captures the manuscript and the terminal state synchronously (a
+        concurrent reset()/eviction must not be able to empty them mid-bind),
+        then hands them to a background task. Nothing here can fail the death.
+        """
+        state = self.state
+        chapters = list(self._chapters)
+        pending, self._scribe_task = self._scribe_task, None
+        self._chapters = []
+        self._bind_task = asyncio.create_task(
+            self._bind_and_assay(state, chapters, pending, epitaph, death_reason)
+        )
+
+    async def _bind_and_assay(
+        self, state: ThreadState, chapters: list[Chapter],
+        pending, epitaph: str, death_reason: str,
+    ) -> str:
+        """Behind the Rite: settle the last chapter, bind the book, weigh the life.
+
+        Never raises (it is nobody's awaited caller) — a failure here costs the
+        book or the verdict, never the death, which is already committed and
+        snapshotted by the time this runs.
+        """
+        # Settle a mid-draft chapter rather than losing it (the old
+        # _settle_scribe_task, now operating on the captured manuscript).
+        if pending is not None:
+            try:
+                chapter = await pending
+                stamp = f"{state.session.player_id}:{state.session.run_number}"
+                if (
+                    chapter is not None
+                    and chapter.thread_stamp == stamp
+                    and not any(c.epoch_index == chapter.epoch_index for c in chapters)
+                ):
+                    chapters.append(chapter)
+            except Exception as exc:
+                logger.warning(f"Pending chapter lost at death: {exc!r}")
+
+        book_id = await self._bind_book_at_death(state, chapters, epitaph, death_reason)
+
+        # Assayer P4: the life becomes a measurement, carrying the real book
+        # link. A verdict failure costs the verdict, never the death.
+        try:
+            write_verdict(
+                compute_verdict(state, death_reason=death_reason, book_id=book_id)
+            )
+        except Exception as exc:
+            logger.error(f"Assay failed: {exc!r} — the death stands, unweighed.")
+
+        # Link the book on the live thread, but ONLY if this kernel still holds
+        # the same terminal state (a reset/new life must never inherit it). A
+        # resumed thread resolves the link from the shelf instead — the death
+        # snapshot was already written, and its monotonic guard (SC-3) rightly
+        # refuses a same-turn rewrite.
+        if self.state is state and state.terminal:
+            state.book_id = book_id
+        return book_id
+
+    async def _bind_book_at_death(
+        self, state: ThreadState, chapters: list[Chapter],
+        epitaph: str, death_reason: str,
+    ) -> str:
         """The Bookbinder's hour: final chapter, assembly, publication.
 
         Returns the book_id, or "" if the life produced nothing bindable.
         Never raises — a failed binding costs the book, not the death.
         """
         try:
-            await self._settle_scribe_task()
-
-            covered_through = max(
-                (c.covers_turns[1] for c in self._chapters), default=0
-            )
-            died_turn = self.state.session.turn_count
+            covered_through = max((c.covers_turns[1] for c in chapters), default=0)
+            died_turn = state.session.turn_count
             start = min(covered_through + 1, died_turn)
             final_snapshot = self._build_scribe_snapshot(
-                epoch_index=(max((c.epoch_index for c in self._chapters), default=0) + 1),
+                epoch_index=(max((c.epoch_index for c in chapters), default=0) + 1),
                 covers=(max(start, 1), died_turn),
                 death_reason=death_reason,
                 epitaph=epitaph,
+                state=state,
             )
             final_chapter = await self.scribe.draft_chapter(final_snapshot)
-            self._accept_chapter(final_chapter)
+            if final_chapter is not None:
+                chapters.append(final_chapter)
 
-            if not self._chapters:
+            if not chapters:
                 logger.warning("No chapters survived — this life goes unbound.")
                 return ""
 
             manifest = bind_book(
-                self.state,
-                self._chapters,
-                epitaph=epitaph,
-                death_reason=death_reason,
+                state, chapters, epitaph=epitaph, death_reason=death_reason,
             )
             write_book(manifest)
             return manifest.book_id
         except Exception as exc:
             logger.error(f"Bookbinding failed: {exc!r} — the death stands, unbound.")
             return ""
-        finally:
-            self._chapters = []
 
     def _cancel_scribe(self) -> None:
         if self._scribe_task is not None and not self._scribe_task.done():

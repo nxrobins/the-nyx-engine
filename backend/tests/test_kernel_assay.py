@@ -44,6 +44,9 @@ class TestDeathWritesVerdict:
         await kernel.process_turn("hide behind the carts")
         result = await kernel.process_turn("embrace the void")
         assert result.terminal
+        # The weighing rides with the Bookbinder BEHIND the Rite, so it carries
+        # the real book link instead of an empty one.
+        await kernel._bind_task
 
         shelf = list_verdicts()
         assert len(shelf) == 1
@@ -51,7 +54,7 @@ class TestDeathWritesVerdict:
         assert v.world_id == kernel.state.world_id
         assert v.thread_stamp == "assay_test:1"
         assert v.died_turn == 3
-        assert v.book_id == result.book_id
+        assert v.book_id == kernel.state.book_id
         assert v.death_cause  # "You chose oblivion..."
 
     @pytest.mark.asyncio
@@ -66,6 +69,7 @@ class TestDeathWritesVerdict:
         monkeypatch.setattr(kernel_module, "compute_verdict", broken)
         result = await kernel.process_turn("embrace the void")
         assert result.terminal          # the death stands
+        await kernel._bind_task         # the weighing fails behind the Rite
         assert list_verdicts() == []    # unweighed, not undead
 
 
@@ -75,7 +79,8 @@ class TestAncestorBookFlourish:
         # Life one: die, get bound.
         await _init(kernel)
         first = await kernel.process_turn("embrace the void")
-        assert first.book_id
+        await kernel._bind_task          # the book binds behind the Rite
+        assert kernel.state.book_id
         first_title = "The Wrath of Orin"
 
         # Life two: the hermetic suite has no DB, so run_number would pin
